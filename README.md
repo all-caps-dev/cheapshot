@@ -13,25 +13,28 @@ agent needed. Measured on a real screenshot: **1,018 image tokens -> 37 text
 tokens, 96% saved.**
 
 Screenshots are also full of things you do not want in an agent's context.
-`ocra` redacts by default.
+`cheapshot` redacts by default.
 
 ## Install
 
 ```bash
-swiftc -O ocra.swift -o ocra -framework Vision -framework AppKit
-cp ocra ~/local-dev/bin/
+swiftc -O cheapshot.swift -o cheapshot -framework Vision -framework AppKit
+cp cheapshot ~/local-dev/bin/
 ```
 
 ## Use
 
 ```bash
-ocra shot.png                 # OCR one file, redacted
-ocra --cleanshot              # newest CleanShot capture
-ocra --cleanshot 3            # newest three
-ocra --newest ~/Desktop 2     # newest two in any folder
-ocra --raw shot.png           # skip redaction
-ocra --json shot.png          # structured output with redaction counts
-ocra --stats shot.png         # token savings to stderr
+cheapshot shot.png                 # OCR one file, redacted
+cheapshot --cleanshot              # newest CleanShot capture
+cheapshot --cleanshot 3            # newest three
+cheapshot --newest ~/Desktop 2     # newest two in any folder
+cheapshot --raw shot.png           # skip redaction
+cheapshot --json shot.png          # structured output with redaction counts
+cheapshot --stats shot.png         # token savings to stderr
+
+cheapshot --video screen.mp4       # screen recording to a timestamped transcript
+cheapshot --ledger                 # cumulative savings across every run
 ```
 
 ## Redaction
@@ -62,6 +65,57 @@ break a specific rule and survive as a fragment; the `TOKEN` catch-all exists to
 sweep those up. Redaction is best-effort on OCR output, not a guarantee. Do not
 point this at something whose secrets must never leak, and use `--raw` only when
 you know what is in the frame.
+
+## The other thing it is for
+
+Cheapshot started as a way to spend fewer tokens. It turned out to also be the
+only lawful way to hand an agent a page it is not allowed to fetch.
+
+Bot protection fingerprints the TLS handshake and runs a JavaScript proof of
+work. `curl` fails both, and every tool that defeats it is bot detection
+evasion. So an agent asking for a retailer's live inventory, a bank statement,
+an authenticated dashboard, an IPMI console, a native app with no API, or
+anything behind a login is stuck, permanently, by design.
+
+You are not stuck. You are allowed to see the page. You are looking at it.
+
+```bash
+cheapshot --cleanshot
+```
+
+The human is the credential. Cheapshot is the transport. Nothing is forged,
+nothing is evaded, and no check is defeated. A person who is permitted to see
+something reads it to their tools.
+
+This is also why redaction is on by default. The pages worth doing this with
+are the ones with account numbers on them.
+
+## Video
+
+`--video` is the same idea aimed at screen recordings. Agents normally read a
+video by sampling frames and sending each one as an image, which costs thousands
+of tokens per frame. Cheapshot instead asks ffmpeg for only the frames where the
+screen actually changed, OCRs those locally, drops any screen nearly identical
+to the one before it, and emits a timestamped transcript.
+
+Measured on a 13 minute, 2.9 GB screen recording at 2560x1440: 12 scene frames,
+**22,128 image tokens to 1,091 text tokens, 95% saved.**
+
+Options: `--scene <f>` change threshold, default 0.25. `--max-frames <n>`,
+default 200. `--dedupe <f>` drop a screen this similar to the last, default 0.90.
+
+Requires ffmpeg on your PATH. Cheapshot uses whichever one you have.
+
+## Ledger
+
+Every run appends a line to `~/.claude/cheapshot-ledger/YYYYMMDD.tsv`:
+
+```
+2026-09-08T01:05:35Z	image	1	1550	54	1496	10
+```
+
+Time, mode, inputs, image tokens, text tokens, saved, redactions. `--ledger`
+totals it. `--no-ledger` skips recording a run.
 
 ## Why there is no LLM in the pipeline
 
