@@ -85,6 +85,11 @@ Business Source License 1.1. Use it, fork it, run it inside your company. You
 may not ship it to third parties as a hosted, embedded, or packaged commercial
 product or service without a commercial license.
 
+**Free in full, no agreement needed:** schools and universities, students,
+academic and non-commercial research, nonprofits, libraries, and anyone using it
+personally or to learn. Hosting included. If you think you might qualify, you
+do.
+
 Converts to **MIT on 2030-09-07**.
 
 Commercial licensing: **https://fuckyoupay.me**
