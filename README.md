@@ -78,3 +78,7 @@ built and cut in the same hour. Measured on real input:
 The entire value of this tool is that the text it hands an agent is what was
 actually on the screen. A layer that invents and deletes is worse than the tokens
 it saves. Vision OCR plus deterministic regex it is.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
