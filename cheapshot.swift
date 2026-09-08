@@ -6,7 +6,7 @@ import Foundation
 import AppKit
 import Vision
 
-let VERSION = "0.2.0"
+let VERSION = "0.3.0"
 
 // MARK: - PII redaction
 
@@ -105,6 +105,85 @@ func ocr(path: String, minConfidence: Float) -> String? {
     return lines.joined(separator: "\n")
 }
 
+
+// MARK: - Video
+
+func findFFmpeg() -> String? {
+    // Honour the user's PATH first; their chosen ffmpeg is the one that should run.
+    if let path = ProcessInfo.processInfo.environment["PATH"] {
+        for dir in path.split(separator: ":") {
+            let c = String(dir) + "/ffmpeg"
+            if FileManager.default.isExecutableFile(atPath: c) { return c }
+        }
+    }
+    let candidates = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg",
+                      NSHomeDirectory() + "/.local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+    for c in candidates where FileManager.default.isExecutableFile(atPath: c) { return c }
+    return nil
+}
+
+/// Pull only the frames where the screen actually changed, with their timestamps.
+func sceneFrames(video: String, threshold: Double, maxFrames: Int) -> (dir: String, frames: [(Double, String)])? {
+    guard let ff = findFFmpeg() else {
+        FileHandle.standardError.write("cheapshot: ffmpeg not found in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin, /usr/bin\n".data(using: .utf8)!)
+        return nil
+    }
+    let dir = NSTemporaryDirectory() + "cheapshot-\(UUID().uuidString)"
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: ff)
+    p.arguments = ["-hide_banner", "-nostdin", "-i", video,
+                   "-vf", "select=eq(n\\,0)+gt(scene\\,\(threshold)),metadata=print:file=-",
+                   "-frames:v", "\(maxFrames)",
+                   "\(dir)/f_%05d.png"]
+    let out = Pipe(); let err = Pipe()
+    p.standardOutput = out; p.standardError = err
+    do { try p.run() } catch {
+        FileHandle.standardError.write("cheapshot: could not launch \(ff): \(error)\n".data(using: .utf8)!)
+        return nil
+    }
+    var outData = Data(), errData = Data()
+    let g = DispatchGroup()
+    g.enter(); DispatchQueue.global().async { outData = out.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+    g.enter(); DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+    p.waitUntilExit(); g.wait()
+    let data = outData
+    if p.terminationStatus != 0 {
+        let tail = (String(data: errData, encoding: .utf8) ?? "").split(separator: "\n").suffix(6).joined(separator: "\n")
+        FileHandle.standardError.write("cheapshot: ffmpeg exited \(p.terminationStatus)\n\(tail)\n".data(using: .utf8)!)
+    }
+
+    // metadata=print emits "frame:N  pts:... pts_time:SECONDS"
+    var times: [Double] = []
+    for line in (String(data: data, encoding: .utf8) ?? "").split(separator: "\n") {
+        guard let r = line.range(of: "pts_time:") else { continue }
+        if let t = Double(line[r.upperBound...].prefix(while: { $0 != " " })) { times.append(t) }
+    }
+
+    let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+        .filter { $0.hasSuffix(".png") }.sorted()
+    var frames: [(Double, String)] = []
+    for (i, f) in files.enumerated() {
+        frames.append((i < times.count ? times[i] : Double(i), dir + "/" + f))
+    }
+    return (dir, frames)
+}
+
+/// Cheap token-set overlap. Screen recordings repeat; near-identical frames are dropped.
+func similarity(_ a: String, _ b: String) -> Double {
+    let sa = Set(a.split(whereSeparator: { $0.isWhitespace }).map(String.init))
+    let sb = Set(b.split(whereSeparator: { $0.isWhitespace }).map(String.init))
+    if sa.isEmpty && sb.isEmpty { return 1 }
+    if sa.isEmpty || sb.isEmpty { return 0 }
+    return Double(sa.intersection(sb).count) / Double(sa.union(sb).count)
+}
+
+func stamp(_ s: Double) -> String {
+    let t = Int(s.rounded())
+    return String(format: "%02d:%02d", t / 60, t % 60)
+}
+
 // MARK: - Token accounting
 
 func imageTokens(path: String) -> Int {
@@ -120,6 +199,53 @@ func imageTokens(path: String) -> Int {
 
 func textTokens(_ s: String) -> Int { max(1, Int((Double(s.count) / 4.0).rounded())) }
 
+
+// MARK: - Ledger
+
+/// Append one line per run to ~/.claude/cheapshot-ledger/YYYYMMDD.tsv.
+/// Same shape as the read-ledger: ISO time, then tab-separated fields.
+func ledgerAppend(mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int) {
+    let dir = NSHomeDirectory() + "/.claude/cheapshot-ledger"
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let day = DateFormatter(); day.dateFormat = "yyyyMMdd"; day.timeZone = TimeZone(identifier: "UTC")
+    let iso = DateFormatter(); iso.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"; iso.timeZone = TimeZone(identifier: "UTC")
+    let now = Date()
+    let path = dir + "/" + day.string(from: now) + ".tsv"
+    let saved = max(0, imageTokens - textTokens)
+    let line = "\(iso.string(from: now))\t\(mode)\t\(inputs)\t\(imageTokens)\t\(textTokens)\t\(saved)\t\(redactions)\n"
+    if let d = line.data(using: .utf8) {
+        if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(d); try? h.close() }
+        else { try? d.write(to: URL(fileURLWithPath: path)) }
+    }
+}
+
+func ledgerTotal() {
+    let dir = NSHomeDirectory() + "/.claude/cheapshot-ledger"
+    let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+        .filter { $0.hasSuffix(".tsv") }.sorted()
+    var runs = 0, imgs = 0, txt = 0, saved = 0, red = 0, inputs = 0
+    for f in files {
+        guard let body = try? String(contentsOfFile: dir + "/" + f, encoding: .utf8) else { continue }
+        for line in body.split(separator: "\n") {
+            let c = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard c.count >= 7 else { continue }
+            runs += 1
+            inputs += Int(c[2]) ?? 0; imgs += Int(c[3]) ?? 0
+            txt += Int(c[4]) ?? 0; saved += Int(c[5]) ?? 0; red += Int(c[6]) ?? 0
+        }
+    }
+    let pct = imgs > 0 ? Int(Double(saved) / Double(imgs) * 100) : 0
+    print("""
+    cheapshot ledger  (\(files.count) day\(files.count == 1 ? "" : "s"))
+      runs           \(runs)
+      inputs         \(inputs)
+      image tokens   \(imgs)
+      text tokens    \(txt)
+      saved          \(saved)  (\(pct)%)
+      redactions     \(red)
+    """)
+}
+
 // MARK: - CLI
 
 func usage() {
@@ -130,12 +256,18 @@ func usage() {
       cheapshot <file.png> [more.png ...]
       cheapshot --newest <dir> [n]
       cheapshot --cleanshot [n]
+      cheapshot --video <file.mp4>
 
     OPTIONS
       --raw             do not redact (redaction is ON by default)
       --json            emit JSON
       --stats           print token savings to stderr
       --min-conf <f>    confidence floor, default 0.3
+      --scene <f>       video scene-change threshold, default 0.25
+      --max-frames <n>  video frame cap, default 200
+      --dedupe <f>      drop a screen this similar to the last, default 0.90
+      --ledger          print cumulative savings across every run
+      --no-ledger       do not record this run
       --version
     """)
 }
@@ -143,6 +275,7 @@ func usage() {
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty || args.contains("-h") || args.contains("--help") { usage(); exit(0) }
 if args.contains("--version") { print(VERSION); exit(0) }
+if args.contains("--ledger") { ledgerTotal(); exit(0) }
 
 var doRedact = true, asJSON = false, showStats = false
 var minConf: Float = 0.3
@@ -158,7 +291,59 @@ func popValue(_ flag: String) -> String? {
 if args.contains("--raw")   { doRedact = false; args.removeAll { $0 == "--raw" } }
 if args.contains("--json")  { asJSON = true;    args.removeAll { $0 == "--json" } }
 if args.contains("--stats") { showStats = true; args.removeAll { $0 == "--stats" } }
+var noLedger = false
+if args.contains("--no-ledger") { noLedger = true; args.removeAll { $0 == "--no-ledger" } }
 if let c = popValue("--min-conf"), let f = Float(c) { minConf = f }
+
+var videoPath: String? = nil
+var sceneThreshold = 0.25
+var maxFrames = 200
+var dedupe = 0.90
+if let v = popValue("--video") { videoPath = v }
+if let s = popValue("--scene"), let d = Double(s) { sceneThreshold = d }
+if let m = popValue("--max-frames"), let i = Int(m) { maxFrames = i }
+if let d = popValue("--dedupe"), let x = Double(d) { dedupe = x }
+
+if let vp = videoPath {
+    guard FileManager.default.fileExists(atPath: vp) else {
+        FileHandle.standardError.write("cheapshot: no such video \(vp)\n".data(using: .utf8)!); exit(2)
+    }
+    guard let (tmp, frames) = sceneFrames(video: vp, threshold: sceneThreshold, maxFrames: maxFrames),
+          !frames.isEmpty else {
+        FileHandle.standardError.write("cheapshot: no frames extracted\n".data(using: .utf8)!); exit(1)
+    }
+    defer { try? FileManager.default.removeItem(atPath: tmp) }
+
+    var kept: [(Double, String)] = []
+    var lastText = ""
+    var frameImageTokens = 0
+    for (t, f) in frames {
+        frameImageTokens += imageTokens(path: f)
+        guard let raw = ocr(path: f, minConfidence: minConf) else { continue }
+        let text = doRedact ? redact(raw).0 : raw
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { continue }
+        if similarity(trimmed, lastText) >= dedupe { continue }
+        kept.append((t, trimmed))
+        lastText = trimmed
+    }
+
+    var body = ""
+    for (t, text) in kept { body += "[\(stamp(t))]\n\(text)\n\n" }
+    print(body.trimmingCharacters(in: .whitespacesAndNewlines))
+
+    let vtt = textTokens(body)
+    if !noLedger { ledgerAppend(mode: "video", inputs: frames.count, imageTokens: frameImageTokens, textTokens: vtt, redactions: 0) }
+    if showStats {
+        let tt = vtt
+        let msg = "cheapshot: \(frames.count) scene frames, \(kept.count) distinct screens  "
+                + "\(frameImageTokens) image tokens -> \(tt) text tokens  "
+                + "(saved \(max(0, frameImageTokens - tt)), "
+                + "\(frameImageTokens > 0 ? Int(Double(max(0, frameImageTokens - tt)) / Double(frameImageTokens) * 100) : 0)%)\n"
+        FileHandle.standardError.write(msg.data(using: .utf8)!)
+    }
+    exit(0)
+}
 
 func newest(in dir: String, count: Int) -> [String] {
     let fm = FileManager.default
@@ -193,7 +378,7 @@ if files.isEmpty {
     exit(2)
 }
 
-var totalImageTokens = 0, totalTextTokens = 0
+var totalImageTokens = 0, totalTextTokens = 0, totalRedactions = 0
 var jsonOut: [[String: Any]] = []
 var failed = 0
 
@@ -206,6 +391,7 @@ for f in files {
     let (text, report) = doRedact ? redact(raw) : (raw, RedactionReport())
     let it = imageTokens(path: f), tt = textTokens(text)
     totalImageTokens += it; totalTextTokens += tt
+    totalRedactions += report.counts.values.reduce(0, +)
 
     if asJSON {
         jsonOut.append(["file": f, "text": text, "redactions": report.counts,
@@ -221,6 +407,11 @@ if asJSON {
                                   "image_tokens": totalImageTokens, "text_tokens": totalTextTokens]
     if let d = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
        let s = String(data: d, encoding: .utf8) { print(s) }
+}
+
+if !noLedger {
+    ledgerAppend(mode: "image", inputs: files.count - failed, imageTokens: totalImageTokens,
+                 textTokens: totalTextTokens, redactions: totalRedactions)
 }
 
 if showStats {
