@@ -92,7 +92,6 @@ do.
 
 Converts to **MIT on 2030-09-07**.
 
-Commercial licensing: **https://fuckyoupay.me**
 
 ## If you are not sure whether you owe anything
 
