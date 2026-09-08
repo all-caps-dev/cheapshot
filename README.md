@@ -117,4 +117,8 @@ the email would have, and it is genuinely the outcome nobody here wants.
 So use it freely if you are in the free group, and get in touch if you are not.
 Both of those are easy, and only one of them involves lawyers.
 
-Commercial licensing: **https://fuckyoupay.me**
+### Commercial licensing
+
+<img src="docs/licensing.png" alt="Scan for commercial licensing" width="180">
+
+Scan it. That is the whole contact process.
