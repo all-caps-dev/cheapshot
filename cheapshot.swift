@@ -1,4 +1,4 @@
-// ocra - on-device screenshot OCR for AI agents.
+// cheapshot - on-device screenshot OCR for AI agents.
 // Turns screenshots into redacted text so agents read words, not pixels.
 // Apple Vision. No network. No API cost.
 
@@ -6,7 +6,7 @@ import Foundation
 import AppKit
 import Vision
 
-let VERSION = "0.1.0"
+let VERSION = "0.2.0"
 
 // MARK: - PII redaction
 
@@ -127,9 +127,9 @@ func usage() {
     ocra \(VERSION) - on-device screenshot OCR for AI agents
 
     USAGE
-      ocra <file.png> [more.png ...]
-      ocra --newest <dir> [n]
-      ocra --cleanshot [n]
+      cheapshot <file.png> [more.png ...]
+      cheapshot --newest <dir> [n]
+      cheapshot --cleanshot [n]
 
     OPTIONS
       --raw             do not redact (redaction is ON by default)
@@ -189,7 +189,7 @@ if let i = args.firstIndex(of: "--newest") {
 }
 
 if files.isEmpty {
-    FileHandle.standardError.write("ocra: no input images\n".data(using: .utf8)!)
+    FileHandle.standardError.write("cheapshot: no input images\n".data(using: .utf8)!)
     exit(2)
 }
 
@@ -199,7 +199,7 @@ var failed = 0
 
 for f in files {
     guard let raw = ocr(path: f, minConfidence: minConf) else {
-        FileHandle.standardError.write("ocra: cannot read \(f)\n".data(using: .utf8)!)
+        FileHandle.standardError.write("cheapshot: cannot read \(f)\n".data(using: .utf8)!)
         failed += 1
         continue
     }
@@ -226,7 +226,7 @@ if asJSON {
 if showStats {
     let saved = max(0, totalImageTokens - totalTextTokens)
     let pct = totalImageTokens > 0 ? Int(Double(saved) / Double(totalImageTokens) * 100) : 0
-    let msg = "ocra: \(files.count - failed) image(s)  \(totalImageTokens) image tokens -> \(totalTextTokens) text tokens  (saved \(saved), \(pct)%)\n"
+    let msg = "cheapshot: \(files.count - failed) image(s)  \(totalImageTokens) image tokens -> \(totalTextTokens) text tokens  (saved \(saved), \(pct)%)\n"
     FileHandle.standardError.write(msg.data(using: .utf8)!)
 }
 
