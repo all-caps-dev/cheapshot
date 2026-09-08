@@ -6,7 +6,7 @@ import Foundation
 import AppKit
 import Vision
 
-let VERSION = "0.3.0"
+let VERSION = "0.4.0"
 
 // MARK: - PII redaction
 
@@ -30,7 +30,9 @@ let RULES: [Rule] = [
     Rule("BEARER",      #"\bBearer\s+[A-Za-z0-9._\-]{16,}"#),
     Rule("EMAIL",       #"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"#),
     Rule("SSN",         #"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"#, []),
+    Rule("ROUTING",     #"\b\d{4}[ \-]?\d{4}[ \-]?\d\b"#, []),
     Rule("CARD",        #"\b\d(?:[ \-]?\d){12,18}\b"#, []),
+    Rule("BANK_ACCT",   #"(?<![\d\-/])\d{8,}(?![\d\-/])"#, []),
     Rule("PHONE",       #"(?<!\d)(?:\+?1[ \-.])?\(?\d{3}\)?[ \-.]\d{3}[ \-.]\d{4}(?!\d)"#, []),
     Rule("TOKEN",       #"(?=[A-Za-z0-9_\-+/=.]*[a-z])(?=[A-Za-z0-9_\-+/=.]*[A-Z])[A-Za-z0-9_\-+/=.]*[A-Za-z0-9_\-+/=.]{20,}"#, []),
     Rule("IPV4",        #"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"#, []),
@@ -44,6 +46,16 @@ func passesLuhn(_ s: String) -> Bool {
     for (i, d) in digits.reversed().enumerated() {
         if i % 2 == 1 { let x = d * 2; sum += x > 9 ? x - 9 : x } else { sum += d }
     }
+    return sum % 10 == 0
+}
+
+
+// ABA routing numbers carry their own checksum. Validating it keeps this rule
+// from eating every 9-digit number in a document.
+func passesABA(_ s: String) -> Bool {
+    let d = s.compactMap { $0.wholeNumberValue }
+    guard d.count == 9 else { return false }
+    let sum = 3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8])
     return sum % 10 == 0
 }
 
@@ -63,6 +75,7 @@ func redact(_ input: String) -> (String, RedactionReport) {
             let hit = String(text[r])
             // Card rule only fires on a real Luhn-valid number.
             if rule.name == "CARD" && !passesLuhn(hit) { continue }
+            if rule.name == "ROUTING" && !passesABA(hit) { continue }
             result += text[last..<r.lowerBound] + "[\(rule.name)]"
             report.counts[rule.name, default: 0] += 1
             last = r.upperBound

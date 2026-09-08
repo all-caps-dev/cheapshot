@@ -55,6 +55,8 @@ rule.
 | `SSN` | US, with invalid-prefix exclusions |
 | `CARD` | 13-19 digits, **Luhn-validated** |
 | `PHONE` | US formats |
+| `ROUTING` | 9-digit ABA, **checksum-validated** |
+| `BANK_ACCT` | bare digit runs 8+, catches MICR lines |
 | `TOKEN` | opaque mixed-case runs 20+ chars |
 | `IPV4` | dotted quads |
 
