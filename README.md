@@ -119,6 +119,6 @@ Both of those are easy, and only one of them involves lawyers.
 
 ### Commercial licensing
 
-<img src="docs/licensing.png" alt="Scan for commercial licensing" width="180">
+<img src="docs/licensing-animated.svg" alt="Scan for commercial licensing" width="200">
 
 Scan it. That is the whole contact process.
