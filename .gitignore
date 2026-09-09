@@ -1,3 +1,4 @@
-cheapshot
 *.o
 .DS_Store
+cheapshot
+ocra
