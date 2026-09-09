@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 444 444" width="444" height="444" role="img" aria-label="Scan for commercial licensing">
-<title>Cheapshot commercial licensing</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 444 444" width="444" height="444" role="img" aria-labelledby="t d">
+<title id="t">Scan for commercial licensing</title>
+<desc id="d">A QR code linking to the Cheapshot commercial licensing page. The same destination is given as text below this image.</desc>
 <style>
   .m { opacity: 1; transform-box: fill-box; transform-origin: center;
-       animation: pop .55s cubic-bezier(.2,.9,.3,1.4), wave 2.6s ease-in-out infinite; }
+       animation: pop .55s cubic-bezier(.2,.9,.3,1.4), wave 2.6s ease-in-out 6; }
   @keyframes pop { from { opacity:0; transform:scale(.1) } 60% { opacity:1; transform:scale(1.12) } to { opacity:1; transform:scale(1) } }
   /* Never lighter than #454a57: contrast on white stays above 7:1, so every
      frame is still a scannable code. */
