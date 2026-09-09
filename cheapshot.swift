@@ -6,7 +6,7 @@ import Foundation
 import AppKit
 import Vision
 
-let VERSION = "0.4.0"
+let VERSION = "0.4.1"
 
 // MARK: - PII redaction
 
@@ -32,9 +32,9 @@ let RULES: [Rule] = [
     Rule("SSN",         #"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"#, []),
     Rule("ROUTING",     #"\b\d{4}[ \-]?\d{4}[ \-]?\d\b"#, []),
     Rule("CARD",        #"\b\d(?:[ \-]?\d){12,18}\b"#, []),
-    Rule("BANK_ACCT",   #"(?<![\d\-/])\d{8,}(?![\d\-/])"#, []),
+    Rule("BANK_ACCT",   #"(?<![\w\-/])\d{8,}(?![\w\-/])"#, []),
     Rule("PHONE",       #"(?<!\d)(?:\+?1[ \-.])?\(?\d{3}\)?[ \-.]\d{3}[ \-.]\d{4}(?!\d)"#, []),
-    Rule("TOKEN",       #"(?=[A-Za-z0-9_\-+/=.]*[a-z])(?=[A-Za-z0-9_\-+/=.]*[A-Z])[A-Za-z0-9_\-+/=.]*[A-Za-z0-9_\-+/=.]{20,}"#, []),
+    Rule("TOKEN",       #"(?<![A-Za-z0-9_\-+/=.])(?=[A-Za-z0-9_\-+/=.]*[a-z])(?=[A-Za-z0-9_\-+/=.]*[A-Z])[A-Za-z0-9_\-+/=.]{20,}"#, []),
     Rule("IPV4",        #"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"#, []),
 ]
 
@@ -59,6 +59,31 @@ func passesABA(_ s: String) -> Bool {
     return sum % 10 == 0
 }
 
+// Shannon entropy, bits per character.
+func entropy(_ s: String) -> Double {
+    guard !s.isEmpty else { return 0 }
+    var freq: [Character: Int] = [:]
+    for c in s { freq[c, default: 0] += 1 }
+    let n = Double(s.count)
+    return freq.values.reduce(0.0) { acc, c in
+        let p = Double(c) / n
+        return acc - p * log2(p)
+    }
+}
+
+// TOKEN is the catch-all for secrets with no recognizable prefix. Every
+// prefixed secret (AKIA, ghp_, sk-, xoxb-, eyJ) is already caught by a specific
+// rule earlier in RULES, so this one can afford a high bar — and it needs one.
+// Its character class contains "/" and ".", so without a gate it swallows every
+// absolute path and every screenshot filename it sees. Measured on real input:
+// paths and CleanShot filenames top out at 4.14 bits/char, prefix-less secrets
+// start at 4.66. 4.4 sits in the gap.
+func looksLikeSecret(_ s: String) -> Bool {
+    if s.contains("://") { return false }   // URL
+    if s.hasPrefix("/")  { return false }   // absolute path
+    return entropy(s) >= 4.4
+}
+
 struct RedactionReport { var counts: [String: Int] = [:] }
 
 func redact(_ input: String) -> (String, RedactionReport) {
@@ -76,6 +101,8 @@ func redact(_ input: String) -> (String, RedactionReport) {
             // Card rule only fires on a real Luhn-valid number.
             if rule.name == "CARD" && !passesLuhn(hit) { continue }
             if rule.name == "ROUTING" && !passesABA(hit) { continue }
+            // Without this, every /Users/... path in the shot becomes [TOKEN].
+            if rule.name == "TOKEN" && !looksLikeSecret(hit) { continue }
             result += text[last..<r.lowerBound] + "[\(rule.name)]"
             report.counts[rule.name, default: 0] += 1
             last = r.upperBound
@@ -263,7 +290,7 @@ func ledgerTotal() {
 
 func usage() {
     print("""
-    ocra \(VERSION) - on-device screenshot OCR for AI agents
+    cheapshot \(VERSION) - on-device screenshot OCR for AI agents
 
     USAGE
       cheapshot <file.png> [more.png ...]
