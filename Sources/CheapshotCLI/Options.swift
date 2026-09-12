@@ -25,6 +25,14 @@ public struct Options: Equatable {
 
     public init(command: Command) { self.command = command }
 
+    /// True for a token that reads as an option rather than a path: a dash followed by
+    /// something that is neither another dash nor a digit. A bare "-" (stdin) and a
+    /// negative-looking token stay positional, because those are still just filenames.
+    private static func isShortOption(_ token: String) -> Bool {
+        guard token.first == "-", let second = token.dropFirst().first else { return false }
+        return second != "-" && !("0"..."9").contains(second)
+    }
+
     public static func parsePages(_ s: String) throws -> ClosedRange<Int> {
         let parts = s.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 1 || parts.count == 2, let lo = Int(parts[0]), let hi = Int(parts.last!),
@@ -52,14 +60,28 @@ public struct Options: Equatable {
             i += 1
             return args[i]
         }
-        func number<T: LosslessStringConvertible>(_ flag: String, _ type: T.Type) throws -> T {
+        /// A finite fraction in 0...1, bounds inclusive.
+        func unitNumber(_ flag: String) throws -> Double {
             let v = try value(flag)
-            guard let n = T(v) else { throw UsageError(message: "\(flag): not a number: \(v)") }
+            guard let n = Double(v) else { throw UsageError(message: "\(flag): not a number: \(v)") }
+            guard n.isFinite, n >= 0, n <= 1 else {
+                throw UsageError(message: "\(flag): must be between 0 and 1: \(v)")
+            }
             return n
         }
-        func nextIsInt() -> Int? {
-            guard i + 1 < args.count, !args[i + 1].hasPrefix("--") else { return nil }
-            return Int(args[i + 1])
+        /// A count of at least 1.
+        func positiveInt(_ flag: String) throws -> Int {
+            let v = try value(flag)
+            guard let n = Int(v) else { throw UsageError(message: "\(flag): not a number: \(v)") }
+            guard n >= 1 else { throw UsageError(message: "\(flag): must be >= 1: \(v)") }
+            return n
+        }
+        /// The next token when it is a count. An integer below 1 is an error rather than a
+        /// silent fall-through to a path, so --newest -3 cannot reach the runner.
+        func nextCount(_ flag: String) throws -> Int? {
+            guard i + 1 < args.count, !args[i + 1].hasPrefix("--"), let n = Int(args[i + 1]) else { return nil }
+            guard n >= 1 else { throw UsageError(message: "\(flag): count must be >= 1: \(args[i + 1])") }
+            return n
         }
 
         while i < args.count {
@@ -71,29 +93,29 @@ public struct Options: Equatable {
             case "--no-ledger": o.noLedger = true
             case "--ledger":    ledger = true
             case "--migrate":   migrate = true
-            case "--min-conf":  o.minConfidence = try number(a, Float.self)
-            case "--scene":     o.scene = try number(a, Double.self)
-            case "--max-frames": o.maxFrames = try number(a, Int.self)
-            case "--dedupe":    o.dedupe = try number(a, Double.self)
+            case "--min-conf":  o.minConfidence = Float(try unitNumber(a))
+            case "--scene":     o.scene = try unitNumber(a)
+            case "--max-frames": o.maxFrames = try positiveInt(a)
+            case "--dedupe":    o.dedupe = try unitNumber(a)
             case "--rules":     o.rulesPath = try value(a)
             case "--pages":     o.pages = try parsePages(try value(a))
             case "--text":      text = try value(a)
             case "--video":     video = try value(a)
             case "--newest":
                 var dir = ".", n = 1
-                if let k = nextIsInt() {
+                if let k = try nextCount(a) {
                     n = k; i += 1
-                } else if i + 1 < args.count, !args[i + 1].hasPrefix("--") {
+                } else if i + 1 < args.count, !args[i + 1].hasPrefix("--"), !isShortOption(args[i + 1]) {
                     dir = args[i + 1]; i += 1
-                    if let k = nextIsInt() { n = k; i += 1 }
+                    if let k = try nextCount(a) { n = k; i += 1 }
                 }
                 newest = (dir, n)
             case "--cleanshot":
                 var n = 1
-                if let k = nextIsInt() { n = k; i += 1 }
+                if let k = try nextCount(a) { n = k; i += 1 }
                 cleanshot = n
             default:
-                if a.hasPrefix("--") { throw UsageError(message: "unknown option \(a)") }
+                if a.hasPrefix("--") || isShortOption(a) { throw UsageError(message: "unknown option \(a)") }
                 positional.append(a)
             }
             i += 1

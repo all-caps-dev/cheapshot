@@ -73,6 +73,52 @@ final class OptionsTests: XCTestCase {
         XCTAssertThrowsError(try Options.parse(["--migrate"]))
     }
 
+    func testNumericBoundsAreValidated() {
+        XCTAssertThrowsError(try Options.parse(["--newest", "-3"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "--newest: count must be >= 1: -3"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--cleanshot", "0"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "--cleanshot: count must be >= 1: 0"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--max-frames", "0", "a.png"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "--max-frames: must be >= 1: 0"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--max-frames", "-1", "a.png"]))
+        XCTAssertThrowsError(try Options.parse(["--min-conf", "2.0", "a.png"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "--min-conf: must be between 0 and 1: 2.0"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--min-conf", "nan", "a.png"]))
+        XCTAssertThrowsError(try Options.parse(["--min-conf", "inf", "a.png"]))
+        XCTAssertThrowsError(try Options.parse(["--min-conf", "-5", "a.png"]))
+        XCTAssertThrowsError(try Options.parse(["--dedupe", "-0.1", "a.png"]))
+        XCTAssertThrowsError(try Options.parse(["--scene", "1.5", "a.png"]))
+    }
+
+    func testNumericBoundsAreInclusive() throws {
+        XCTAssertEqual(try Options.parse(["--min-conf", "0", "a.png"]).minConfidence, 0)
+        XCTAssertEqual(try Options.parse(["--min-conf", "1", "a.png"]).minConfidence, 1)
+        XCTAssertEqual(try Options.parse(["--dedupe", "0", "a.png"]).dedupe, 0)
+        XCTAssertEqual(try Options.parse(["--dedupe", "1", "a.png"]).dedupe, 1)
+        XCTAssertEqual(try Options.parse(["--max-frames", "1", "a.png"]).maxFrames, 1)
+        XCTAssertEqual(try Options.parse(["--newest", "1"]).command, .newest(dir: ".", count: 1))
+        XCTAssertEqual(try Options.parse(["--cleanshot", "1"]).command, .cleanshot(count: 1))
+    }
+
+    func testSingleDashUnknownOptions() throws {
+        XCTAssertThrowsError(try Options.parse(["-v"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "unknown option -v"))
+        }
+        XCTAssertThrowsError(try Options.parse(["-j", "a.png"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "unknown option -j"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--newest", "-v"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "unknown option -v"))
+        }
+        // Bare "-" is stdin and a negative-looking token is just a filename.
+        XCTAssertEqual(try Options.parse(["--text", "-"]).command, .text(path: "-"))
+        XCTAssertEqual(try Options.parse(["-3.png"]).command, .files(["-3.png"]))
+    }
+
     func testRulesAndPages() throws {
         let o = try Options.parse(["--rules", "r.json", "--pages", "1-2", "doc.pdf"])
         XCTAssertEqual(o.rulesPath, "r.json")
