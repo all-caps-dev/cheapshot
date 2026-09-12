@@ -129,6 +129,28 @@ public enum CLI {
                 io.err("cheapshot: no such file \(f)\n")
                 continue
             }
+            if (f as NSString).pathExtension.lowercased() == "pdf" {
+                let doc: PDFDocumentResult
+                do { doc = try PDFSource.pages(of: URL(fileURLWithPath: f), range: opts.pages, minConfidence: opts.minConfidence) }
+                catch {
+                    failed += 1
+                    results.append(["file": f, "error": "\(error)"])
+                    io.err("cheapshot: \(error)\n")
+                    continue
+                }
+                let (text, report) = apply(redactor, PDFSource.text(of: doc))
+                let it = doc.pages.reduce(0) { $0 + Tokens.image(width: $1.width, height: $1.height) }
+                let tt = Tokens.text(text)
+                totalImage += it; totalText += tt; totalRedactions += report.total
+                results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
+                                "source": ["path": doc.path, "sha256": doc.sha256, "pages": doc.pageCount],
+                                "pages": doc.pages.map { ["n": $0.n, "lane": $0.lane.rawValue, "lines": lineJSON($0.lines, redactor: redactor)] as [String: Any] }])
+                if !opts.json {
+                    if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
+                    io.out(text + "\n")
+                }
+                continue
+            }
             guard let image = ImageLoader.load(path: f) else {
                 failed += 1
                 results.append(["file": f, "error": "cannot read image"])

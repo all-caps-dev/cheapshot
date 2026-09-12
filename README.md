@@ -114,6 +114,15 @@ Frames are sampled at 4 per second, static stretches are dropped before scene
 scoring, and only changed frames are written (`-fps_mode vfr`), so `--max-frames`
 counts kept frames, not input frames.
 
+## PDF
+
+`cheapshot report.pdf` and `cheapshot --pages 3-5 report.pdf`. Pages with a text layer are
+read through PDFKit (the text lane, free, fonts kept so code is fenced); pages without one are
+rendered at 2x and OCR'd like a screenshot (the scan lane). The plain output separates pages
+with `--- page N ---`. `--json` adds `source.sha256` and `pages[].lane` so a downstream tool
+can cite a page and route scanned pages for review. Redaction and the ledger apply as for
+images; the ledger counts what an agent would pay to read each page as an image.
+
 ## Ledger
 
 Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledger.jsonl`

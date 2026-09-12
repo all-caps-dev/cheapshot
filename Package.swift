@@ -11,7 +11,7 @@ let package = Package(
     targets: [
         .target(
             name: "CheapshotCore",
-            linkerSettings: [.linkedFramework("Vision"), .linkedFramework("AppKit")]
+            linkerSettings: [.linkedFramework("Vision"), .linkedFramework("AppKit"), .linkedFramework("PDFKit")]
         ),
         .target(name: "CheapshotCLI", dependencies: ["CheapshotCore"]),
         .executableTarget(name: "cheapshot", dependencies: ["CheapshotCore", "CheapshotCLI"]),

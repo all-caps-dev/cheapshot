@@ -1,6 +1,7 @@
 import XCTest
 import ImageIO
 import CoreGraphics
+import CoreText
 @testable import CheapshotCLI
 import CheapshotCore
 
@@ -181,6 +182,40 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(results.count, 1)
         XCTAssertEqual(results[0]["file"] as? String, bad.path)
         XCTAssertFalse((try XCTUnwrap(results[0]["error"] as? String)).isEmpty)
+    }
+
+    func testPDFJSONHasSourceShaAndPageLanes() async throws {
+        let url = tmp.appendingPathComponent("doc.pdf")
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &box, nil))
+        for text in ["acct 12345678 on page one", "page two has enough text to count"] {
+            ctx.beginPDFPage(nil)
+            let font = CTFontCreateWithName("Helvetica" as CFString, 12, nil)
+            let attr = NSAttributedString(string: text, attributes: [kCTFontAttributeName as NSAttributedString.Key: font])
+            ctx.textPosition = CGPoint(x: 72, y: 700)
+            CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+            ctx.endPDFPage()
+        }
+        ctx.closePDF()
+
+        let r = await run(["--pages", "1-2", url.path, "--json"])
+        XCTAssertEqual(r.code, 0, r.err)
+        let results = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])
+        let source = try XCTUnwrap(results[0]["source"] as? [String: Any])
+        XCTAssertEqual((source["sha256"] as? String)?.count, 64)
+        XCTAssertEqual(source["pages"] as? Int, 2)
+        let pages = try XCTUnwrap(results[0]["pages"] as? [[String: Any]])
+        XCTAssertEqual(pages.map { $0["lane"] as? String }, ["text", "text"])
+        XCTAssertEqual(pages.map { $0["n"] as? Int }, [1, 2])
+        let text = try XCTUnwrap(results[0]["text"] as? String)
+        XCTAssertTrue(text.contains("--- page 2 ---"))
+        XCTAssertTrue(text.contains("acct [BANK_ACCT]"), text)
+        let firstLine = try XCTUnwrap((pages[0]["lines"] as? [[String: Any]])?.first)
+        XCTAssertEqual(firstLine["text"] as? String, "acct [BANK_ACCT] on page one", "lines are redacted too")
+        // A 612x792 point page renders at 2x, 1224x1584; the long edge scales to 1568, so the
+        // billed size is 1211.6x1568 / 750 = 2533 tokens per page, 5066 for the two.
+        XCTAssertEqual(Tokens.image(width: 1224, height: 1584), 2533)
+        XCTAssertEqual((results[0]["image_tokens"] as? Int), 2 * Tokens.image(width: 1224, height: 1584))
     }
 
     func testHelpAndVersion() async {
