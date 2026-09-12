@@ -48,7 +48,9 @@ public enum PDFSource {
         }
         var pages: [PDFPageResult] = []
         for n in r {
-            guard let page = doc.page(at: n - 1) else { continue }
+            guard let page = doc.page(at: n - 1) else {
+                throw Failure(message: "cannot read page \(n) of \(url.lastPathComponent)")
+            }
             pages.append(try process(page, n: n, minConfidence: minConfidence))
         }
         return PDFDocumentResult(path: url.path, sha256: try sha256(of: url), pageCount: count, pages: pages)
@@ -59,23 +61,42 @@ public enum PDFSource {
         result.pages.map { "--- page \($0.n) ---\n" + Layout.text($0.lines) }.joined(separator: "\n\n")
     }
 
-    static func process(_ page: PDFPage, n: Int, minConfidence: Float) throws -> PDFPageResult {
+    /// The page's size in rendered pixels at `renderScale`. `bounds(for:)` reports the media box
+    /// as written, ignoring `/Rotate`, but `draw(with:to:)` applies the rotation, so a quarter-turn
+    /// page draws landscape into a portrait bitmap and comes back blank. Swap the axes here and the
+    /// bitmap matches what is drawn into it.
+    static func pixelSize(_ page: PDFPage) -> (width: Int, height: Int) {
         let bounds = page.bounds(for: .mediaBox)
-        let w = Int((bounds.width * renderScale).rounded()), h = Int((bounds.height * renderScale).rounded())
+        let quarterTurned = (((page.rotation % 360) + 360) % 360) % 180 == 90
+        let w = quarterTurned ? bounds.height : bounds.width
+        let h = quarterTurned ? bounds.width : bounds.height
+        return (Int((w * renderScale).rounded()), Int((h * renderScale).rounded()))
+    }
+
+    static func process(_ page: PDFPage, n: Int, minConfidence: Float) throws -> PDFPageResult {
+        let (w, h) = pixelSize(page)
         let string = page.string ?? ""
         if string.filter({ !$0.isWhitespace }).count >= scanLaneThreshold {
+            let bounds = page.bounds(for: .mediaBox)
             return PDFPageResult(n: n, lane: .text, lines: textLines(page, string: string, bounds: bounds), width: w, height: h)
         }
-        let image = try render(page, bounds: bounds, width: w, height: h)
+        let image = try render(page, width: w, height: h)
         let lines = try OCR.recognizeLayout(image: image, minConfidence: minConfidence)
         return PDFPageResult(n: n, lane: .scan, lines: lines, width: w, height: h)
     }
 
     /// One RenderedLine per non-blank line of the text layer, with its selection bounds
     /// converted to a top-left origin and `fenced` set when the first glyph's font is fixed pitch.
+    ///
+    /// The fonts come from one attributed string for the whole page rather than one per line:
+    /// PDFKit logs a diagnostic to stderr for every attributed string it builds, so building one
+    /// per line made the noise scale with the page. Its index space is only used when its length
+    /// agrees with `page.string`; otherwise no line is fenced, which is the safe direction.
     static func textLines(_ page: PDFPage, string: String, bounds: CGRect) -> [RenderedLine] {
         var out: [RenderedLine] = []
         var location = 0
+        let attributed = page.attributedString
+        let fontsAreAddressable = attributed?.length == (string as NSString).length
         for raw in string.split(separator: "\n", omittingEmptySubsequences: false) {
             let length = (String(raw) as NSString).length
             let range = NSRange(location: location, length: length)
@@ -87,17 +108,20 @@ public enum PDFSource {
             if let sel = page.selection(for: range) {
                 let b = sel.bounds(for: page)
                 bbox = CGRect(x: b.minX - bounds.minX, y: bounds.maxY - b.maxY, width: b.width, height: b.height)
-                if let attr = sel.attributedString, attr.length > 0,
-                   let font = attr.attribute(.font, at: 0, effectiveRange: nil) as? NSFont {
-                    mono = font.isFixedPitch
-                }
+            }
+            if fontsAreAddressable, let attr = attributed, range.length > 0, range.location < attr.length,
+               let font = attr.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont {
+                mono = font.isFixedPitch
             }
             out.append(RenderedLine(n: out.count + 1, text: text, bbox: bbox, confidence: 1.0, fenced: mono))
         }
         return out
     }
 
-    static func render(_ page: PDFPage, bounds: CGRect, width: Int, height: Int) throws -> CGImage {
+    /// The page on a white bitmap at `renderScale`. `draw(with:to:)` maps the media box onto the
+    /// current transform itself, origin and rotation included, so the only transform this adds is
+    /// the scale; translating by the box origin as well would shift a non-zero-origin page twice.
+    static func render(_ page: PDFPage, width: Int, height: Int) throws -> CGImage {
         guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpaceCreateDeviceRGB(),
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
@@ -106,7 +130,6 @@ public enum PDFSource {
         ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
         ctx.scaleBy(x: renderScale, y: renderScale)
-        ctx.translateBy(x: -bounds.minX, y: -bounds.minY)
         page.draw(with: .mediaBox, to: ctx)
         guard let image = ctx.makeImage() else { throw Failure(message: "cannot render page") }
         return image
