@@ -225,6 +225,14 @@ Dropping a PDF on the menu bar icon behaves like dropping an image. Free tier, s
 
 Docling, chunking, embeddings, vector or keyword search, retrieval tools, orchestration, object storage. If Ryan builds the knowledge base, cheapshot's `--json` is its input for Mac-side documents and screenshots, and Docling handles the rest. Do not add a `cheapshot index` or `cheapshot search` command.
 
+## Docs site
+
+Proposed by Ryan 2026-09-12. Same stack as `ryanilano/subfolio-astro-docs`: Astro 7 with `@astrojs/starlight` and the `lucode-starlight` theme, Node 22, built to GitHub Pages by the workflow copied from that repo. Lives in this repo under `site/` so a docs change ships in the same PR as the code change, and the `docs/` folder stays the source for specs and research. Decision: Starlight over MkDocs because the config, theme, and Pages workflow already exist in Ryan's repo, and Starlight ships keyboard navigation, skip links, and contrast-checked themes out of the box, which the Accessibility section requires.
+
+Pages, one file each under `site/src/content/docs/`: install (brew, make), use (every flag, exit codes), redaction (rule table, `--rules` format, the injection note), ledger (location, JSON line, `--migrate`), video, pdf, claude-code (plugin install, hook behaviour, `cheapshot allow`), mcp (three tools, one resource), and the two research notes as reference pages. The README shrinks to install, one example per feature, and a link.
+
+Phase: 2, after the v0.5.0 tag, since brew install is the first thing the site documents. Half a day.
+
 ## Accessibility
 
 Added 2026-09-12 at Ryan's request. Accessibility is a requirement in every phase, not a polish item.
@@ -252,7 +260,7 @@ Phase 0, half a day: create `Package.swift`, move `cheapshot.swift` into `Source
 
 Phase 1, four and a half days: the brief's five audit items, each as a Core change with a test. Plus the `-fps_mode vfr` video fix and the filter chain above, the three code-aware output fixes (indentation, fences, line-addressable JSON), and PDF input (text lane and scan lane, `--pages`, `source.sha256` in `--json`). PDF tables stay in the later bucket. Add `--text` stdin mode and the 30-case golden suite. Add `--rules`, `--ledger --json`, `--ledger --migrate`. Move the ledger to the location rule above.
 
-Phase 2, one day: relicense to MIT, Developer ID cert, release workflow, tap repo, tag v0.5.0.
+Phase 2, one and a half days: relicense to MIT, Developer ID cert, release workflow, tap repo, tag v0.5.0, then the Starlight docs site under `site/` on GitHub Pages (see "Docs site").
 
 Phase 3, two to three days: plugin with the image and PDF matcher, SKILL.md, MCP package, status line segment.
 
