@@ -1,4 +1,6 @@
 *.o
 .DS_Store
-cheapshot
-ocra
+/cheapshot
+/ocra
+.build/
+*.xcodeproj

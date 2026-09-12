@@ -6,21 +6,21 @@ import Foundation
 import AppKit
 import Vision
 
-let VERSION = "0.4.1"
+public let VERSION = "0.4.1"
 
 // MARK: - PII redaction
 
-struct Rule {
-    let name: String
-    let pattern: String
-    let opts: NSRegularExpression.Options
-    init(_ name: String, _ pattern: String, _ opts: NSRegularExpression.Options = [.caseInsensitive]) {
+public struct Rule {
+    public let name: String
+    public let pattern: String
+    public let opts: NSRegularExpression.Options
+    public init(_ name: String, _ pattern: String, _ opts: NSRegularExpression.Options = [.caseInsensitive]) {
         self.name = name; self.pattern = pattern; self.opts = opts
     }
 }
 
 // Ordered: most specific first, so a key is not eaten by a looser rule.
-let RULES: [Rule] = [
+public let RULES: [Rule] = [
     Rule("AWS_KEY",     #"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA)[0-9A-Z]{16}\b"#, []),
     Rule("GITHUB_PAT",  #"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b"#, []),
     Rule("OPENAI_KEY",  #"\bsk-(?:proj-|ant-|live-)?[A-Za-z0-9_\-]{20,}\b"#, []),
@@ -39,7 +39,7 @@ let RULES: [Rule] = [
 ]
 
 // Luhn check so we only redact things that are actually card numbers.
-func passesLuhn(_ s: String) -> Bool {
+public func passesLuhn(_ s: String) -> Bool {
     let digits = s.compactMap { $0.wholeNumberValue }
     guard digits.count >= 13, digits.count <= 19 else { return false }
     var sum = 0
@@ -52,7 +52,7 @@ func passesLuhn(_ s: String) -> Bool {
 
 // ABA routing numbers carry their own checksum. Validating it keeps this rule
 // from eating every 9-digit number in a document.
-func passesABA(_ s: String) -> Bool {
+public func passesABA(_ s: String) -> Bool {
     let d = s.compactMap { $0.wholeNumberValue }
     guard d.count == 9 else { return false }
     let sum = 3 * (d[0] + d[3] + d[6]) + 7 * (d[1] + d[4] + d[7]) + (d[2] + d[5] + d[8])
@@ -60,7 +60,7 @@ func passesABA(_ s: String) -> Bool {
 }
 
 // Shannon entropy, bits per character.
-func entropy(_ s: String) -> Double {
+public func entropy(_ s: String) -> Double {
     guard !s.isEmpty else { return 0 }
     var freq: [Character: Int] = [:]
     for c in s { freq[c, default: 0] += 1 }
@@ -78,15 +78,18 @@ func entropy(_ s: String) -> Double {
 // absolute path and every screenshot filename it sees. Measured on real input:
 // paths and CleanShot filenames top out at 4.14 bits/char, prefix-less secrets
 // start at 4.66. 4.4 sits in the gap.
-func looksLikeSecret(_ s: String) -> Bool {
+public func looksLikeSecret(_ s: String) -> Bool {
     if s.contains("://") { return false }   // URL
     if s.hasPrefix("/")  { return false }   // absolute path
     return entropy(s) >= 4.4
 }
 
-struct RedactionReport { var counts: [String: Int] = [:] }
+public struct RedactionReport {
+    public var counts: [String: Int] = [:]
+    public init() {}
+}
 
-func redact(_ input: String) -> (String, RedactionReport) {
+public func redact(_ input: String) -> (String, RedactionReport) {
     var text = input
     var report = RedactionReport()
     for rule in RULES {
@@ -117,7 +120,7 @@ func redact(_ input: String) -> (String, RedactionReport) {
 
 // MARK: - OCR
 
-func ocr(path: String, minConfidence: Float) -> String? {
+public func ocr(path: String, minConfidence: Float) -> String? {
     guard let img = NSImage(contentsOfFile: path),
           let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
 
@@ -148,7 +151,7 @@ func ocr(path: String, minConfidence: Float) -> String? {
 
 // MARK: - Video
 
-func findFFmpeg() -> String? {
+public func findFFmpeg() -> String? {
     // Honour the user's PATH first; their chosen ffmpeg is the one that should run.
     if let path = ProcessInfo.processInfo.environment["PATH"] {
         for dir in path.split(separator: ":") {
@@ -163,7 +166,7 @@ func findFFmpeg() -> String? {
 }
 
 /// Pull only the frames where the screen actually changed, with their timestamps.
-func sceneFrames(video: String, threshold: Double, maxFrames: Int) -> (dir: String, frames: [(Double, String)])? {
+public func sceneFrames(video: String, threshold: Double, maxFrames: Int) -> (dir: String, frames: [(Double, String)])? {
     guard let ff = findFFmpeg() else {
         FileHandle.standardError.write("cheapshot: ffmpeg not found in /opt/homebrew/bin, /usr/local/bin, ~/.local/bin, /usr/bin\n".data(using: .utf8)!)
         return nil
@@ -211,7 +214,7 @@ func sceneFrames(video: String, threshold: Double, maxFrames: Int) -> (dir: Stri
 }
 
 /// Cheap token-set overlap. Screen recordings repeat; near-identical frames are dropped.
-func similarity(_ a: String, _ b: String) -> Double {
+public func similarity(_ a: String, _ b: String) -> Double {
     let sa = Set(a.split(whereSeparator: { $0.isWhitespace }).map(String.init))
     let sb = Set(b.split(whereSeparator: { $0.isWhitespace }).map(String.init))
     if sa.isEmpty && sb.isEmpty { return 1 }
@@ -219,14 +222,14 @@ func similarity(_ a: String, _ b: String) -> Double {
     return Double(sa.intersection(sb).count) / Double(sa.union(sb).count)
 }
 
-func stamp(_ s: Double) -> String {
+public func stamp(_ s: Double) -> String {
     let t = Int(s.rounded())
     return String(format: "%02d:%02d", t / 60, t % 60)
 }
 
 // MARK: - Token accounting
 
-func imageTokens(path: String) -> Int {
+public func imageTokens(path: String) -> Int {
     guard let img = NSImage(contentsOfFile: path),
           let rep = img.representations.first else { return 0 }
     let w = rep.pixelsWide, h = rep.pixelsHigh
@@ -237,14 +240,14 @@ func imageTokens(path: String) -> Int {
     return Int((fw * fh / 750.0).rounded())
 }
 
-func textTokens(_ s: String) -> Int { max(1, Int((Double(s.count) / 4.0).rounded())) }
+public func textTokens(_ s: String) -> Int { max(1, Int((Double(s.count) / 4.0).rounded())) }
 
 
 // MARK: - Ledger
 
 /// Append one line per run to ~/.claude/cheapshot-ledger/YYYYMMDD.tsv.
 /// Same shape as the read-ledger: ISO time, then tab-separated fields.
-func ledgerAppend(mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int) {
+public func ledgerAppend(mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int) {
     let dir = NSHomeDirectory() + "/.claude/cheapshot-ledger"
     try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     let day = DateFormatter(); day.dateFormat = "yyyyMMdd"; day.timeZone = TimeZone(identifier: "UTC")
@@ -259,7 +262,7 @@ func ledgerAppend(mode: String, inputs: Int, imageTokens: Int, textTokens: Int, 
     }
 }
 
-func ledgerTotal() {
+public func ledgerTotal() {
     let dir = NSHomeDirectory() + "/.claude/cheapshot-ledger"
     let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
         .filter { $0.hasSuffix(".tsv") }.sorted()
@@ -285,180 +288,3 @@ func ledgerTotal() {
       redactions     \(red)
     """)
 }
-
-// MARK: - CLI
-
-func usage() {
-    print("""
-    cheapshot \(VERSION) - on-device screenshot OCR for AI agents
-
-    USAGE
-      cheapshot <file.png> [more.png ...]
-      cheapshot --newest <dir> [n]
-      cheapshot --cleanshot [n]
-      cheapshot --video <file.mp4>
-
-    OPTIONS
-      --raw             do not redact (redaction is ON by default)
-      --json            emit JSON
-      --stats           print token savings to stderr
-      --min-conf <f>    confidence floor, default 0.3
-      --scene <f>       video scene-change threshold, default 0.25
-      --max-frames <n>  video frame cap, default 200
-      --dedupe <f>      drop a screen this similar to the last, default 0.90
-      --ledger          print cumulative savings across every run
-      --no-ledger       do not record this run
-      --version
-    """)
-}
-
-var args = Array(CommandLine.arguments.dropFirst())
-if args.isEmpty || args.contains("-h") || args.contains("--help") { usage(); exit(0) }
-if args.contains("--version") { print(VERSION); exit(0) }
-if args.contains("--ledger") { ledgerTotal(); exit(0) }
-
-var doRedact = true, asJSON = false, showStats = false
-var minConf: Float = 0.3
-var files: [String] = []
-
-func popValue(_ flag: String) -> String? {
-    guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
-    let v = args[i + 1]
-    args.removeSubrange(i...(i + 1))
-    return v
-}
-
-if args.contains("--raw")   { doRedact = false; args.removeAll { $0 == "--raw" } }
-if args.contains("--json")  { asJSON = true;    args.removeAll { $0 == "--json" } }
-if args.contains("--stats") { showStats = true; args.removeAll { $0 == "--stats" } }
-var noLedger = false
-if args.contains("--no-ledger") { noLedger = true; args.removeAll { $0 == "--no-ledger" } }
-if let c = popValue("--min-conf"), let f = Float(c) { minConf = f }
-
-var videoPath: String? = nil
-var sceneThreshold = 0.25
-var maxFrames = 200
-var dedupe = 0.90
-if let v = popValue("--video") { videoPath = v }
-if let s = popValue("--scene"), let d = Double(s) { sceneThreshold = d }
-if let m = popValue("--max-frames"), let i = Int(m) { maxFrames = i }
-if let d = popValue("--dedupe"), let x = Double(d) { dedupe = x }
-
-if let vp = videoPath {
-    guard FileManager.default.fileExists(atPath: vp) else {
-        FileHandle.standardError.write("cheapshot: no such video \(vp)\n".data(using: .utf8)!); exit(2)
-    }
-    guard let (tmp, frames) = sceneFrames(video: vp, threshold: sceneThreshold, maxFrames: maxFrames),
-          !frames.isEmpty else {
-        FileHandle.standardError.write("cheapshot: no frames extracted\n".data(using: .utf8)!); exit(1)
-    }
-    defer { try? FileManager.default.removeItem(atPath: tmp) }
-
-    var kept: [(Double, String)] = []
-    var lastText = ""
-    var frameImageTokens = 0
-    for (t, f) in frames {
-        frameImageTokens += imageTokens(path: f)
-        guard let raw = ocr(path: f, minConfidence: minConf) else { continue }
-        let text = doRedact ? redact(raw).0 : raw
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { continue }
-        if similarity(trimmed, lastText) >= dedupe { continue }
-        kept.append((t, trimmed))
-        lastText = trimmed
-    }
-
-    var body = ""
-    for (t, text) in kept { body += "[\(stamp(t))]\n\(text)\n\n" }
-    print(body.trimmingCharacters(in: .whitespacesAndNewlines))
-
-    let vtt = textTokens(body)
-    if !noLedger { ledgerAppend(mode: "video", inputs: frames.count, imageTokens: frameImageTokens, textTokens: vtt, redactions: 0) }
-    if showStats {
-        let tt = vtt
-        let msg = "cheapshot: \(frames.count) scene frames, \(kept.count) distinct screens  "
-                + "\(frameImageTokens) image tokens -> \(tt) text tokens  "
-                + "(saved \(max(0, frameImageTokens - tt)), "
-                + "\(frameImageTokens > 0 ? Int(Double(max(0, frameImageTokens - tt)) / Double(frameImageTokens) * 100) : 0)%)\n"
-        FileHandle.standardError.write(msg.data(using: .utf8)!)
-    }
-    exit(0)
-}
-
-func newest(in dir: String, count: Int) -> [String] {
-    let fm = FileManager.default
-    guard let items = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
-    let pngs = items.filter { $0.lowercased().hasSuffix(".png") || $0.lowercased().hasSuffix(".jpg") }
-    let withDates: [(String, Date)] = pngs.compactMap {
-        let p = (dir as NSString).appendingPathComponent($0)
-        let d = (try? fm.attributesOfItem(atPath: p)[.modificationDate] as? Date) ?? nil
-        return d.map { (p, $0) }
-    }
-    return withDates.sorted { $0.1 > $1.1 }.prefix(count).map { $0.0 }
-}
-
-func cleanshotDir() -> String {
-    let d = UserDefaults(suiteName: "pl.maketheweb.cleanshotx")?.string(forKey: "exportPath")
-    return d ?? (NSHomeDirectory() + "/Dropbox/_Screenshots")
-}
-
-if let i = args.firstIndex(of: "--newest") {
-    let dir = i + 1 < args.count ? args[i + 1] : "."
-    let n = (i + 2 < args.count ? Int(args[i + 2]) : 1) ?? 1
-    files = newest(in: dir, count: n)
-} else if let i = args.firstIndex(of: "--cleanshot") {
-    let n = (i + 1 < args.count ? Int(args[i + 1]) : 1) ?? 1
-    files = newest(in: cleanshotDir(), count: n)
-} else {
-    files = args.filter { !$0.hasPrefix("--") }
-}
-
-if files.isEmpty {
-    FileHandle.standardError.write("cheapshot: no input images\n".data(using: .utf8)!)
-    exit(2)
-}
-
-var totalImageTokens = 0, totalTextTokens = 0, totalRedactions = 0
-var jsonOut: [[String: Any]] = []
-var failed = 0
-
-for f in files {
-    guard let raw = ocr(path: f, minConfidence: minConf) else {
-        FileHandle.standardError.write("cheapshot: cannot read \(f)\n".data(using: .utf8)!)
-        failed += 1
-        continue
-    }
-    let (text, report) = doRedact ? redact(raw) : (raw, RedactionReport())
-    let it = imageTokens(path: f), tt = textTokens(text)
-    totalImageTokens += it; totalTextTokens += tt
-    totalRedactions += report.counts.values.reduce(0, +)
-
-    if asJSON {
-        jsonOut.append(["file": f, "text": text, "redactions": report.counts,
-                        "image_tokens": it, "text_tokens": tt])
-    } else {
-        if files.count > 1 { print("== \((f as NSString).lastPathComponent)") }
-        print(text)
-    }
-}
-
-if asJSON {
-    let payload: [String: Any] = ["version": VERSION, "results": jsonOut,
-                                  "image_tokens": totalImageTokens, "text_tokens": totalTextTokens]
-    if let d = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
-       let s = String(data: d, encoding: .utf8) { print(s) }
-}
-
-if !noLedger {
-    ledgerAppend(mode: "image", inputs: files.count - failed, imageTokens: totalImageTokens,
-                 textTokens: totalTextTokens, redactions: totalRedactions)
-}
-
-if showStats {
-    let saved = max(0, totalImageTokens - totalTextTokens)
-    let pct = totalImageTokens > 0 ? Int(Double(saved) / Double(totalImageTokens) * 100) : 0
-    let msg = "cheapshot: \(files.count - failed) image(s)  \(totalImageTokens) image tokens -> \(totalTextTokens) text tokens  (saved \(saved), \(pct)%)\n"
-    FileHandle.standardError.write(msg.data(using: .utf8)!)
-}
-
-exit(failed > 0 && failed == files.count ? 1 : 0)
