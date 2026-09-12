@@ -40,9 +40,19 @@ public enum CLI {
     /// One JSON object per recognized line: 1-based number, redacted text, integer box with a
     /// top-left origin, and Vision's confidence. The box is in pixels for an image or a rendered
     /// page, and in PDF points for the text lane.
+    ///
+    /// The lines are redacted joined, exactly as `text` is, and split back apart, so the array is
+    /// the same redaction the payload carries. Redacting each line on its own was weaker: a rule
+    /// whose pattern crosses a newline redacted the document but not the array, so `text` was
+    /// clean while `lines[]` still held the secret, and the two disagreed on how many lines there
+    /// were. When a rule does eat a newline the split no longer lines up with the input, and then
+    /// per-line redaction is the honest fallback: a custom rule may contain `\s` deliberately, and
+    /// keeping `n` and the boxes attached to the right line matters more than matching `text`.
     static func lineJSON(_ lines: [RenderedLine], redactor: Redactor?) -> [[String: Any]] {
-        lines.map { l in
-            ["n": l.n, "text": apply(redactor, l.text).text,
+        let joined = apply(redactor, lines.map(\.text).joined(separator: "\n")).text.components(separatedBy: "\n")
+        let texts = joined.count == lines.count ? joined : lines.map { apply(redactor, $0.text).text }
+        return zip(lines, texts).map { l, text in
+            ["n": l.n, "text": text,
              "bbox": [Int(l.bbox.minX.rounded()), Int(l.bbox.minY.rounded()), Int(l.bbox.maxX.rounded()), Int(l.bbox.maxY.rounded())],
              "confidence": Double(l.confidence)]
         }

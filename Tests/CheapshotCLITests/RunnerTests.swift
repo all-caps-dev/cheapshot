@@ -163,6 +163,41 @@ final class RunnerTests: XCTestCase {
         XCTAssertNotNil(o["confidence"] as? Double)
     }
 
+    /// `lines[]` has to be the same redaction `text` is, split back into lines. Redacting each
+    /// line in isolation let a rule whose pattern crossed a newline redact the document but not
+    /// the array (the token came back in the clear) and changed the line count, so the numbers
+    /// stopped matching `text`.
+    func testLineJSONMatchesTheDocumentRedactionLineForLine() throws {
+        let texts = ["Authorization: Bearer", "abcdef0123456789abcdef", "key AKIAIOSFODNN7EXAMPLE"]
+        let lines = texts.enumerated().map {
+            RenderedLine(n: $0.offset + 1, text: $0.element,
+                         bbox: CGRect(x: 0, y: CGFloat($0.offset * 16), width: 100, height: 16),
+                         confidence: 1, fenced: false)
+        }
+        let redactor = Redactor()
+        let document = redactor.redact(texts.joined(separator: "\n")).text
+        let out = CLI.lineJSON(lines, redactor: redactor)
+        XCTAssertEqual(out.count, texts.count)
+        XCTAssertEqual(out.map { $0["n"] as? Int }, [1, 2, 3])
+        XCTAssertEqual(out.map { $0["text"] as? String }, document.components(separatedBy: "\n"),
+                       "lines[] must equal the document redaction split on newlines")
+    }
+
+    /// A custom rule may legitimately contain `\s`, and then the joined redaction comes back with
+    /// fewer lines than it started with. Falling back to per-line redaction there keeps `n` and
+    /// the boxes honest rather than silently re-numbering the array.
+    func testLineJSONFallsBackWhenACustomRuleEatsANewline() throws {
+        let redactor = Redactor(rules: [Rule(name: "span", pattern: #"TOKEN:\s+\S+"#)])
+        XCTAssertEqual(redactor.redact("TOKEN:\nabc123").text, "[span]", "the fixture rule really does span lines")
+        let lines = [RenderedLine(n: 1, text: "TOKEN:", bbox: CGRect(x: 0, y: 0, width: 50, height: 16), confidence: 1, fenced: false),
+                     RenderedLine(n: 2, text: "abc123", bbox: CGRect(x: 0, y: 16, width: 50, height: 16), confidence: 1, fenced: false)]
+        let out = CLI.lineJSON(lines, redactor: redactor)
+        XCTAssertEqual(out.count, 2)
+        XCTAssertEqual(out.map { $0["n"] as? Int }, [1, 2])
+        XCTAssertEqual(out.map { $0["text"] as? String }, ["TOKEN:", "abc123"])
+        XCTAssertEqual(out[1]["bbox"] as? [Int], [0, 16, 50, 32])
+    }
+
     /// The three --json failure paths must all produce an envelope, not just the missing-file one.
     func testJSONVideoMissingFileIsAnErrorEntryAndExit1() async throws {
         let path = tmp.appendingPathComponent("missing.mp4").path

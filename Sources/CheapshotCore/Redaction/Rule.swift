@@ -21,7 +21,10 @@ public struct Rule {
         Rule(name: "SLACK_TOKEN", pattern: #"\bxox[abposr]-[A-Za-z0-9\-]{10,}\b"#, options: []),
         Rule(name: "JWT",         pattern: #"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"#, options: []),
         Rule(name: "PRIVATE_KEY", pattern: #"-----BEGIN [A-Z ]*PRIVATE KEY-----"#, options: []),
-        Rule(name: "BEARER",      pattern: #"\bBearer\s+[A-Za-z0-9._\-]{16,}"#),
+        // `[ \t]+`, never `\s+`: a builtin that can cross a newline redacts a joined document
+        // differently from the lines it was joined from, which changed the line count in the
+        // `--json` line array and left the token in the clear there.
+        Rule(name: "BEARER",      pattern: #"\bBearer[ \t]+[A-Za-z0-9._\-]{16,}"#),
         // The domain must not be a @2x/@3x scale suffix, so "CleanShot 2026-09-12 at
         // 10.22.33@2x.png" is not an address. Digit-only local parts are still addresses.
         Rule(name: "EMAIL",       pattern: #"\b[A-Za-z0-9._%+\-]+@(?!\d+x\.)[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"#),
