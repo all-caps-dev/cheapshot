@@ -14,6 +14,6 @@ let package = Package(
             linkerSettings: [.linkedFramework("Vision"), .linkedFramework("AppKit")]
         ),
         .executableTarget(name: "cheapshot", dependencies: ["CheapshotCore"]),
-        .testTarget(name: "CheapshotCoreTests", dependencies: ["CheapshotCore"]),
+        .testTarget(name: "CheapshotCoreTests", dependencies: ["CheapshotCore"], resources: [.copy("Golden")]),
     ]
 )

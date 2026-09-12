@@ -53,12 +53,12 @@ rule.
 | `JWT` | three base64url segments |
 | `PRIVATE_KEY` | PEM header |
 | `BEARER` | Authorization: Bearer ... |
-| `EMAIL` | addresses |
+| `EMAIL` | addresses; a scale suffix like `@2x.png` is not one |
 | `SSN` | US, with invalid-prefix exclusions |
 | `CARD` | 13-19 digits, **Luhn-validated** |
 | `PHONE` | US formats |
 | `ROUTING` | 9-digit ABA, **checksum-validated** |
-| `BANK_ACCT` | bare digit runs 8+, catches MICR lines |
+| `BANK_ACCT` | 8 to 17 digits after an account cue (`acct`, `account`, `a/c`, `iban`, `micr`) or a redacted routing number; bare digit runs survive |
 | `TOKEN` | opaque mixed-case runs 20+ chars |
 | `IPV4` | dotted quads |
 

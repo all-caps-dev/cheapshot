@@ -1,0 +1,4 @@
+user [EMAIL]
+key [AWS_KEY]
+path /opt/homebrew/bin/ffmpeg
+ts 2026-09-12T15:37:00Z
