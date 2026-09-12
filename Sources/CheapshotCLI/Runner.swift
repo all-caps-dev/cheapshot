@@ -37,8 +37,9 @@ public enum CLI {
         redactor?.redact(text) ?? (text, RedactionReport())
     }
 
-    /// One JSON object per recognized line: 1-based number, redacted text, integer pixel box
-    /// with a top-left origin, and Vision's confidence.
+    /// One JSON object per recognized line: 1-based number, redacted text, integer box with a
+    /// top-left origin, and Vision's confidence. The box is in pixels for an image or a rendered
+    /// page, and in PDF points for the text lane.
     static func lineJSON(_ lines: [RenderedLine], redactor: Redactor?) -> [[String: Any]] {
         lines.map { l in
             ["n": l.n, "text": apply(redactor, l.text).text,
@@ -144,7 +145,9 @@ public enum CLI {
                 totalImage += it; totalText += tt; totalRedactions += report.total
                 results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
                                 "source": ["path": doc.path, "sha256": doc.sha256, "pages": doc.pageCount],
-                                "pages": doc.pages.map { ["n": $0.n, "lane": $0.lane.rawValue, "lines": lineJSON($0.lines, redactor: redactor)] as [String: Any] }])
+                                "pages": doc.pages.map { ["n": $0.n, "lane": $0.lane.rawValue,
+                                                          "width": $0.width, "height": $0.height,
+                                                          "lines": lineJSON($0.lines, redactor: redactor)] as [String: Any] }])
                 if !opts.json {
                     if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
                     io.out(text + "\n")

@@ -207,6 +207,10 @@ final class RunnerTests: XCTestCase {
         let pages = try XCTUnwrap(results[0]["pages"] as? [[String: Any]])
         XCTAssertEqual(pages.map { $0["lane"] as? String }, ["text", "text"])
         XCTAssertEqual(pages.map { $0["n"] as? Int }, [1, 2])
+        // The page size in --json is the rendered pixel size, so a downstream tool can scale a
+        // scan-lane box against it. 612x792 points at 2x is 1224x1584.
+        XCTAssertEqual(pages[0]["width"] as? Int, 1224)
+        XCTAssertEqual(pages[0]["height"] as? Int, 1584)
         let text = try XCTUnwrap(results[0]["text"] as? String)
         XCTAssertTrue(text.contains("--- page 2 ---"))
         XCTAssertTrue(text.contains("acct [BANK_ACCT]"), text)

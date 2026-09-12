@@ -1,6 +1,6 @@
 # Phase 0 and Phase 1: Core split and audit fixes Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the single-file `cheapshot.swift` into a SwiftPM package with a `CheapshotCore` library, a thin CLI, and a test suite, then land every Phase 1 fix from the spec with a test each.
 
@@ -3487,7 +3487,7 @@ Expected: `ok: universal, minos 13.0`; 0 failures; `0.5.0-dev`; exit 1 with an e
 
 - [x] **Step 4: Tick the plan and commit**
 
-Change every `- [x]` in this plan file to `- [x]`.
+Change every `- [ ]` in this plan file to `- [x]`.
 
 ```bash
 git add -A
