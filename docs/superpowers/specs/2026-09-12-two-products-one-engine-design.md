@@ -47,13 +47,14 @@ Core knows nothing about licenses, tiers, or the App Store. Every feature is cal
 
 The sales pitch is "you saved N tokens this week". Most of those savings will come from the CLI hook, not from the app. So the app must read the CLI's ledger.
 
-Rule: Core resolves the ledger directory in this order.
+Rule: Core resolves the ledger file in this order.
 
 1. `$CHEAPSHOT_HOME/ledger.jsonl` if the variable is set.
-2. `~/Library/Group Containers/<TEAMID>.dev.all-caps.cheapshot/ledger.jsonl` if that directory exists. The app creates it on first launch through its App Group entitlement. The CLI is not sandboxed, so it can write there directly.
-3. `~/Library/Application Support/cheapshot/ledger.jsonl` otherwise.
+2. `~/Library/Application Support/cheapshot/ledger.jsonl` otherwise.
 
-The team ID prefix is a constant in Core. It is harmless in a FOSS repo; it only names a folder. Existing `~/.claude/cheapshot-ledger/*.tsv` files are imported once by `cheapshot --ledger --migrate` and left in place.
+Revised 2026-09-12 after Perplexity answer 2 (see Open questions): a CLI that is not an entitled member of the App Group gets a macOS 15 authorization prompt when it touches `~/Library/Group Containers/<TEAMID>.dev.all-caps.cheapshot/`, and the user can deny it. So the CLI never writes there. How the sandboxed app reads the CLI's ledger is decided in Phase 4, between two options: the app takes a security-scoped bookmark to `~/Library/Application Support/cheapshot/` on first launch (one more folder picker, no signing dependency), or the brew-distributed CLI is signed by the same team with the App Group entitlement and validated at runtime with `launchctl procinfo`. The bookmark is the default because it has no dependency on how the binary was installed.
+
+Existing `~/.claude/cheapshot-ledger/*.tsv` files are imported once by `cheapshot --ledger --migrate` and left in place.
 
 ### Plugin layout
 
@@ -93,7 +94,7 @@ Menu bar only, no Dock icon, no main window until the user opens the ledger.
 
 1. Folder picker for the screenshots folder. Store a security-scoped bookmark. Default suggestion: read `com.apple.screencapture location`, fall back to `~/Desktop`.
 2. Ask for notification permission.
-3. Create the App Group ledger directory so the CLI starts writing there too.
+3. Ask for a security-scoped bookmark to `~/Library/Application Support/cheapshot/` so the app can read the CLI's ledger (see "Ledger location and sharing").
 
 ### Free tier
 
@@ -106,7 +107,7 @@ Menu bar only, no Dock icon, no main window until the user opens the ledger.
 1. **Clipboard guard.** This is the feature that closes the gap the CLI cannot: claude-code#16592 means a pasted screenshot is never seen by a hook. The app watches `NSPasteboard.general` for image data. When one lands, it OCRs it in the background and offers a global hotkey (default Cmd-Shift-V) that replaces the image on the clipboard with the redacted text and pastes it. The image is never auto-replaced; the user chooses per paste. That keeps image pastes into Figma or Slack working.
 2. **Video transcripts.** Drop a screen recording on the menu bar icon, or pick from the folder watcher when a `.mov` appears. Uses `AVFoundationFrameSource`.
 3. **Ledger history.** All time, per day chart, export as CSV.
-4. **Custom redaction rules.** Editor with a live test field. Writes the same `rules.json` the CLI reads with `--rules`, at the App Group path, so the CLI picks them up too.
+4. **Custom redaction rules.** Editor with a live test field. Writes the same `rules.json` the CLI reads with `--rules`, into the bookmarked `~/Library/Application Support/cheapshot/` directory, so the CLI picks them up too.
 
 The paywall screen shows the user's own number first: "Cheapshot saved you 41,200 tokens this week." Then the price.
 
@@ -197,7 +198,7 @@ Added 2026-09-12 after Ryan pasted a Docling-based knowledge-base architecture (
 1. **Text lane.** `PDFKit` `PDFPage.attributedString`. Native text with fonts, so monospace detection and indentation come for free. Near-zero cost, macOS 10.4+, sandbox-safe.
 2. **Scan lane.** If a page's text layer is under 20 characters, render the page at 2x with `PDFPage.draw(with:to:)` into a `CGImage` and run the same Vision OCR path as screenshots. The lane is recorded per page so a downstream consumer can route low-confidence pages for review.
 
-Redaction, the ledger, and the code-aware output fixes apply unchanged. Ledger entry counts what the agent would have paid: Claude Code's `Read` renders PDF pages as images, so the image-token estimate per page is real savings.
+Redaction, the ledger, and the code-aware output fixes apply unchanged. The ledger entry records an estimate of what a rendered page would cost as an image (the 2x render size through the same `(w * h) / 750` rule). Anthropic publishes no per-page token rate for `Read` on a PDF (Perplexity answer 4 in Open questions), so this is labelled an estimate, not a measured saving.
 
 Output: the plain text payload gains `--- page N ---` separators. `--json` gains:
 
@@ -245,5 +246,19 @@ Phase 4, after CLI traction: private app repo. Order inside it: folder watcher a
 ## Open questions
 
 1. Bundle and group identifiers: `dev.all-caps.cheapshot` uses a hyphen, which Apple allows but some tools mangle. Alternative `dev.allcaps.cheapshot`. Decide when the Developer ID cert is created.
+
+### Perplexity answers folded in (2026-09-12)
+
+Five questions were sent to Perplexity; the prompts are in `~/Dropbox/00-Agent-Markdown-Dropbox/_action/2026-09-12-perplexity-questions-for-the-cheapshot-spec.md`. Answers so far:
+
+2. **App Review and StoreKit for a 2-year non-renewing subscription. Answered.** A 2-year non-renewing subscription is allowed; Apple documents the type as a limited-duration service with no published maximum, and the seven-day minimum in guideline 3.1.2(a) applies to auto-renewable products only. 3.1.2 does not literally require server-side restore, but Apple's subscription documentation makes the app responsible for cross-device availability and names a server-side account as the usual mechanism. `Transaction.all` is the customer's purchase history and, per the WWDC24 StoreKit session, includes non-renewing subscriptions; StoreKit does not compute an expiry for them. Decision stays: no server. The app ships a visible "Restore Purchases" action that calls `AppStore.sync()` then walks verified `Transaction.all`, computes `purchaseDate + 2 years` itself, honours revocation fields, and treats a repurchase before expiry as extending the end date. Verify in the StoreKit sandbox on two Macs before submission that a non-renewing purchase appears on the second Mac; the API reference page lists non-consumables and auto-renewing products explicitly and the non-renewing claim rests on the session, not the reference. If App Review objects to no-server restore, the fallback is unchanged: a one-year auto-renewing subscription at $2.49. Sources: developer.apple.com/help/app-store-connect/reference/in-app-purchase-types, developer.apple.com/app-store/review/guidelines/ (3.1.2), developer.apple.com/documentation/storekit/handling-subscriptions-billing, developer.apple.com/documentation/storekit/transaction/all, developer.apple.com/videos/play/wwdc2024/10061/.
+
+3. **Can a non-sandboxed CLI write the App Group container? Answered: not reliably.** On macOS 15 and later, app-group containers get SIP-backed protection even when the owning app is not sandboxed. A process that is not a signed, entitled member of the group triggers a user authorization prompt on access and can be denied; Unix ownership and mode bits do not count. Membership is possible for a CLI signed by the same team with the exact `com.apple.security.application-groups` entitlement (the `<TEAMID>.` form needs no provisioning profile on macOS) and validated at runtime (`sudo launchctl procinfo <pid>` shows `entitlements validated`), and the directory must then be resolved through `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)`, never a hard-coded path. A Mac App Store app also may not install a CLI into shared locations, so the CLI stays a separate brew-distributed product either way. Effect on this spec: the ledger location rule lost its Group Containers step (see "Ledger location and sharing"); the app reads the CLI's ledger through a security-scoped bookmark by default, with the entitled-CLI route as the alternative to evaluate in Phase 4. Sources: developer.apple.com/documentation/xcode/configuring-app-groups, developer.apple.com/videos/play/wwdc2024/10123/ (app-group container protection), developer.apple.com/app-store/review/guidelines/ (2.4.5).
+
+4. **Hook input for PDFs. Answered.** For `Read`, `tool_input` always carries an absolute `file_path` (Claude Code expands `~` and relative paths before the hook runs) plus optional `offset`, `limit`, and a `pages` string such as `"1-5"`; the Agent SDK TypeScript reference publishes the `pages?: string` field. The hook sees the requested input only, never the parsed text or rendered pages. A PDF `Read` returns a summary text block followed by a `document` block inside the tool result; Anthropic does not document the internal conversion or a fixed per-page token rate for Claude Code, and release notes only say `pages` constrains the range and that PDFs over 10 pages referenced with `@` can become a lightweight reference. Effect on this spec: the hook design stands (read `tool_input.pages`, pass it as `--pages`, pass through with a hint over 20 pages when no range is given, all with `jq -r '.tool_input.pages // empty'` so missing fields do not break it). The ledger's per-page number is an estimate of the image tokens a 2x render would cost and is labelled as such; the "real savings" wording in "PDF input" is softened to "an estimate of what a rendered page would cost". Sources: docs.claude.com/en/docs/claude-code/hooks (PreToolUse input, absolute file_path guarantee), the Agent SDK TypeScript reference for the Read tool input type, and the Claude Code changelog entries for `pages` and large `@` PDFs.
+
+5. **Plugin install syntax.** Not yet answered.
+
+6. **Release plumbing (bump-homebrew-formula-action, `depends_on :macos`, Intel tier).** Not yet answered.
 
 Note for the ledger window: a user who never installs the CLI has only the app's own captures in the ledger. The window must read cleanly with a small or empty ledger and never show a "install the CLI" nag in the free tier.
