@@ -2,6 +2,7 @@ import XCTest
 import ImageIO
 import CoreGraphics
 import CoreText
+import PDFKit
 @testable import CheapshotCLI
 import CheapshotCore
 
@@ -220,6 +221,36 @@ final class RunnerTests: XCTestCase {
         // billed size is 1211.6x1568 / 750 = 2533 tokens per page, 5066 for the two.
         XCTAssertEqual(Tokens.image(width: 1224, height: 1584), 2533)
         XCTAssertEqual((results[0]["image_tokens"] as? Int), 2 * Tokens.image(width: 1224, height: 1584))
+    }
+
+    /// A locked PDF used to exit 0 with an empty text payload and a fabricated saving in the
+    /// ledger. It is an input failure: an error entry, exit 1, and no ledger line at all.
+    func testPasswordProtectedPDFIsAnErrorEntryAndWritesNoLedgerLine() async throws {
+        let plain = tmp.appendingPathComponent("plain.pdf")
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = try XCTUnwrap(CGContext(plain as CFURL, mediaBox: &box, nil))
+        ctx.beginPDFPage(nil)
+        let font = CTFontCreateWithName("Helvetica" as CFString, 12, nil)
+        let attr = NSAttributedString(string: "a page with plenty of readable text on it",
+                                      attributes: [kCTFontAttributeName as NSAttributedString.Key: font])
+        ctx.textPosition = CGPoint(x: 72, y: 700)
+        CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+        ctx.endPDFPage()
+        ctx.closePDF()
+
+        let locked = tmp.appendingPathComponent("locked.pdf")
+        let doc = try XCTUnwrap(PDFDocument(url: plain))
+        XCTAssertTrue(doc.write(to: locked, withOptions: [.userPasswordOption: "x", .ownerPasswordOption: "x"]))
+
+        let r = await run(["--json", "--stats", locked.path])
+        XCTAssertEqual(r.code, 1, r.out)
+        let results = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0]["file"] as? String, locked.path)
+        XCTAssertTrue((try XCTUnwrap(results[0]["error"] as? String)).contains("password-protected"), "\(results[0])")
+        XCTAssertNil(results[0]["text"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path),
+                       "a locked PDF must not record a saving")
     }
 
     func testHelpAndVersion() async {

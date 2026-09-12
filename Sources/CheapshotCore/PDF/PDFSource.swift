@@ -40,6 +40,10 @@ public enum PDFSource {
 
     public static func pages(of url: URL, range: ClosedRange<Int>?, minConfidence: Float) throws -> PDFDocumentResult {
         guard let doc = PDFDocument(url: url) else { throw Failure(message: "cannot open PDF \(url.path)") }
+        // A locked document still opens, still reports its page count, and still hands back pages
+        // whose `string` is nil and whose render is blank. Left alone it sails through the scan
+        // lane and reports a saving on text nobody read.
+        guard !doc.isLocked else { throw Failure(message: "\(url.lastPathComponent) is password-protected") }
         let count = doc.pageCount
         guard count > 0 else { throw Failure(message: "\(url.path) has no pages") }
         let r = range ?? 1...count

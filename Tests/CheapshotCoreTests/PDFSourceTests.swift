@@ -82,6 +82,23 @@ final class PDFSourceTests: XCTestCase {
         XCTAssertThrowsError(try PDFSource.pages(of: tmp.appendingPathComponent("missing.pdf"), range: nil, minConfidence: 0.3))
     }
 
+    /// A locked document opens: `PDFDocument(url:)` returns non-nil with a real `pageCount`, but
+    /// every `page.string` is nil and every render is blank. Without the guard the whole file went
+    /// to the scan lane, OCR'd to nothing, and exited 0 with a fabricated saving.
+    func testPasswordProtectedPDFThrows() throws {
+        let plain = try makePDF([.text(["a page with plenty of readable text on it"], font: "Helvetica")], name: "plain.pdf")
+        let doc = try XCTUnwrap(PDFDocument(url: plain))
+        let locked = tmp.appendingPathComponent("locked.pdf")
+        XCTAssertTrue(doc.write(to: locked, withOptions: [.userPasswordOption: "x", .ownerPasswordOption: "x"]))
+        let reopened = try XCTUnwrap(PDFDocument(url: locked))
+        XCTAssertTrue(reopened.isLocked, "the fixture has to actually be locked")
+        XCTAssertGreaterThan(reopened.pageCount, 0, "and to report pages, which is what fooled the scan lane")
+        XCTAssertThrowsError(try PDFSource.pages(of: locked, range: nil, minConfidence: 0.3)) { error in
+            XCTAssertTrue("\(error)".contains("password-protected"), "\(error)")
+            XCTAssertTrue("\(error)".contains("locked.pdf"), "\(error)")
+        }
+    }
+
     func testSHA256() throws {
         let f = tmp.appendingPathComponent("abc.bin")
         try Data("abc".utf8).write(to: f)
