@@ -286,7 +286,10 @@ public enum Layout {
             let cell = median(voting.map(\.1))
             let minX = voting.map { s[$0.0].bbox.minX }.min() ?? 0
             for i in run {
-                let indent = min(maxIndent, max(0, Int(((s[i].bbox.minX - minX) / cell).rounded())))
+                // `Int(_:)` traps on a non-finite value, so a NaN origin on a line the run holds
+                // would crash rather than measure wrong. No usable origin means no indent.
+                let cells = (s[i].bbox.minX - minX) / cell
+                let indent = cells.isFinite ? min(maxIndent, max(0, Int(cells.rounded()))) : 0
                 out[i].text = String(repeating: " ", count: indent) + s[i].text
                 out[i].fenced = true
             }

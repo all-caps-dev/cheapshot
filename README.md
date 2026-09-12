@@ -147,9 +147,12 @@ Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledg
 {"image_tokens":1550,"inputs":1,"mode":"image","redactions":10,"saved":1496,"text_tokens":54,"ts":"2026-09-08T01:05:35Z"}
 ```
 
-`--ledger` totals it, `--ledger --json` prints the totals as JSON, `--no-ledger` skips
-recording a run. Upgrading from 0.4.x: `cheapshot --ledger --migrate` imports the old
-`~/.claude/cheapshot-ledger/*.tsv` files once and leaves them in place.
+`mode` is `image`, `pdf` or `video`, and a run that mixes PDFs and screenshots writes one line
+per kind, because the PDF number is an estimate of what reading the pages as images would have
+cost rather than a measured saving. `--ledger` totals it, `--ledger --json` prints the totals as
+JSON, `--no-ledger` skips recording a run. Upgrading from 0.4.x:
+`cheapshot --ledger --migrate` imports the old `~/.claude/cheapshot-ledger/*.tsv` files once and
+leaves them in place.
 
 ## Why there is no LLM in the pipeline
 

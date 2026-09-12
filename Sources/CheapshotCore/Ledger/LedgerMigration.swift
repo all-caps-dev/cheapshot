@@ -25,9 +25,14 @@ extension Ledger {
                 count += 1
             }
         }
-        let marker: [String: Any] = ["from": dir.path, "count": count, "at": LedgerEntry.now()]
-        try FileManager.default.createDirectory(at: migrationMarker.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: marker, options: [.sortedKeys]).write(to: migrationMarker)
+        // Only a real import gets a marker. Writing one after importing nothing locked out every
+        // later `--migrate`, and the 0.4.x files may simply not be there yet the first time a
+        // summary is asked for.
+        if count > 0 {
+            let marker: [String: Any] = ["from": dir.path, "count": count, "at": LedgerEntry.now()]
+            try FileManager.default.createDirectory(at: migrationMarker.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: marker, options: [.sortedKeys]).write(to: migrationMarker)
+        }
         return count
     }
 }

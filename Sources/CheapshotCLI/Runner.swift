@@ -128,10 +128,21 @@ public enum CLI {
 
     // MARK: - images
 
+    /// One kind of input's running totals. PDFs and images are counted apart because they mean
+    /// different things in the ledger: an image line is a measured saving, a PDF line is an
+    /// estimate of what reading the pages as images would have cost.
+    struct RunTotals {
+        var inputs = 0, imageTokens = 0, textTokens = 0, redactions = 0
+        mutating func add(imageTokens it: Int, textTokens tt: Int, redactions r: Int) {
+            inputs += 1; imageTokens += it; textTokens += tt; redactions += r
+        }
+    }
+
     static func runImages(_ opts: Options, paths: [String], redactor: Redactor?, io: CLIIO) -> Int32 {
         guard !paths.isEmpty else { io.err("cheapshot: no input images\n"); return 2 }
         var results: [[String: Any]] = []
-        var totalImage = 0, totalText = 0, totalRedactions = 0, failed = 0
+        var pdfs = RunTotals(), images = RunTotals()
+        var failed = 0
 
         for f in paths {
             guard FileManager.default.fileExists(atPath: f) else {
@@ -152,7 +163,7 @@ public enum CLI {
                 let (text, report) = apply(redactor, PDFSource.text(of: doc))
                 let it = doc.pages.reduce(0) { $0 + Tokens.image(width: $1.width, height: $1.height) }
                 let tt = Tokens.text(text)
-                totalImage += it; totalText += tt; totalRedactions += report.total
+                pdfs.add(imageTokens: it, textTokens: tt, redactions: report.total)
                 results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
                                 "source": ["path": doc.path, "sha256": doc.sha256, "pages": doc.pageCount],
                                 "pages": doc.pages.map { ["n": $0.n, "lane": $0.lane.rawValue,
@@ -181,7 +192,7 @@ public enum CLI {
             let (text, report) = apply(redactor, Layout.text(rendered))
             let size = ImageLoader.pixelSize(path: f) ?? (image.width, image.height)
             let it = Tokens.image(width: size.width, height: size.height), tt = Tokens.text(text)
-            totalImage += it; totalText += tt; totalRedactions += report.total
+            images.add(imageTokens: it, textTokens: tt, redactions: report.total)
             results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
                             "lines": lineJSON(rendered, redactor: redactor)])
             if !opts.json {
@@ -190,10 +201,14 @@ public enum CLI {
             }
         }
 
+        let totalImage = pdfs.imageTokens + images.imageTokens
+        let totalText = pdfs.textTokens + images.textTokens
         if opts.json { io.out(Output.json(payload(results, imageTokens: totalImage, textTokens: totalText))) }
         let ok = paths.count - failed
-        if ok > 0 {
-            record(LedgerEntry(mode: "image", inputs: ok, imageTokens: totalImage, textTokens: totalText, redactions: totalRedactions), opts, io)
+        // One line per kind present, so a PDF run never reports itself as measured image savings.
+        for (mode, t) in [("pdf", pdfs), ("image", images)] where t.inputs > 0 {
+            record(LedgerEntry(mode: mode, inputs: t.inputs, imageTokens: t.imageTokens,
+                               textTokens: t.textTokens, redactions: t.redactions), opts, io)
         }
         if opts.stats { io.err(statsLine(inputs: ok, noun: "image(s)", imageTokens: totalImage, textTokens: totalText)) }
         return failed > 0 ? 1 : 0

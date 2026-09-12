@@ -10,11 +10,16 @@ public struct Redactor {
     public let rules: [Rule]
     private let compiled: [(Rule, NSRegularExpression)]
 
+    /// A rule whose pattern will not compile is dropped, which silently un-redacts whatever it
+    /// covered. That is only ever a programming error here: ``RuleFile`` is the validating entry
+    /// point for anything a user wrote, and it rejects an uncompilable pattern with a message
+    /// before a `Redactor` is ever built. The assertion catches a bad builtin in debug.
     public init(rules: [Rule] = Rule.builtin) {
         self.rules = rules
         self.compiled = rules.compactMap { rule in
             (try? NSRegularExpression(pattern: rule.pattern, options: rule.options)).map { (rule, $0) }
         }
+        assert(compiled.count == rules.count, "uncompilable rule")
     }
 
     /// Custom rules go first so they win over the built-ins.

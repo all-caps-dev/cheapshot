@@ -252,6 +252,20 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(Layout.render(lines).first?.text, "second line", "a non-finite row sorts last")
     }
 
+    /// A non-finite origin on a line the run holds used to trap: `Int(_:)` on a NaN indent is a
+    /// crash, not a wrong number. The line rides along with no indent.
+    func testNonFiniteOriginInsideARunIndentsAtZero() {
+        let lines = [
+            mono("def main():", x: 0, y: 0),
+            mono("x = compute()", x: 0, y: 16),
+            OCRLine(text: "nan origin", bbox: CGRect(x: CGFloat.nan, y: 32, width: CGFloat.nan, height: 16), confidence: 0.9),
+            mono("print(main())", x: 0, y: 48),
+        ]
+        let r = Layout.render(lines)
+        XCTAssertEqual(r.map(\.text), ["def main():", "x = compute()", "nan origin", "print(main())"])
+        XCTAssertTrue(r.allSatisfy(\.fenced), "the non-finite line sits inside the run")
+    }
+
     func testRenderWithExplicitRunsIgnoresDetection() {
         // Proportional-looking widths: monospaceRuns would find nothing here.
         let lines = [

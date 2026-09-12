@@ -40,6 +40,42 @@ final class RunnerTests: XCTestCase {
         try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(s.utf8)) as? [String: Any])
     }
 
+    /// Every ledger line this run wrote, in order.
+    func ledgerEntries() throws -> [[String: Any]] {
+        let url = tmp.appendingPathComponent("ledger.jsonl")
+        guard let body = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        return try body.split(separator: "\n").map { try json(String($0)) }
+    }
+
+    /// A one-page PDF with a real text layer, so it takes the text lane.
+    func makeTextPDF(name: String) throws -> URL {
+        let url = tmp.appendingPathComponent(name)
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &box, nil))
+        ctx.beginPDFPage(nil)
+        let font = CTFontCreateWithName("Helvetica" as CFString, 12, nil)
+        let attr = NSAttributedString(string: "a page with plenty of readable text on it",
+                                      attributes: [kCTFontAttributeName as NSAttributedString.Key: font])
+        ctx.textPosition = CGPoint(x: 72, y: 700)
+        CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+        ctx.endPDFPage()
+        ctx.closePDF()
+        return url
+    }
+
+    /// A blank white PNG: a real image input with no text in it.
+    func makeBlankPNG(name: String) throws -> URL {
+        let png = tmp.appendingPathComponent(name)
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: 200, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
+        let img = try XCTUnwrap(ctx.makeImage())
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(png as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil); XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return png
+    }
+
     func testMissingFileIsAnErrorEntryAndExit1() async throws {
         let r = await run(["--json", "missing.png"])
         XCTAssertEqual(r.code, 1)
@@ -148,6 +184,7 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(first["image_tokens"] as? Int, 27)   // 200*100/750
         XCTAssertNotNil(first["text"] as? String)
         XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path), "successful run writes the ledger")
+        XCTAssertEqual(try ledgerEntries().map { $0["mode"] as? String }, ["image"])
     }
 
     /// The JSON line array is redacted line by line and its box is integer pixels, top-left origin.
@@ -286,6 +323,27 @@ final class RunnerTests: XCTestCase {
         XCTAssertNil(results[0]["text"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path),
                        "a locked PDF must not record a saving")
+    }
+
+    /// The spec calls the PDF per-page number an estimate, not a measured saving, so PDFs cannot
+    /// share the "image" mode with screenshots. One entry per kind present, in that order.
+    func testPDFRunRecordsModePDFAndAMixedRunWritesBothModes() async throws {
+        let pdf = try makeTextPDF(name: "doc.pdf")
+        let r = await run([pdf.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        var entries = try ledgerEntries()
+        XCTAssertEqual(entries.map { $0["mode"] as? String }, ["pdf"])
+        XCTAssertEqual(entries[0]["inputs"] as? Int, 1)
+
+        let png = try makeBlankPNG(name: "blank.png")
+        let m = await run([pdf.path, png.path])
+        XCTAssertEqual(m.code, 0, m.err)
+        entries = try ledgerEntries()
+        XCTAssertEqual(entries.map { $0["mode"] as? String }, ["pdf", "pdf", "image"], "a mixed run writes one line per kind")
+        XCTAssertEqual(entries[1]["inputs"] as? Int, 1)
+        XCTAssertEqual(entries[2]["inputs"] as? Int, 1)
+        XCTAssertEqual(entries[2]["image_tokens"] as? Int, 27, "the image line carries only the PNG")
+        XCTAssertEqual(entries[1]["image_tokens"] as? Int, Tokens.image(width: 1224, height: 1584))
     }
 
     func testHelpAndVersion() async {
