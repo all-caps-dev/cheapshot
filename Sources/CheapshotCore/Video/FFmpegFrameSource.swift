@@ -1,0 +1,104 @@
+import Foundation
+import CoreGraphics
+import ImageIO
+
+/// CLI frame source. Runs ffmpeg once with scene detection into a temp directory this source
+/// owns, then streams the JPEGs as CGImages one at a time and deletes the directory when the
+/// stream ends. Not sandbox-safe; the app uses AVFoundation (later phase).
+public struct FFmpegFrameSource: FrameSource {
+    public struct Failure: Error, CustomStringConvertible {
+        public let message: String
+        public var description: String { message }
+    }
+
+    public let ffmpegPath: String?
+    public let sceneThreshold: Double
+    public let tempBase: URL
+
+    public init(ffmpegPath: String? = nil, sceneThreshold: Double = 0.25,
+                tempBase: URL = URL(fileURLWithPath: NSTemporaryDirectory())) {
+        self.ffmpegPath = ffmpegPath; self.sceneThreshold = sceneThreshold; self.tempBase = tempBase
+    }
+
+    /// The user's PATH first; then the usual install locations.
+    public static func findFFmpeg(environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+        let fm = FileManager.default
+        for dir in (environment["PATH"] ?? "").split(separator: ":") {
+            let c = String(dir) + "/ffmpeg"
+            if fm.isExecutableFile(atPath: c) { return c }
+        }
+        for c in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", NSHomeDirectory() + "/.local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+        where fm.isExecutableFile(atPath: c) { return c }
+        return nil
+    }
+
+    /// fps=4 cuts filter work about 15x on 60 fps captures; mpdecimate drops static stretches
+    /// before the scene metric runs; select keeps frame 0 plus every scene change.
+    public static func filterChain(threshold: Double) -> String {
+        "fps=4,mpdecimate=hi=64*12:lo=64*5:frac=0.1,select=eq(n\\,0)+gt(scene\\,\(threshold)),metadata=print:file=-"
+    }
+
+    public func frames(of video: URL, maxFrames: Int) throws -> AsyncThrowingStream<VideoFrame, Error> {
+        guard let ff = ffmpegPath ?? Self.findFFmpeg(), FileManager.default.isExecutableFile(atPath: ff) else {
+            throw Failure(message: "ffmpeg not found on PATH, /opt/homebrew/bin, /usr/local/bin, ~/.local/bin, /usr/bin")
+        }
+        guard FileManager.default.fileExists(atPath: video.path) else { throw Failure(message: "no such video \(video.path)") }
+        let dir = tempBase.appendingPathComponent("cheapshot-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let cleanup = { try? FileManager.default.removeItem(at: dir) }
+
+        let extracted: [(TimeInterval, URL)]
+        do { extracted = try extract(ffmpeg: ff, video: video, into: dir, maxFrames: maxFrames) }
+        catch { cleanup(); throw error }
+
+        // Unfolding streams load one JPEG per pull, so a 200-frame 1440p recording is never all in memory.
+        var iterator = extracted.makeIterator()
+        var finished = false
+        return AsyncThrowingStream(unfolding: {
+            while let (t, url) = iterator.next() {
+                if let image = Self.loadJPEG(url) { return VideoFrame(time: t, image: image) }
+            }
+            if !finished { finished = true; cleanup() }
+            return nil
+        })
+    }
+
+    func extract(ffmpeg: String, video: URL, into dir: URL, maxFrames: Int) throws -> [(TimeInterval, URL)] {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: ffmpeg)
+        p.arguments = ["-hide_banner", "-nostdin", "-loglevel", "error", "-i", video.path,
+                       "-an", "-sn",
+                       "-vf", Self.filterChain(threshold: sceneThreshold),
+                       "-fps_mode", "vfr",
+                       "-frames:v", "\(maxFrames)",
+                       "-q:v", "2",
+                       dir.appendingPathComponent("f_%05d.jpg").path]
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out; p.standardError = err
+        do { try p.run() } catch { throw Failure(message: "could not launch \(ffmpeg): \(error.localizedDescription)") }
+        var outData = Data(), errData = Data()
+        let g = DispatchGroup()
+        g.enter(); DispatchQueue.global().async { outData = out.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+        g.enter(); DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+        p.waitUntilExit(); g.wait()
+        if p.terminationStatus != 0 {
+            let tail = (String(data: errData, encoding: .utf8) ?? "").split(separator: "\n").suffix(6).joined(separator: "\n")
+            throw Failure(message: "ffmpeg exited \(p.terminationStatus)\n\(tail)")
+        }
+
+        // metadata=print emits "frame:N  pts:... pts_time:SECONDS" per kept frame, frame 0 included.
+        var times: [TimeInterval] = []
+        for line in (String(data: outData, encoding: .utf8) ?? "").split(separator: "\n") {
+            guard let r = line.range(of: "pts_time:") else { continue }
+            if let t = Double(line[r.upperBound...].prefix(while: { $0 != " " })) { times.append(t) }
+        }
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+            .filter { $0.hasSuffix(".jpg") }.sorted()
+        return files.enumerated().map { i, f in (i < times.count ? times[i] : TimeInterval(i), dir.appendingPathComponent(f)) }
+    }
+
+    static func loadJPEG(_ url: URL) -> CGImage? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCache: false] as CFDictionary)
+    }
+}

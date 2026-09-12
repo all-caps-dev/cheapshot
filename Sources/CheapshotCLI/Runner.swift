@@ -18,7 +18,7 @@ public enum CLI {
         case .version: io.out(cheapshotVersion + "\n"); return 0
         case .ledger(let json, let migrate): return runLedger(json: json, migrate: migrate, io: io)
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
-        case .video(let path): return runVideo(opts, path: path, redactor: redactor, io: io)
+        case .video(let path): return await runVideo(opts, path: path, redactor: redactor, io: io)
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)
         case .newest(let dir, let n): return runImages(opts, paths: newest(in: dir, count: n), redactor: redactor, io: io)
         case .cleanshot(let n): return runImages(opts, paths: newest(in: cleanshotDir(home: io.home), count: n), redactor: redactor, io: io)
@@ -164,38 +164,38 @@ public enum CLI {
         return failed > 0 ? 1 : 0
     }
 
-    // MARK: - video (Task 11 replaces the body with VideoTranscriber)
+    // MARK: - video
 
-    static func runVideo(_ opts: Options, path: String, redactor: Redactor?, io: CLIIO) -> Int32 {
-        guard FileManager.default.fileExists(atPath: path) else { io.err("cheapshot: no such video \(path)\n"); return 2 }
-        guard let (tmp, frames) = sceneFrames(video: path, threshold: opts.scene, maxFrames: opts.maxFrames), !frames.isEmpty else {
-            io.err("cheapshot: no frames extracted\n"); return 1
+    static func runVideo(_ opts: Options, path: String, redactor: Redactor?, io: CLIIO) async -> Int32 {
+        guard FileManager.default.fileExists(atPath: path) else {
+            if opts.json { io.out(Output.json(payload([["file": path, "error": "no such video"]], imageTokens: 0, textTokens: 0))) }
+            io.err("cheapshot: no such video \(path)\n")
+            return 1
         }
-        defer { try? FileManager.default.removeItem(atPath: tmp) }   // runs now: this is a function, not exit(0)
+        let source = FFmpegFrameSource(sceneThreshold: opts.scene)
+        let transcriber = VideoTranscriber(source: source, dedupe: opts.dedupe, minConfidence: opts.minConfidence, redactor: redactor)
+        let t: VideoTranscript
+        do { t = try await transcriber.transcribe(URL(fileURLWithPath: path), maxFrames: opts.maxFrames) }
+        catch { io.err("cheapshot: \(error)\n"); return 1 }
+        guard t.frameCount > 0 else { io.err("cheapshot: no frames extracted\n"); return 1 }
 
-        var kept: [(Double, String)] = []
-        var lastText = ""
-        var frameImageTokens = 0, redactions = 0
-        for (t, f) in frames {
-            frameImageTokens += ImageLoader.pixelSize(path: f).map { Tokens.image(width: $0.width, height: $0.height) } ?? 0
-            guard let image = ImageLoader.load(path: f),
-                  let rendered = try? OCR.recognizeLayout(image: image, minConfidence: opts.minConfidence) else { continue }
-            let raw = Layout.text(rendered)
-            let (text, report) = apply(redactor, raw)
-            redactions += report.total
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { continue }
-            if similarity(trimmed, lastText) >= opts.dedupe { continue }
-            kept.append((t, trimmed)); lastText = trimmed
-        }
         var body = ""
-        for (t, text) in kept { body += "[\(stamp(t))]\n\(text)\n\n" }
-        io.out(body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
+        for s in t.segments { body += "[\(VideoTranscriber.stamp(s.time))]\n\(s.text)\n\n" }
         let tt = Tokens.text(body)
-        record(LedgerEntry(mode: "video", inputs: frames.count, imageTokens: frameImageTokens, textTokens: tt, redactions: redactions), opts, io)
+        if opts.json {
+            let segs = t.segments.map { ["time": $0.time, "stamp": VideoTranscriber.stamp($0.time), "text": $0.text] as [String: Any] }
+            io.out(Output.json(payload([["file": path, "text": body.trimmingCharacters(in: .whitespacesAndNewlines),
+                                         "segments": segs, "frames": t.frameCount, "redactions": t.redactions.counts,
+                                         "image_tokens": t.imageTokens, "text_tokens": tt]],
+                                       imageTokens: t.imageTokens, textTokens: tt)))
+        } else {
+            io.out(body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
+        }
+        record(LedgerEntry(mode: "video", inputs: t.frameCount, imageTokens: t.imageTokens, textTokens: tt, redactions: t.redactions.total), opts, io)
         if opts.stats {
-            io.err("cheapshot: \(frames.count) scene frames, \(kept.count) distinct screens  "
-                   + statsLine(inputs: frames.count, noun: "frame(s)", imageTokens: frameImageTokens, textTokens: tt).dropFirst("cheapshot: ".count).description)
+            let saved = max(0, t.imageTokens - tt)
+            let pct = t.imageTokens > 0 ? Int(Double(saved) / Double(t.imageTokens) * 100) : 0
+            io.err("cheapshot: \(t.frameCount) scene frames, \(t.segments.count) distinct screens  \(t.imageTokens) image tokens -> \(tt) text tokens  (saved \(saved), \(pct)%)\n")
         }
         return 0
     }

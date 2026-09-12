@@ -110,6 +110,10 @@ default 200. `--dedupe <f>` drop a screen this similar to the last, default 0.90
 
 Requires ffmpeg on your PATH. Cheapshot uses whichever one you have.
 
+Frames are sampled at 4 per second, static stretches are dropped before scene
+scoring, and only changed frames are written (`-fps_mode vfr`), so `--max-frames`
+counts kept frames, not input frames.
+
 ## Ledger
 
 Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledger.jsonl`
