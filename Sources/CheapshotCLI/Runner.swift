@@ -37,6 +37,16 @@ public enum CLI {
         redactor?.redact(text) ?? (text, RedactionReport())
     }
 
+    /// One JSON object per recognized line: 1-based number, redacted text, integer pixel box
+    /// with a top-left origin, and Vision's confidence.
+    static func lineJSON(_ lines: [RenderedLine], redactor: Redactor?) -> [[String: Any]] {
+        lines.map { l in
+            ["n": l.n, "text": apply(redactor, l.text).text,
+             "bbox": [Int(l.bbox.minX.rounded()), Int(l.bbox.minY.rounded()), Int(l.bbox.maxX.rounded()), Int(l.bbox.maxY.rounded())],
+             "confidence": Double(l.confidence)]
+        }
+    }
+
     static func payload(_ results: [[String: Any]], imageTokens: Int, textTokens: Int) -> [String: Any] {
         ["version": cheapshotVersion, "results": results, "image_tokens": imageTokens, "text_tokens": textTokens]
     }
@@ -94,7 +104,7 @@ public enum CLI {
         }
         let input = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
         let (text, report) = apply(redactor, input)
-        let tt = Tokens_text(text)
+        let tt = Tokens.text(text)
         if opts.json {
             io.out(Output.json(payload([["file": path, "text": text, "redactions": report.counts,
                                          "image_tokens": 0, "text_tokens": tt]], imageTokens: 0, textTokens: tt)))
@@ -119,16 +129,26 @@ public enum CLI {
                 io.err("cheapshot: no such file \(f)\n")
                 continue
             }
-            guard let raw = ocr(path: f, minConfidence: opts.minConfidence) else {
+            guard let image = ImageLoader.load(path: f) else {
                 failed += 1
                 results.append(["file": f, "error": "cannot read image"])
                 io.err("cheapshot: cannot read \(f)\n")
                 continue
             }
-            let (text, report) = apply(redactor, raw)
-            let it = imageTokens(path: f), tt = Tokens_text(text)
+            let rendered: [RenderedLine]
+            do { rendered = try OCR.recognizeLayout(image: image, minConfidence: opts.minConfidence) }
+            catch {
+                failed += 1
+                results.append(["file": f, "error": "\(error)"])
+                io.err("cheapshot: \(f): \(error)\n")
+                continue
+            }
+            let (text, report) = apply(redactor, Layout.text(rendered))
+            let size = ImageLoader.pixelSize(path: f) ?? (image.width, image.height)
+            let it = Tokens.image(width: size.width, height: size.height), tt = Tokens.text(text)
             totalImage += it; totalText += tt; totalRedactions += report.total
-            results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt])
+            results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
+                            "lines": lineJSON(rendered, redactor: redactor)])
             if !opts.json {
                 if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
                 io.out(text + "\n")
@@ -157,8 +177,10 @@ public enum CLI {
         var lastText = ""
         var frameImageTokens = 0, redactions = 0
         for (t, f) in frames {
-            frameImageTokens += imageTokens(path: f)
-            guard let raw = ocr(path: f, minConfidence: opts.minConfidence) else { continue }
+            frameImageTokens += ImageLoader.pixelSize(path: f).map { Tokens.image(width: $0.width, height: $0.height) } ?? 0
+            guard let image = ImageLoader.load(path: f),
+                  let rendered = try? OCR.recognizeLayout(image: image, minConfidence: opts.minConfidence) else { continue }
+            let raw = Layout.text(rendered)
             let (text, report) = apply(redactor, raw)
             redactions += report.total
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -169,7 +191,7 @@ public enum CLI {
         var body = ""
         for (t, text) in kept { body += "[\(stamp(t))]\n\(text)\n\n" }
         io.out(body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
-        let tt = Tokens_text(body)
+        let tt = Tokens.text(body)
         record(LedgerEntry(mode: "video", inputs: frames.count, imageTokens: frameImageTokens, textTokens: tt, redactions: redactions), opts, io)
         if opts.stats {
             io.err("cheapshot: \(frames.count) scene frames, \(kept.count) distinct screens  "
@@ -198,7 +220,3 @@ public enum CLI {
         UserDefaults(suiteName: "pl.maketheweb.cleanshotx")?.string(forKey: "exportPath") ?? (home + "/Desktop")
     }
 }
-
-// Until Task 10 moves the estimators into Tokens, alias the Phase 0 function under a name
-// that will not collide with the local variables named textTokens.
-func Tokens_text(_ s: String) -> Int { textTokens(s) }

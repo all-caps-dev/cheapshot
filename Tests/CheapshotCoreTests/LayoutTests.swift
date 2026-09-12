@@ -215,4 +215,12 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(code.map(\.text), ["let a = 1", "let b = 2", "let c = 3"])
         XCTAssertFalse(r.contains { $0.text.hasPrefix(" ") }, "gutter digits shifted the block")
     }
+
+    func testNonFiniteBoxDoesNotTrapTheSort() {
+        let lines = [
+            OCRLine(text: "nan box", bbox: CGRect(x: 0, y: CGFloat.nan, width: CGFloat.nan, height: CGFloat.nan), confidence: 0.9),
+            mono("second line", x: 0, y: 0),
+        ]
+        XCTAssertEqual(Layout.render(lines).first?.text, "second line", "a non-finite row sorts last")
+    }
 }

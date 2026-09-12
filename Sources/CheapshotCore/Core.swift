@@ -3,39 +3,6 @@
 // Apple Vision. No network. No API cost.
 
 import Foundation
-import AppKit
-import Vision
-
-// MARK: - OCR
-
-public func ocr(path: String, minConfidence: Float) -> String? {
-    guard let img = NSImage(contentsOfFile: path),
-          let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-
-    let request = VNRecognizeTextRequest()
-    request.recognitionLevel = .accurate
-    request.usesLanguageCorrection = true
-
-    let handler = VNImageRequestHandler(cgImage: cg, options: [:])
-    do { try handler.perform([request]) } catch { return nil }
-
-    guard let obs = request.results else { return "" }
-
-    // Sort top-to-bottom, then left-to-right. Vision's origin is bottom-left.
-    let sorted = obs.sorted { a, b in
-        let ay = a.boundingBox.origin.y, by = b.boundingBox.origin.y
-        if abs(ay - by) > 0.01 { return ay > by }
-        return a.boundingBox.origin.x < b.boundingBox.origin.x
-    }
-
-    var lines: [String] = []
-    for o in sorted {
-        guard let top = o.topCandidates(1).first, top.confidence >= minConfidence else { continue }
-        lines.append(top.string)
-    }
-    return lines.joined(separator: "\n")
-}
-
 
 // MARK: - Video
 
@@ -114,19 +81,3 @@ public func stamp(_ s: Double) -> String {
     let t = Int(s.rounded())
     return String(format: "%02d:%02d", t / 60, t % 60)
 }
-
-// MARK: - Token accounting
-
-public func imageTokens(path: String) -> Int {
-    guard let img = NSImage(contentsOfFile: path),
-          let rep = img.representations.first else { return 0 }
-    let w = rep.pixelsWide, h = rep.pixelsHigh
-    // Anthropic's rule of thumb, with the long-edge downscale to 1568px applied.
-    var fw = Double(w), fh = Double(h)
-    let maxEdge = 1568.0
-    if max(fw, fh) > maxEdge { let s = maxEdge / max(fw, fh); fw *= s; fh *= s }
-    return Int((fw * fh / 750.0).rounded())
-}
-
-public func textTokens(_ s: String) -> Int { max(1, Int((Double(s.count) / 4.0).rounded())) }
-

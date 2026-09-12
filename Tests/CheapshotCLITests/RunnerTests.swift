@@ -1,4 +1,6 @@
 import XCTest
+import ImageIO
+import CoreGraphics
 @testable import CheapshotCLI
 import CheapshotCore
 
@@ -123,6 +125,26 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(r.out.contains("imported 1"), r.out)
         let again = await run(["--ledger", "--migrate"])
         XCTAssertTrue(again.out.contains("imported 0"), again.out)
+    }
+
+    /// A blank white PNG has no text. This asserts the JSON shape, not OCR content.
+    func testBlankImageJSONHasLinesArrayAndTokens() async throws {
+        let png = tmp.appendingPathComponent("blank.png")
+        let ctx = CGContext(data: nil, width: 200, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
+        let img = ctx.makeImage()!
+        let dest = CGImageDestinationCreateWithURL(png as CFURL, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, img, nil); XCTAssertTrue(CGImageDestinationFinalize(dest))
+
+        let r = await run(["--json", png.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        let results = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(results[0]["file"] as? String, png.path)
+        XCTAssertNotNil(results[0]["lines"] as? [[String: Any]])
+        XCTAssertEqual(results[0]["image_tokens"] as? Int, 27)   // 200*100/750
+        XCTAssertNotNil(results[0]["text"] as? String)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path), "successful run writes the ledger")
     }
 
     func testHelpAndVersion() async {

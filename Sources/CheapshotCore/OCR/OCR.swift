@@ -1,0 +1,74 @@
+import Foundation
+import Vision
+import CoreGraphics
+
+public enum OCR {
+    public struct Failure: Error, CustomStringConvertible {
+        public let message: String
+        public var description: String { message }
+    }
+
+    /// Vision text recognition on one image. Boxes come back in pixels with a top-left origin.
+    public static func recognize(image: CGImage, minConfidence: Float, languageCorrection: Bool = true) throws -> OCRResult {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = languageCorrection
+        let lines = try perform(request, on: image, minConfidence: minConfidence, roi: nil)
+        return OCRResult(lines: lines, width: image.width, height: image.height)
+    }
+
+    /// Full screenshot pipeline: recognize with correction on, find monospace runs, recognize each
+    /// run's region again with correction off (so hashes and tokens are not "corrected" into words),
+    /// then lay out with indentation and fences.
+    public static func recognizeLayout(image: CGImage, minConfidence: Float) throws -> [RenderedLine] {
+        let first = try recognize(image: image, minConfidence: minConfidence)
+        var lines = Layout.sorted(first.lines)
+        for run in Layout.monospaceRuns(lines).reversed() {      // reversed so earlier indices stay valid
+            let union = run.reduce(CGRect.null) { $0.union(lines[$1].bbox) }
+            let pad: CGFloat = 4
+            let region = union.insetBy(dx: -pad, dy: -pad)
+                .intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            guard !region.isEmpty else { continue }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            request.regionOfInterest = normalized(region, width: image.width, height: image.height)
+            guard let replacement = try? perform(request, on: image, minConfidence: minConfidence, roi: request.regionOfInterest),
+                  !replacement.isEmpty else { continue }
+            lines.replaceSubrange(run, with: Layout.sorted(replacement))
+        }
+        return Layout.render(lines)
+    }
+
+    static func perform(_ request: VNRecognizeTextRequest, on image: CGImage, minConfidence: Float, roi: CGRect?) throws -> [OCRLine] {
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        do { try handler.perform([request]) } catch { throw Failure(message: "vision: \(error.localizedDescription)") }
+        var lines: [OCRLine] = []
+        for o in request.results ?? [] {
+            guard let top = o.topCandidates(1).first, top.confidence >= minConfidence else { continue }
+            // With a regionOfInterest, Vision reports boxes relative to that region.
+            var box = o.boundingBox
+            if let roi = roi {
+                box = CGRect(x: roi.minX + box.minX * roi.width, y: roi.minY + box.minY * roi.height,
+                             width: box.width * roi.width, height: box.height * roi.height)
+            }
+            // The layout arithmetic quantizes rows with Int(minY / pitch), which traps on a
+            // non-finite value. Vision never gets to feed one in.
+            let bbox = pixels(box, width: image.width, height: image.height)
+            guard bbox.origin.x.isFinite, bbox.origin.y.isFinite, bbox.width.isFinite, bbox.height.isFinite else { continue }
+            lines.append(OCRLine(text: top.string, bbox: bbox, confidence: top.confidence))
+        }
+        return lines
+    }
+
+    /// Vision: normalized, bottom-left origin. Ours: pixels, top-left origin.
+    static func pixels(_ r: CGRect, width: Int, height: Int) -> CGRect {
+        let w = CGFloat(width), h = CGFloat(height)
+        return CGRect(x: r.minX * w, y: (1 - r.maxY) * h, width: r.width * w, height: r.height * h)
+    }
+
+    static func normalized(_ r: CGRect, width: Int, height: Int) -> CGRect {
+        let w = CGFloat(width), h = CGFloat(height)
+        return CGRect(x: r.minX / w, y: (h - r.maxY) / h, width: r.width / w, height: r.height / h)
+    }
+}

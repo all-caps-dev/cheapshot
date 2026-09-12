@@ -64,9 +64,15 @@ public enum Layout {
     /// came back reversed and columns offset by half a line interleaved wrongly.
     static func sorted(_ lines: [OCRLine]) -> [OCRLine] {
         let pitch = rowPitch(lines)
+        // `Int(_:)` traps on a non-finite value, so a NaN box would crash the sort. Park those
+        // rows at the end instead.
+        func row(_ y: CGFloat) -> Int {
+            let r = (y / pitch).rounded()
+            return r.isFinite ? Int(r) : Int.max
+        }
         return lines.sorted { a, b in
-            let ra = Int((a.bbox.minY / pitch).rounded())
-            let rb = Int((b.bbox.minY / pitch).rounded())
+            let ra = row(a.bbox.minY)
+            let rb = row(b.bbox.minY)
             if ra != rb { return ra < rb }
             if a.bbox.minX != b.bbox.minX { return a.bbox.minX < b.bbox.minX }
             return a.bbox.minY < b.bbox.minY
