@@ -10,7 +10,7 @@ final class GoldenTests: XCTestCase {
         let expectedDir = root.appendingPathComponent("expected")
         let names = try FileManager.default.contentsOfDirectory(atPath: casesDir.path)
             .filter { $0.hasSuffix(".txt") }.sorted()
-        XCTAssertEqual(names.count, 30, "expected 30 golden cases, found \(names.count)")
+        XCTAssertEqual(names.count, 32, "expected 32 golden cases, found \(names.count)")
         let redactor = Redactor()
         for name in names {
             let input = try String(contentsOf: casesDir.appendingPathComponent(name), encoding: .utf8)

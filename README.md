@@ -58,7 +58,7 @@ rule.
 | `CARD` | 13-19 digits, **Luhn-validated** |
 | `PHONE` | US formats |
 | `ROUTING` | 9-digit ABA, **checksum-validated** |
-| `BANK_ACCT` | 8 to 17 digits after an account cue (`acct`, `account`, `a/c`, `iban`, `micr`) or a redacted routing number; bare digit runs survive |
+| `BANK_ACCT` | 8 to 17 digits after an account cue (`acct`, `account`, `a/c`, `micr`) or a redacted routing number; bare digit runs survive |
 | `TOKEN` | opaque mixed-case runs 20+ chars |
 | `IPV4` | dotted quads |
 
