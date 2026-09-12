@@ -16,7 +16,7 @@ public enum CLI {
         switch opts.command {
         case .help:    io.out(Output.usage()); return 0
         case .version: io.out(cheapshotVersion + "\n"); return 0
-        case .ledger:  ledgerTotal(); return 0      // Task 8 replaces this with Ledger
+        case .ledger(let json, let migrate): return runLedger(json: json, migrate: migrate, io: io)
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
         case .video(let path): return runVideo(opts, path: path, redactor: redactor, io: io)
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)
@@ -45,6 +45,37 @@ public enum CLI {
         let saved = max(0, imageTokens - textTokens)
         let pct = imageTokens > 0 ? Int(Double(saved) / Double(imageTokens) * 100) : 0
         return "cheapshot: \(inputs) \(noun)  \(imageTokens) image tokens -> \(textTokens) text tokens  (saved \(saved), \(pct)%)\n"
+    }
+
+    // MARK: - ledger
+
+    static func ledger(_ io: CLIIO) -> Ledger {
+        Ledger(at: Ledger.resolveURL(environment: io.environment, home: io.home))
+    }
+
+    static func record(_ entry: LedgerEntry, _ opts: Options, _ io: CLIIO) {
+        guard !opts.noLedger else { return }
+        do { try ledger(io).append(entry) } catch { io.err("cheapshot: ledger not written: \(error)\n") }
+    }
+
+    static func runLedger(json: Bool, migrate: Bool, io: CLIIO) -> Int32 {
+        let l = ledger(io)
+        do {
+            if migrate {
+                let n = try l.migrate(fromTSVDirectory: Ledger.defaultTSVDirectory(home: io.home))
+                io.out("cheapshot: imported \(n) ledger line(s) into \(l.url.path)\n")
+                return 0
+            }
+            let s = try l.summary()
+            if json {
+                io.out(Output.json(["days": s.days, "runs": s.runs, "inputs": s.inputs, "image_tokens": s.imageTokens,
+                                    "text_tokens": s.textTokens, "saved": s.saved, "redactions": s.redactions,
+                                    "percent": s.percent, "path": l.url.path]))
+            } else {
+                io.out(l.summaryText(s))
+            }
+            return 0
+        } catch { io.err("cheapshot: \(error)\n"); return 1 }
     }
 
     // MARK: - --text
@@ -106,8 +137,8 @@ public enum CLI {
 
         if opts.json { io.out(Output.json(payload(results, imageTokens: totalImage, textTokens: totalText))) }
         let ok = paths.count - failed
-        if !opts.noLedger && ok > 0 {
-            ledgerAppend(mode: "image", inputs: ok, imageTokens: totalImage, textTokens: totalText, redactions: totalRedactions)   // Task 8 replaces
+        if ok > 0 {
+            record(LedgerEntry(mode: "image", inputs: ok, imageTokens: totalImage, textTokens: totalText, redactions: totalRedactions), opts, io)
         }
         if opts.stats { io.err(statsLine(inputs: ok, noun: "image(s)", imageTokens: totalImage, textTokens: totalText)) }
         return failed > 0 ? 1 : 0
@@ -139,7 +170,7 @@ public enum CLI {
         for (t, text) in kept { body += "[\(stamp(t))]\n\(text)\n\n" }
         io.out(body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
         let tt = Tokens_text(body)
-        if !opts.noLedger { ledgerAppend(mode: "video", inputs: frames.count, imageTokens: frameImageTokens, textTokens: tt, redactions: redactions) }
+        record(LedgerEntry(mode: "video", inputs: frames.count, imageTokens: frameImageTokens, textTokens: tt, redactions: redactions), opts, io)
         if opts.stats {
             io.err("cheapshot: \(frames.count) scene frames, \(kept.count) distinct screens  "
                    + statsLine(inputs: frames.count, noun: "frame(s)", imageTokens: frameImageTokens, textTokens: tt).dropFirst("cheapshot: ".count).description)

@@ -112,14 +112,16 @@ Requires ffmpeg on your PATH. Cheapshot uses whichever one you have.
 
 ## Ledger
 
-Every run appends a line to `~/.claude/cheapshot-ledger/YYYYMMDD.tsv`:
+Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledger.jsonl`
+(or `$CHEAPSHOT_HOME/ledger.jsonl` if that variable is set):
 
 ```
-2026-09-08T01:05:35Z	image	1	1550	54	1496	10
+{"image_tokens":1550,"inputs":1,"mode":"image","redactions":10,"saved":1496,"text_tokens":54,"ts":"2026-09-08T01:05:35Z"}
 ```
 
-Time, mode, inputs, image tokens, text tokens, saved, redactions. `--ledger`
-totals it. `--no-ledger` skips recording a run.
+`--ledger` totals it, `--ledger --json` prints the totals as JSON, `--no-ledger` skips
+recording a run. Upgrading from 0.4.x: `cheapshot --ledger --migrate` imports the old
+`~/.claude/cheapshot-ledger/*.tsv` files once and leaves them in place.
 
 ## Why there is no LLM in the pipeline
 

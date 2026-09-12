@@ -101,6 +101,30 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(r.err.contains("rules"))
     }
 
+    func testLedgerJSONOnEmptyLedger() async throws {
+        let r = await run(["--ledger", "--json"])
+        XCTAssertEqual(r.code, 0)
+        let s = try json(r.out)
+        XCTAssertEqual(s["runs"] as? Int, 0)
+        XCTAssertEqual(s["saved"] as? Int, 0)
+    }
+
+    func testFailedRunWritesNoLedgerLine() async {
+        _ = await run(["missing.png"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path))
+    }
+
+    func testLedgerMigrateReportsCount() async throws {
+        let tsv = tmp.appendingPathComponent(".claude/cheapshot-ledger")
+        try FileManager.default.createDirectory(at: tsv, withIntermediateDirectories: true)
+        try "2026-09-08T01:05:35Z\timage\t1\t1550\t54\t1496\t10\n".write(to: tsv.appendingPathComponent("20260908.tsv"), atomically: true, encoding: .utf8)
+        let r = await run(["--ledger", "--migrate"])
+        XCTAssertEqual(r.code, 0)
+        XCTAssertTrue(r.out.contains("imported 1"), r.out)
+        let again = await run(["--ledger", "--migrate"])
+        XCTAssertTrue(again.out.contains("imported 0"), again.out)
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)
