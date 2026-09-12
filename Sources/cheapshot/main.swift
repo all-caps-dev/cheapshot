@@ -6,7 +6,7 @@ import CheapshotCore
 
 func usage() {
     print("""
-    cheapshot \(VERSION) - on-device screenshot OCR for AI agents
+    cheapshot \(cheapshotVersion) - on-device screenshot OCR for AI agents
 
     USAGE
       cheapshot <file.png> [more.png ...]
@@ -30,7 +30,7 @@ func usage() {
 
 var args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty || args.contains("-h") || args.contains("--help") { usage(); exit(0) }
-if args.contains("--version") { print(VERSION); exit(0) }
+if args.contains("--version") { print(cheapshotVersion); exit(0) }
 if args.contains("--ledger") { ledgerTotal(); exit(0) }
 
 var doRedact = true, asJSON = false, showStats = false
@@ -76,7 +76,7 @@ if let vp = videoPath {
     for (t, f) in frames {
         frameImageTokens += imageTokens(path: f)
         guard let raw = ocr(path: f, minConfidence: minConf) else { continue }
-        let text = doRedact ? redact(raw).0 : raw
+        let text = doRedact ? Redactor().redact(raw).text : raw
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { continue }
         if similarity(trimmed, lastText) >= dedupe { continue }
@@ -144,10 +144,10 @@ for f in files {
         failed += 1
         continue
     }
-    let (text, report) = doRedact ? redact(raw) : (raw, RedactionReport())
+    let (text, report) = doRedact ? Redactor().redact(raw) : (raw, RedactionReport())
     let it = imageTokens(path: f), tt = textTokens(text)
     totalImageTokens += it; totalTextTokens += tt
-    totalRedactions += report.counts.values.reduce(0, +)
+    totalRedactions += report.total
 
     if asJSON {
         jsonOut.append(["file": f, "text": text, "redactions": report.counts,
@@ -159,7 +159,7 @@ for f in files {
 }
 
 if asJSON {
-    let payload: [String: Any] = ["version": VERSION, "results": jsonOut,
+    let payload: [String: Any] = ["version": cheapshotVersion, "results": jsonOut,
                                   "image_tokens": totalImageTokens, "text_tokens": totalTextTokens]
     if let d = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
        let s = String(data: d, encoding: .utf8) { print(s) }
