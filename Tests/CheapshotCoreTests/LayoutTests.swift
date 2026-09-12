@@ -230,10 +230,18 @@ final class LayoutTests: XCTestCase {
             lines.append(mono("\(i + 1)", x: 0, y: y))
             lines.append(mono(code, x: 30, y: y))
         }
+        XCTAssertEqual(Layout.monospaceRuns(Layout.sorted(lines)), [1..<6],
+                       "a gutter digit left of the code split the run instead of riding along")
         let r = Layout.render(lines)
         let code = r.filter { $0.text.contains("let") }
         XCTAssertEqual(code.map(\.text), ["let a = 1", "let b = 2", "let c = 3"])
         XCTAssertFalse(r.contains { $0.text.hasPrefix(" ") }, "gutter digits shifted the block")
+        // The run opens at its first voter, so only the leading digit stays outside it; the
+        // interleaved digits are fenced with the code they number.
+        XCTAssertEqual(r.map(\.fenced), [false, true, true, true, true, true],
+                       "an interleaved gutter digit was not fenced with its code")
+        XCTAssertEqual(Layout.text(r).components(separatedBy: "```").count - 1, 2,
+                       "expected one fenced block over the whole numbered listing")
     }
 
     func testNonFiniteBoxDoesNotTrapTheSort() {
@@ -411,15 +419,21 @@ final class LayoutTests: XCTestCase {
 
     /// A line whose span is not a number cannot be placed in any column. It rides with the last
     /// one and takes its row position there, and nothing traps on the way.
+    ///
+    /// `CGRect(width: .nan)` leaves `minX` finite and `maxX` NaN, so `readingOrder` still reads a
+    /// finite row for it and still compares its left edge: the line lands in its own row, ahead of
+    /// that row's other lines because its left edge is furthest left. The NaN row sits at y = 16,
+    /// not at the bottom, so the assertion fails if the line is ever parked at the end instead.
     func testNonFiniteSpanRidesWithTheLastColumn() {
         let left = (0..<3).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
         let right = (0..<3).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
         let nan = OCRLine(text: "nan box",
-                          bbox: CGRect(x: 0, y: 48, width: CGFloat.nan, height: 16), confidence: 1)
+                          bbox: CGRect(x: 0, y: 16, width: CGFloat.nan, height: 16), confidence: 1)
         let lines = left + [nan] + right
         XCTAssertEqual(Layout.columns(lines).count, 2, "a non-finite span opened a column")
         XCTAssertEqual(Layout.columns(lines)[1].count, 4, "the non-finite line did not ride with the last column")
-        XCTAssertEqual(Layout.sorted(lines).map(\.text).last, "nan box",
+        XCTAssertEqual(Layout.sorted(lines).map(\.text),
+                       ["left 0", "left 1", "left 2", "right 0", "nan box", "right 1", "right 2"],
                        "a non-finite span did not take its row position in the last column")
         XCTAssertEqual(Layout.render(lines).count, 7)
     }
