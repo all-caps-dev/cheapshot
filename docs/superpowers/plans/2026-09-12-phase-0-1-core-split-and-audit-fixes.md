@@ -1,6 +1,6 @@
 # Phase 0 and Phase 1: Core split and audit fixes Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Turn the single-file `cheapshot.swift` into a SwiftPM package with a `CheapshotCore` library, a thin CLI, and a test suite, then land every Phase 1 fix from the spec with a test each.
 
@@ -227,7 +227,7 @@ public enum Output {
 **Interfaces:**
 - Produces: `CheapshotCore` module exporting, unchanged in behaviour, `VERSION`, `Rule`, `RULES`, `passesLuhn`, `passesABA`, `entropy`, `looksLikeSecret`, `RedactionReport`, `redact(_:)`, `ocr(path:minConfidence:)`, `findFFmpeg()`, `sceneFrames(video:threshold:maxFrames:)`, `similarity(_:_:)`, `stamp(_:)`, `imageTokens(path:)`, `textTokens(_:)`, `ledgerAppend(...)`, `ledgerTotal()`. All become `public`. Task 3 onward replaces them.
 
-- [ ] **Step 1: Write Package.swift**
+- [x] **Step 1: Write Package.swift**
 
 ```swift
 // swift-tools-version:5.9
@@ -251,7 +251,7 @@ let package = Package(
 )
 ```
 
-- [ ] **Step 2: Move the engine into Core**
+- [x] **Step 2: Move the engine into Core**
 
 Run:
 ```bash
@@ -274,7 +274,7 @@ Then in `Sources/CheapshotCore/Core.swift` add `public` to every top-level decla
 
 The `main.swift` file keeps `usage()`, `popValue`, `newest`, `cleanshotDir`, and all top-level statements exactly as they were. Line 320 `var doRedact = true, asJSON = false, showStats = false` and everything else stays.
 
-- [ ] **Step 3: Write the smoke test**
+- [x] **Step 3: Write the smoke test**
 
 `Tests/CheapshotCoreTests/SmokeTests.swift`:
 ```swift
@@ -295,12 +295,12 @@ final class SmokeTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 4: Build and test**
+- [x] **Step 4: Build and test**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | grep -E "Executed|error" `
 Expected: `Build complete!` and `Executed 2 tests, with 0 failures`.
 
-- [ ] **Step 5: Behaviour check against the old binary**
+- [x] **Step 5: Behaviour check against the old binary**
 
 Run:
 ```bash
@@ -310,7 +310,7 @@ git show HEAD:cheapshot.swift > /tmp/cs-old.swift && swiftc -O /tmp/cs-old.swift
 ```
 Expected: `HELP_SAME` and both print `0.4.1`.
 
-- [ ] **Step 6: Update .gitignore and commit**
+- [x] **Step 6: Update .gitignore and commit**
 
 Append `.build/` and `*.xcodeproj` to `.gitignore`. Keep the existing `cheapshot` and `ocra` lines.
 
@@ -333,7 +333,7 @@ No behaviour change. swift build and swift test work; the CLI's --help and
 **Interfaces:**
 - Produces: `make` builds `./cheapshot` universal; `make check` verifies both slices say `minos 13.0`; `make test` runs `swift test`; `make install` copies to `$(PREFIX)/bin`.
 
-- [ ] **Step 1: Write the Makefile**
+- [x] **Step 1: Write the Makefile**
 
 ```make
 # cheapshot: universal (arm64 + x86_64) release binary, macOS 13 floor.
@@ -366,7 +366,7 @@ clean:
 
 Use a real tab before each recipe line.
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `make 2>&1 | tail -4`
 Expected: last line `ok: universal, minos 13.0`.
@@ -374,7 +374,7 @@ Expected: last line `ok: universal, minos 13.0`.
 Run: `./cheapshot --version`
 Expected: `0.4.1`.
 
-- [ ] **Step 3: Update README install**
+- [x] **Step 3: Update README install**
 
 Replace the Install block with:
 ```markdown
@@ -388,7 +388,7 @@ make install    # copies it to /usr/local/bin (PREFIX=... to change)
 Needs the Xcode command line tools. `swift test` runs the test suite.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Makefile README.md
@@ -415,7 +415,7 @@ git commit -m "phase 0: Makefile builds a universal macOS 13 binary and checks m
 - Produces: `Rule`, `Rule.builtin`, `Validators`, `RedactionReport`, `Redactor` exactly as in the API reference. `cheapshotVersion` replaces `VERSION`.
 - The CLI (still the Phase 0 `main.swift`) calls `Redactor().redact(raw)` where it called `redact(raw)`, and `cheapshotVersion` where it used `VERSION`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `Tests/CheapshotCoreTests/ValidatorsTests.swift`:
 ```swift
@@ -485,12 +485,12 @@ final class RedactorTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `swift test 2>&1 | grep -E "error:|Executed" | head`
 Expected: compile errors, `Validators`, `Redactor`, `cheapshotVersion` not found.
 
-- [ ] **Step 3: Write Version.swift and Validators.swift**
+- [x] **Step 3: Write Version.swift and Validators.swift**
 
 `Sources/CheapshotCore/Version.swift`:
 ```swift
@@ -545,7 +545,7 @@ public enum Validators {
 }
 ```
 
-- [ ] **Step 4: Write Rule.swift**
+- [x] **Step 4: Write Rule.swift**
 
 `Sources/CheapshotCore/Redaction/Rule.swift`:
 ```swift
@@ -587,7 +587,7 @@ public struct Rule {
 
 EMAIL and BANK_ACCT are copied unchanged here on purpose; Task 4 changes them behind the golden suite.
 
-- [ ] **Step 5: Write Redactor.swift**
+- [x] **Step 5: Write Redactor.swift**
 
 `Sources/CheapshotCore/Redaction/Redactor.swift`:
 ```swift
@@ -640,7 +640,7 @@ public struct Redactor {
 }
 ```
 
-- [ ] **Step 6: Remove the old definitions and fix call sites**
+- [x] **Step 6: Remove the old definitions and fix call sites**
 
 In `Sources/CheapshotCore/Core.swift` delete: `let VERSION`, `struct Rule`, `let RULES`, `passesLuhn`, `passesABA`, `entropy`, `looksLikeSecret`, `struct RedactionReport`, `func redact`. Keep everything from `// MARK: - OCR` down.
 
@@ -650,12 +650,12 @@ In `Sources/cheapshot/main.swift`:
 - `doRedact ? redact(raw) : (raw, RedactionReport())` -> `doRedact ? Redactor().redact(raw) : (raw, RedactionReport())`
 - `report.counts.values.reduce(0, +)` -> `report.total`
 
-- [ ] **Step 7: Run tests**
+- [x] **Step 7: Run tests**
 
 Run: `swift test 2>&1 | grep -E "error:|Executed"`
 Expected: `Executed 9 tests, with 0 failures`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A Sources Tests
@@ -682,14 +682,14 @@ of name checks inside the loop. Redactor(customRules:) puts custom rules first."
 
 Expected outputs below were verified on this Mac against the current redactor with only these two patterns swapped.
 
-- [ ] **Step 1: Add the resource declaration**
+- [x] **Step 1: Add the resource declaration**
 
 In `Package.swift` change the test target to:
 ```swift
 .testTarget(name: "CheapshotCoreTests", dependencies: ["CheapshotCore"], resources: [.copy("Golden")]),
 ```
 
-- [ ] **Step 2: Write the golden runner**
+- [x] **Step 2: Write the golden runner**
 
 `Tests/CheapshotCoreTests/GoldenTests.swift`:
 ```swift
@@ -723,7 +723,7 @@ private extension String {
 }
 ```
 
-- [ ] **Step 3: Write the 30 case and expected files**
+- [x] **Step 3: Write the 30 case and expected files**
 
 Run this script from the repo root. Each block is `name`, then input lines, then `=>`, then expected lines.
 
@@ -905,12 +905,12 @@ PY
 ```
 Expected: `30 cases`.
 
-- [ ] **Step 4: Run and watch exactly five cases fail**
+- [x] **Step 4: Run and watch exactly five cases fail**
 
 Run: `swift test --filter GoldenTests 2>&1 | grep -E "golden case|Executed"`
 Expected failures: 16, 22, 26, 27, 28 (old BANK_ACCT and EMAIL over-match) and no others. Case 25 passes both before and after. If a different set fails, stop and compare against the "verified on this Mac" note above before touching anything.
 
-- [ ] **Step 5: Change the two patterns**
+- [x] **Step 5: Change the two patterns**
 
 In `Sources/CheapshotCore/Redaction/Rule.swift` replace the EMAIL line with:
 ```swift
@@ -928,16 +928,16 @@ and the BANK_ACCT line with:
 ```
 Note BANK_ACCT now uses the default `[.caseInsensitive]` options.
 
-- [ ] **Step 6: Run the whole suite**
+- [x] **Step 6: Run the whole suite**
 
 Run: `swift test 2>&1 | grep -E "error|failed|Executed"`
 Expected: `Executed 10 tests, with 0 failures`.
 
-- [ ] **Step 7: Update the README table**
+- [x] **Step 7: Update the README table**
 
 Replace the `EMAIL` row with `| \`EMAIL\` | addresses; a scale suffix like \`@2x.png\` is not one |` and the `BANK_ACCT` row with `| \`BANK_ACCT\` | 8 to 17 digits after an account cue (\`acct\`, \`account\`, \`a/c\`, \`iban\`, \`micr\`) or a redacted routing number; bare digit runs survive |`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add Package.swift Sources/CheapshotCore/Redaction/Rule.swift Tests/CheapshotCoreTests README.md
@@ -959,7 +959,7 @@ redact after acct/account/a/c/iban/micr or a redacted ROUTING on the same line."
 - Produces: `RuleFile.load(_ url: URL) throws -> [Rule]` and `RuleFile.parse(_ data: Data) throws -> [Rule]`, `RuleFile.LoadError`. Task 7's runner wires `--rules`.
 - File format, a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b", "caseInsensitive": true}]`. `caseInsensitive` defaults to true. Names are upper-cased for the `[NAME]` marker.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `Tests/CheapshotCoreTests/RuleFileTests.swift`:
 ```swift
@@ -993,12 +993,12 @@ final class RuleFileTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `swift test --filter RuleFileTests 2>&1 | grep -E "error:" | head -3`
 Expected: `cannot find 'RuleFile' in scope`.
 
-- [ ] **Step 3: Write RuleFile.swift**
+- [x] **Step 3: Write RuleFile.swift**
 
 ```swift
 import Foundation
@@ -1038,12 +1038,12 @@ public enum RuleFile {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `swift test 2>&1 | grep -E "error|Executed"`
 Expected: `Executed 14 tests, with 0 failures`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/CheapshotCore/Redaction/RuleFile.swift Tests/CheapshotCoreTests/RuleFileTests.swift
@@ -1064,7 +1064,7 @@ git commit -m "core: RuleFile loads custom redaction rules from JSON"
 
 Behaviour fixed here (audit finding 4): `--min-conf shot.png` is an error instead of swallowing the filename; `--newest 3` means count 3 in the current directory; any leftover `--flag` is "unknown option", exit 2.
 
-- [ ] **Step 1: Add the targets**
+- [x] **Step 1: Add the targets**
 
 `Package.swift` targets become:
 ```swift
@@ -1080,7 +1080,7 @@ Behaviour fixed here (audit finding 4): `--min-conf shot.png` is an error instea
     ]
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `Tests/CheapshotCLITests/OptionsTests.swift`:
 ```swift
@@ -1171,12 +1171,12 @@ final class OptionsTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run: `swift test --filter OptionsTests 2>&1 | grep -E "error:" | head -3`
 Expected: `no such module 'CheapshotCLI'` or `cannot find 'Options'`.
 
-- [ ] **Step 4: Write Options.swift**
+- [x] **Step 4: Write Options.swift**
 
 `Sources/CheapshotCLI/Options.swift`:
 ```swift
@@ -1294,12 +1294,12 @@ public struct Options: Equatable {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `swift test 2>&1 | grep -E "error|failed|Executed"`
 Expected: two `Executed` lines (one per test bundle), both with 0 failures; OptionsTests has 11 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Package.swift Sources/CheapshotCLI/Options.swift Tests/CheapshotCLITests/OptionsTests.swift
@@ -1324,7 +1324,7 @@ git commit -m "cli: strict option parser; unknown flags and missing values are u
 
 Behaviour fixed here (audit findings 3 and 8): a missing or unreadable input adds `{"file","error"}` to `results` and the exit code is 1 if any input failed; `--text -` reads stdin, `--text path` reads a file, both skip Vision and the ledger.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `Tests/CheapshotCLITests/RunnerTests.swift`:
 ```swift
@@ -1443,12 +1443,12 @@ import CheapshotCore
 let cheapshotVersionForTests = cheapshotVersion
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `swift test --filter RunnerTests 2>&1 | grep -E "error:" | head -3`
 Expected: `cannot find 'CLIIO'` / `cannot find 'CLI'`.
 
-- [ ] **Step 3: Write CLIIO.swift and Output.swift**
+- [x] **Step 3: Write CLIIO.swift and Output.swift**
 
 `Sources/CheapshotCLI/CLIIO.swift`:
 ```swift
@@ -1524,7 +1524,7 @@ public enum Output {
 }
 ```
 
-- [ ] **Step 4: Write Runner.swift**
+- [x] **Step 4: Write Runner.swift**
 
 `Sources/CheapshotCLI/Runner.swift`:
 ```swift
@@ -1719,7 +1719,7 @@ struct Main {
 
 Delete `Sources/cheapshot/main.swift` (`git rm Sources/cheapshot/main.swift`). An `@main` type and a `main.swift` cannot coexist.
 
-- [ ] **Step 5: Run tests and the acceptance commands**
+- [x] **Step 5: Run tests and the acceptance commands**
 
 Run: `swift test 2>&1 | grep -E "error|failed|Executed"`
 Expected: 0 failures in both bundles.
@@ -1737,7 +1737,7 @@ echo "CleanShot 2026 @2x.png" | $B --text -
 ```
 Expected: JSON with `"error"` and `"file": "missing.png"`, `exit=1`; `unknown option --bogus`, `exit=2`; `--min-conf: not a number: shot.png`, `exit=2`; `acct [BANK_ACCT]`; `1694563200`; `CleanShot 2026 @2x.png`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A Sources Tests
@@ -1767,7 +1767,7 @@ with captured IO. Video temp dir is deleted by a real defer; CleanShot fallback 
 
 Behaviour fixed here (audit finding 6): append is one `write(2)` on an `O_APPEND` descriptor, so concurrent runs never interleave; the file moves out of `~/.claude/`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `Tests/CheapshotCoreTests/LedgerTests.swift`:
 ```swift
@@ -1911,12 +1911,12 @@ Add to `Tests/CheapshotCLITests/RunnerTests.swift`:
     }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `swift test --filter "LedgerTests|LedgerMigrationTests" 2>&1 | grep -E "error:" | head -3`
 Expected: `cannot find 'Ledger' in scope`.
 
-- [ ] **Step 3: Write Ledger.swift**
+- [x] **Step 3: Write Ledger.swift**
 
 ```swift
 import Foundation
@@ -2043,7 +2043,7 @@ public struct Ledger {
 }
 ```
 
-- [ ] **Step 4: Write LedgerMigration.swift**
+- [x] **Step 4: Write LedgerMigration.swift**
 
 ```swift
 import Foundation
@@ -2081,7 +2081,7 @@ extension Ledger {
 }
 ```
 
-- [ ] **Step 5: Wire the runner and delete the old functions**
+- [x] **Step 5: Wire the runner and delete the old functions**
 
 Delete `ledgerAppend` and `ledgerTotal` (and the `// MARK: - Ledger` block) from `Sources/CheapshotCore/Core.swift`.
 
@@ -2135,7 +2135,7 @@ and the video one with:
         record(LedgerEntry(mode: "video", inputs: frames.count, imageTokens: frameImageTokens, textTokens: tt, redactions: redactions), opts, io)
 ```
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `swift test 2>&1 | grep -E "error|failed|Executed"`
 Expected: 0 failures in both bundles.
@@ -2143,7 +2143,7 @@ Expected: 0 failures in both bundles.
 Run: `CHEAPSHOT_HOME=/tmp/cs-ledger-check .build/debug/cheapshot --ledger --json && ls /tmp/cs-ledger-check 2>&1`
 Expected: JSON with `"runs" : 0` and `"path" : "/tmp/cs-ledger-check/ledger.jsonl"`; the directory does not exist yet (nothing was appended).
 
-- [ ] **Step 7: Update the README Ledger section**
+- [x] **Step 7: Update the README Ledger section**
 
 Replace it with:
 ```markdown
@@ -2161,7 +2161,7 @@ recording a run. Upgrading from 0.4.x: `cheapshot --ledger --migrate` imports th
 `~/.claude/cheapshot-ledger/*.tsv` files once and leaves them in place.
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A Sources Tests README.md
@@ -2185,7 +2185,7 @@ Decisions, from the spec's "Structured output" section:
 - A monospace run is 3 or more consecutive voting lines whose cell widths stay within 8% of the run's median. Short lines inside a run join it without voting.
 - Fenced runs get indentation: `round((line.minX - run.minX) / medianCellWidth)` spaces, capped at 40. Lines outside a run get no indentation: on proportional-font UI (chat, sidebars, right-aligned labels) the same arithmetic produces large spurious indents, and indentation only carries meaning where the font is fixed width. This is a one-line constant to revisit.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `Tests/CheapshotCoreTests/LayoutTests.swift`:
 ```swift
@@ -2284,12 +2284,12 @@ final class LayoutTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `swift test --filter LayoutTests 2>&1 | grep -E "error:" | head -3`
 Expected: `cannot find 'Layout'` / `cannot find type 'OCRLine'`.
 
-- [ ] **Step 3: Write Layout.swift**
+- [x] **Step 3: Write Layout.swift**
 
 ```swift
 import Foundation
@@ -2420,12 +2420,12 @@ public enum Layout {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `swift test --filter LayoutTests 2>&1 | grep -E "error|failed|Executed"`
 Expected: `Executed 9 tests, with 0 failures`. If `testMixedProseThenCode` fails on the run range, check that the two prose lines have cell widths 90/16=5.6 and 140/19=7.4 (24% apart) so they never join the 8 px run.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/CheapshotCore/OCR/Layout.swift Tests/CheapshotCoreTests/LayoutTests.swift
@@ -2452,7 +2452,7 @@ git commit -m "core: layout arithmetic; indentation and code fences from boundin
 
 Spec items implemented: indentation and fences in the plain payload (through `Layout`), monospace regions re-OCR'd with `usesLanguageCorrection = false`, and line-addressable JSON.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `Tests/CheapshotCoreTests/TokensTests.swift`:
 ```swift
@@ -2500,12 +2500,12 @@ Add to `Tests/CheapshotCLITests/RunnerTests.swift`:
 ```
 Add `import ImageIO` and `import CoreGraphics` at the top of that file.
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `swift test --filter TokensTests 2>&1 | grep -E "error:" | head -3`
 Expected: `cannot find 'Tokens' in scope`.
 
-- [ ] **Step 3: Write Tokens.swift and ImageLoader.swift**
+- [x] **Step 3: Write Tokens.swift and ImageLoader.swift**
 
 `Sources/CheapshotCore/Tokens.swift`:
 ```swift
@@ -2544,7 +2544,7 @@ public enum ImageLoader {
 }
 ```
 
-- [ ] **Step 4: Write OCR.swift**
+- [x] **Step 4: Write OCR.swift**
 
 ```swift
 import Foundation
@@ -2619,7 +2619,7 @@ public enum OCR {
 }
 ```
 
-- [ ] **Step 5: Delete the old functions and rewire the runner**
+- [x] **Step 5: Delete the old functions and rewire the runner**
 
 Delete `ocr`, `imageTokens`, `textTokens` from `Sources/CheapshotCore/Core.swift`. What remains there is the video block (`findFFmpeg`, `sceneFrames`, `similarity`, `stamp`); Task 11 removes those and the file.
 
@@ -2665,7 +2665,7 @@ In `Sources/CheapshotCLI/Runner.swift`:
             let raw = Layout.text(rendered)
 ```
 
-- [ ] **Step 6: Run tests and a manual check on a real screenshot**
+- [x] **Step 6: Run tests and a manual check on a real screenshot**
 
 Run: `swift test 2>&1 | grep -E "error|failed|Executed"`
 Expected: 0 failures in both bundles.
@@ -2673,7 +2673,7 @@ Expected: 0 failures in both bundles.
 Manual check (not a test; Vision output drifts): take any terminal screenshot on this Mac and run
 `swift build && .build/debug/cheapshot --no-ledger --json <shot.png> | head -40`. Confirm the plain `text` starts with a fence, lines are in top-to-bottom order, `bbox` values are within the image size, and `n` is 1-based and increasing. If a fenced region comes back with lines out of order or boxes outside the image, the `regionOfInterest` box conversion in `perform` is wrong: Vision reports boxes relative to the region, and the conversion above assumes that.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A Sources Tests
@@ -2700,7 +2700,7 @@ git commit -m "ocr: lines with boxes, code-aware layout, line-addressable --json
 
 Behaviour fixed here (audit finding 5 and the spec's `-fps_mode vfr` bug): the image2 muxer no longer duplicates frames at constant rate, so `-frames:v` caps kept frames instead of input frames; the temp directory is owned by the source and deleted when the stream finishes; the ledger records redactions.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `Tests/CheapshotCoreTests/FFmpegFrameSourceTests.swift`:
 ```swift
@@ -2817,12 +2817,12 @@ final class VideoTranscriberTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `swift test --filter "FFmpegFrameSourceTests|VideoTranscriberTests" 2>&1 | grep -E "error:" | head -3`
 Expected: `cannot find 'FFmpegFrameSource'`.
 
-- [ ] **Step 3: Write FrameSource.swift**
+- [x] **Step 3: Write FrameSource.swift**
 
 ```swift
 import Foundation
@@ -2841,7 +2841,7 @@ public protocol FrameSource {
 }
 ```
 
-- [ ] **Step 4: Write FFmpegFrameSource.swift**
+- [x] **Step 4: Write FFmpegFrameSource.swift**
 
 ```swift
 import Foundation
@@ -2950,7 +2950,7 @@ public struct FFmpegFrameSource: FrameSource {
 }
 ```
 
-- [ ] **Step 5: Write VideoTranscriber.swift**
+- [x] **Step 5: Write VideoTranscriber.swift**
 
 ```swift
 import Foundation
@@ -3019,7 +3019,7 @@ public struct VideoTranscriber {
 }
 ```
 
-- [ ] **Step 6: Delete Core.swift and rewrite runVideo**
+- [x] **Step 6: Delete Core.swift and rewrite runVideo**
 
 `git rm Sources/CheapshotCore/Core.swift` (everything in it now lives in the new files).
 
@@ -3056,7 +3056,7 @@ In `Sources/CheapshotCLI/Runner.swift`, the `.video` case becomes `return await 
     }
 ```
 
-- [ ] **Step 7: Run tests and the acceptance check**
+- [x] **Step 7: Run tests and the acceptance check**
 
 Run: `swift test 2>&1 | grep -E "error|failed|Executed"`
 Expected: 0 failures in both bundles; the ffmpeg tests run (not skipped) on this Mac.
@@ -3070,11 +3070,11 @@ ls "${TMPDIR:-/tmp}" | grep -c '^cheapshot-'
 ```
 Expected: stderr `cheapshot: 3 scene frames, 0 distinct screens ...`, `exit=0`, and `0` leftover directories.
 
-- [ ] **Step 8: README Video paragraph**
+- [x] **Step 8: README Video paragraph**
 
 After "Requires ffmpeg on your PATH." add: "Frames are sampled at 4 per second, static stretches are dropped before scene scoring, and only changed frames are written (`-fps_mode vfr`), so `--max-frames` counts kept frames, not input frames."
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add -A Sources Tests README.md
@@ -3102,11 +3102,11 @@ records redactions for video runs."
 - `--json` result entry for a PDF: `{"file", "source": {"path", "sha256", "pages"}, "pages": [{"n", "lane", "lines": [...]}], "text", "redactions", "image_tokens", "text_tokens"}`. The `lines` objects are the same shape as image lines; text-lane confidence is 1.0 and bbox is in PDF points, top-left origin.
 - Image tokens per page: the 2x render size through `Tokens.image`, for both lanes. That is what an agent pays when `Read` renders the page.
 
-- [ ] **Step 1: Add PDFKit to the linker settings**
+- [x] **Step 1: Add PDFKit to the linker settings**
 
 In `Package.swift`: `linkerSettings: [.linkedFramework("Vision"), .linkedFramework("AppKit"), .linkedFramework("PDFKit")]`.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `Tests/CheapshotCoreTests/PDFSourceTests.swift`:
 ```swift
@@ -3238,12 +3238,12 @@ Add to `Tests/CheapshotCLITests/RunnerTests.swift`:
 ```
 Add `import CoreText` at the top of that file.
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run: `swift test --filter PDFSourceTests 2>&1 | grep -E "error:" | head -3`
 Expected: `cannot find 'PDFSource'`.
 
-- [ ] **Step 4: Write PDFSource.swift**
+- [x] **Step 4: Write PDFSource.swift**
 
 ```swift
 import Foundation
@@ -3362,7 +3362,7 @@ public enum PDFSource {
 }
 ```
 
-- [ ] **Step 5: Add the PDF branch to the runner**
+- [x] **Step 5: Add the PDF branch to the runner**
 
 In `runImages`, right after the `fileExists` guard and before `ImageLoader.load`, insert:
 ```swift
@@ -3390,7 +3390,7 @@ In `runImages`, right after the `fileExists` guard and before `ImageLoader.load`
             }
 ```
 
-- [ ] **Step 6: Run tests and the acceptance check**
+- [x] **Step 6: Run tests and the acceptance check**
 
 Run: `swift test 2>&1 | grep -E "error|failed|Executed"`
 Expected: 0 failures in both bundles. If `testTextLaneReadsLinesWithBoxesAndMonospaceFence` fails on `lines.map(\.text)`, print `page.string` for the test PDF: PDFKit may join or split lines differently from the draw order, and the fix is in `textLines`, not the test.
@@ -3398,7 +3398,7 @@ Expected: 0 failures in both bundles. If `testTextLaneReadsLinesWithBoxesAndMono
 Run: `.build/debug/cheapshot --no-ledger --pages 1-2 <any real pdf> --json | head -30`
 Expected: `"lane"` inside `pages` and a 64-character `"sha256"` under `source`.
 
-- [ ] **Step 7: README PDF section**
+- [x] **Step 7: README PDF section**
 
 After the Video section add:
 ```markdown
@@ -3412,7 +3412,7 @@ can cite a page and route scanned pages for review. Redaction and the ledger app
 images; the ledger counts what an agent would pay to read each page as an image.
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add -A Package.swift Sources Tests README.md
@@ -3429,11 +3429,11 @@ git commit -m "pdf: text lane and scan lane, --pages, source.sha256 and pages[].
 - Modify: `README.md` "Use" and "Redaction" sections
 - Modify: `docs/superpowers/plans/2026-09-12-phase-0-1-core-split-and-audit-fixes.md` (tick every box)
 
-- [ ] **Step 1: Version**
+- [x] **Step 1: Version**
 
 `Sources/CheapshotCore/Version.swift`: `public let cheapshotVersion = "0.5.0-dev"`. Update `testVersionConstant` to expect `"0.5.0-dev"`.
 
-- [ ] **Step 2: README "Use" section**
+- [x] **Step 2: README "Use" section**
 
 Replace the block with:
 ```markdown
@@ -3466,11 +3466,11 @@ Custom rules are a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b
 They run before the built-in rules.
 ```
 
-- [ ] **Step 2b: Accessibility check (spec section "Accessibility")**
+- [x] **Step 2b: Accessibility check (spec section "Accessibility")**
 
 Confirm and fix if needed: every `<img>` and `![...]` in `README.md` has non-empty alt text; `docs/licensing-animated.svg` still contains `prefers-reduced-motion`, `role="img"`, and a `<title>` element (add `<title>Scan for commercial licensing</title>` as the first child of the root `<svg>` if it is missing); `Output.usage()` and every `io.err` message use plain words with no ANSI escapes or box-drawing characters (`grep -rn $'\x1b' Sources` returns nothing).
 
-- [ ] **Step 3: Build, test, acceptance sweep**
+- [x] **Step 3: Build, test, acceptance sweep**
 
 Run:
 ```bash
@@ -3485,9 +3485,9 @@ CHEAPSHOT_HOME=/tmp/cs-accept ./cheapshot --stats --video /tmp/cs-clip.mp4; ls /
 ```
 Expected: `ok: universal, minos 13.0`; 0 failures; `0.5.0-dev`; exit 1 with an error entry; exit 2 twice; the three text lines redacted only on the first; `/tmp/cs-accept/ledger.jsonl` exists with one `"mode":"video"` line; `0` leftover dirs.
 
-- [ ] **Step 4: Tick the plan and commit**
+- [x] **Step 4: Tick the plan and commit**
 
-Change every `- [ ]` in this plan file to `- [x]`.
+Change every `- [x]` in this plan file to `- [x]`.
 
 ```bash
 git add -A

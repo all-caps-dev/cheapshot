@@ -28,16 +28,29 @@ Needs the Xcode command line tools. `swift test` runs the test suite.
 
 ```bash
 cheapshot shot.png                 # OCR one file, redacted
-cheapshot --cleanshot              # newest CleanShot capture
+cheapshot report.pdf               # PDF, text layer or OCR per page
+cheapshot --pages 3-5 report.pdf   # a page range
+cheapshot --cleanshot              # newest CleanShot capture (falls back to ~/Desktop)
 cheapshot --cleanshot 3            # newest three
 cheapshot --newest ~/Desktop 2     # newest two in any folder
 cheapshot --raw shot.png           # skip redaction
-cheapshot --json shot.png          # structured output with redaction counts
+cheapshot --json shot.png          # structured output: text, lines with boxes, redaction counts
 cheapshot --stats shot.png         # token savings to stderr
+cheapshot --rules my-rules.json shot.png   # extra redaction rules
+cat notes.txt | cheapshot --text - # redact text with no OCR at all
 
 cheapshot --video screen.mp4       # screen recording to a timestamped transcript
 cheapshot --ledger                 # cumulative savings across every run
 ```
+
+Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 usage error.
+
+Screenshots of code keep their shape: lines in a fixed-width font are wrapped in a code fence
+and their indentation is rebuilt from the bounding boxes, and those regions are recognized with
+language correction off so hashes and tokens are not "corrected" into words.
+
+Custom rules are a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b", "caseInsensitive": true}]`.
+They run before the built-in rules.
 
 ## Redaction
 
@@ -121,7 +134,9 @@ read through PDFKit (the text lane, free, fonts kept so code is fenced); pages w
 rendered at 2x and OCR'd like a screenshot (the scan lane). The plain output separates pages
 with `--- page N ---`. `--json` adds `source.sha256` and `pages[].lane` so a downstream tool
 can cite a page and route scanned pages for review. Redaction and the ledger apply as for
-images; the ledger counts what an agent would pay to read each page as an image.
+images; the ledger counts what an agent would pay to read each page as an image. In the text
+lane a line's `bbox` is in PDF points in the page's own unrotated coordinate space, while the
+page `width` and `height` in `--json` are the rendered pixel size after rotation.
 
 ## Ledger
 

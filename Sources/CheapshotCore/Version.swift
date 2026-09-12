@@ -1,1 +1,1 @@
-public let cheapshotVersion = "0.4.1"
+public let cheapshotVersion = "0.5.0-dev"
