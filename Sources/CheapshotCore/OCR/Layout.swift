@@ -6,7 +6,18 @@ public struct OCRLine: Equatable {
     public var text: String
     public var bbox: CGRect
     public var confidence: Float
-    public init(text: String, bbox: CGRect, confidence: Float) { self.text = text; self.bbox = bbox; self.confidence = confidence }
+    /// Median per-word cell width in pixels, measured from Vision's word boxes. Nil when the
+    /// line had fewer than three measurable words, or when the source has no word boxes at all
+    /// (a PDF page, a synthetic fixture).
+    public var cellWidth: CGFloat?
+    /// Coefficient of variation of those per-word cell widths; 0 is perfectly fixed-width.
+    /// Nil under the same conditions as `cellWidth`.
+    public var cellVariation: CGFloat?
+    public init(text: String, bbox: CGRect, confidence: Float,
+                cellWidth: CGFloat? = nil, cellVariation: CGFloat? = nil) {
+        self.text = text; self.bbox = bbox; self.confidence = confidence
+        self.cellWidth = cellWidth; self.cellVariation = cellVariation
+    }
 }
 
 public struct OCRResult: Equatable {
@@ -39,14 +50,32 @@ public enum Layout {
     /// near 8% fences whole paragraphs. Monospace text on tight boxes stays under 2%.
     /// Tuned separately against real captures; see the layout tuning card.
     public static let monospaceTolerance: CGFloat = 0.03
+    /// How much a single line's own words may disagree before the line stops being evidence of
+    /// a fixed-width font. Measured per line as the coefficient of variation of its per-word
+    /// cell widths: on a real capture, monospace lines land at 1 to 8% and proportional lines
+    /// at 9 to 21%. A line above this does not vote and cannot start a run.
+    public static let maxWordVariation: CGFloat = 0.08
     public static let minimumVotingLines = 3
     public static let minimumVotingChars = 4
     public static let maxIndent = 40
 
+    /// The line's per-character cell width. Vision's word boxes give a far better estimate than
+    /// the whole-line width over the string length, which is skewed by inserted spaces,
+    /// corrected tokens and ink-fit boxes, so the measured field wins whenever it is present.
     public static func cellWidth(_ line: OCRLine) -> CGFloat? {
         let n = line.text.count
-        guard n >= minimumVotingChars, line.bbox.width > 0 else { return nil }
+        guard n >= minimumVotingChars else { return nil }
+        if let measured = line.cellWidth, measured > 0 { return measured }
+        guard line.bbox.width > 0 else { return nil }
         return line.bbox.width / CGFloat(n)
+    }
+
+    /// The cell width a line contributes to a run's verdict, or nil if it is not evidence:
+    /// too short to measure, or its own words disagree by more than `maxWordVariation`.
+    /// A line with no word-box measurement at all keeps the pre-measurement behaviour.
+    static func vote(_ line: OCRLine) -> CGFloat? {
+        if let v = line.cellVariation, v > maxWordVariation { return nil }
+        return cellWidth(line)
     }
 
     /// The typical line height, used to quantize rows. Falls back to 1 for empty or degenerate input.
@@ -97,7 +126,7 @@ public enum Layout {
 
     /// Runs of consecutive lines (in the given order) whose voting lines' cell widths stay within
     /// `monospaceTolerance`. A run needs at least `minimumVotingLines` voters, spans from its
-    /// first voter to its last, and then absorbs the short lines trailing it only while they sit
+    /// first voter to its last, and then absorbs the non-voting lines trailing it only while they sit
     /// horizontally inside the block: an aligned closing brace is code, a far-left status label
     /// or gutter digit is not, and letting one in would drag the run's left edge with it.
     public static func monospaceRuns(_ lines: [OCRLine]) -> [Range<Int>] {
@@ -113,7 +142,7 @@ public enum Layout {
             let cell = median(widths)
             let minX = voterMinX.min() ?? 0
             var end = lastVoter + 1
-            while end < limit, cellWidth(lines[end]) == nil, lines[end].bbox.minX >= minX - 0.5 * cell {
+            while end < limit, vote(lines[end]) == nil, lines[end].bbox.minX >= minX - 0.5 * cell {
                 end += 1
             }
             runs.append(start..<end)
@@ -124,7 +153,7 @@ public enum Layout {
         }
 
         for (i, line) in lines.enumerated() {
-            guard let cw = cellWidth(line) else { continue }          // short line: may join, does not vote
+            guard let cw = vote(line) else { continue }               // no evidence: may join, does not vote
             if widths.isEmpty {
                 // Drop leading short lines from the run: start at the first voter.
                 open(at: i, cw, line.bbox.minX)
@@ -153,9 +182,13 @@ public enum Layout {
             RenderedLine(n: i + 1, text: l.text, bbox: l.bbox, confidence: l.confidence, fenced: false)
         }
         for run in runs where run.lowerBound >= 0 && run.upperBound <= s.count {
-            // Only voting lines set the cell width and the left edge; a short line inside the run
-            // that starts further left than the block would otherwise shift every indent right.
-            let voting = run.compactMap { i in cellWidth(s[i]).map { (i, $0) } }
+            // Only voting lines set the cell width and the left edge; a non-voting line inside the
+            // run that starts further left than the block would otherwise shift every indent right.
+            var voting = run.compactMap { i in vote(s[i]).map { (i, $0) } }
+            // A caller that asked for this run gets it fenced even if none of the lines it holds
+            // now is evidence on its own: the second OCR pass rewrites a run's text, and the
+            // verdict was taken once, on the first pass, deliberately.
+            if voting.isEmpty { voting = run.compactMap { i in cellWidth(s[i]).map { (i, $0) } } }
             guard !voting.isEmpty else { continue }
             let cell = median(voting.map(\.1))
             let minX = voting.map { s[$0.0].bbox.minX }.min() ?? 0

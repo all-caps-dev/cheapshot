@@ -65,9 +65,46 @@ public enum OCR {
             // non-finite value. Vision never gets to feed one in.
             let bbox = pixels(box, width: image.width, height: image.height)
             guard bbox.origin.x.isFinite, bbox.origin.y.isFinite, bbox.width.isFinite, bbox.height.isFinite else { continue }
-            lines.append(OCRLine(text: top.string, bbox: bbox, confidence: top.confidence))
+            let cells = wordCells(top, lineWidth: bbox.width, roi: roi, width: image.width, height: image.height)
+            lines.append(OCRLine(text: top.string, bbox: bbox, confidence: top.confidence,
+                                 cellWidth: cells?.width, cellVariation: cells?.variation))
         }
         return lines
+    }
+
+    /// The per-character cell width measured from Vision's word boxes, and how much those words
+    /// disagree. `boundingBox(for:)` resolves at word granularity, which is the only estimate
+    /// that separates a fixed-width font from prose: the whole-line width over the string length
+    /// is skewed by inserted spaces, corrected tokens and ink-fit boxes, and lands in the same
+    /// range for both. Words under 3 characters are too short for the division to mean anything,
+    /// and a box wider than 90% of the line is Vision handing back the line box for a range it
+    /// could not resolve. Fewer than three usable words is no evidence at all.
+    static func wordCells(_ top: VNRecognizedText, lineWidth: CGFloat, roi: CGRect?,
+                          width: Int, height: Int) -> (width: CGFloat, variation: CGFloat)? {
+        let s = top.string
+        var cells: [CGFloat] = []
+        var i = s.startIndex
+        while i < s.endIndex {
+            guard !s[i].isWhitespace else { i = s.index(after: i); continue }
+            var j = i
+            while j < s.endIndex, !s[j].isWhitespace { j = s.index(after: j) }
+            defer { i = j }
+            let n = s.distance(from: i, to: j)
+            guard n >= 3, let word = try? top.boundingBox(for: i..<j) else { continue }
+            var box = word.boundingBox
+            if let roi = roi {
+                box = CGRect(x: roi.minX + box.minX * roi.width, y: roi.minY + box.minY * roi.height,
+                             width: box.width * roi.width, height: box.height * roi.height)
+            }
+            let w = box.width * CGFloat(width)
+            guard w.isFinite, w > 0, w <= 0.9 * lineWidth else { continue }
+            cells.append(w / CGFloat(n))
+        }
+        guard cells.count >= 3 else { return nil }
+        let mean = cells.reduce(0, +) / CGFloat(cells.count)
+        guard mean > 0 else { return nil }
+        let variance = cells.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / CGFloat(cells.count)
+        return (Layout.median(cells), variance.squareRoot() / mean)
     }
 
     /// Vision: normalized, bottom-left origin. Ours: pixels, top-left origin.

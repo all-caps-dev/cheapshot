@@ -239,4 +239,62 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(r.map(\.n), [1, 2, 3, 4, 5])
         XCTAssertEqual(r[2].text, "  return 1", "indent still comes from the run's own cell width")
     }
+
+    // MARK: - Task 10b: monospace evidence from Vision word boxes
+
+    /// A line carrying word-box evidence: `cell` is both the box's width/count cell and the
+    /// measured median per-word cell, `cv` the coefficient of variation across its words.
+    func measured(_ text: String, x: CGFloat, y: CGFloat, cell: CGFloat = 8, cv: CGFloat) -> OCRLine {
+        OCRLine(text: text, bbox: CGRect(x: x, y: y, width: cell * CGFloat(text.count), height: 16),
+                confidence: 0.95, cellWidth: cell, cellVariation: cv)
+    }
+
+    func testWordVariationVetoesAVote() {
+        let text = String(repeating: "a", count: 20)
+        func varying(_ cvs: [CGFloat]) -> [OCRLine] {
+            cvs.enumerated().map { i, cv in measured(text, x: 0, y: CGFloat(i) * 16, cv: cv) }
+        }
+        XCTAssertEqual(Layout.monospaceRuns(varying([0.02, 0.20, 0.02])), [],
+                       "a line whose words vary too much must not vote, leaving two voters")
+        XCTAssertEqual(Layout.monospaceRuns(varying([0.02, 0.05, 0.02])), [0..<3])
+    }
+
+    func testCellWidthFieldWins() {
+        let text = String(repeating: "a", count: 20)
+        let box = CGRect(x: 0, y: 0, width: 200, height: 16)
+        XCTAssertEqual(Layout.cellWidth(OCRLine(text: text, bbox: box, confidence: 1, cellWidth: 8.0)), 8.0,
+                       "the measured per-word cell beats the naive width/count estimate")
+        XCTAssertEqual(Layout.cellWidth(OCRLine(text: text, bbox: box, confidence: 1)), 10)
+        XCTAssertNil(Layout.cellWidth(OCRLine(text: "ab", bbox: box, confidence: 1, cellWidth: 8.0)),
+                     "lines under 4 chars still do not vote")
+    }
+
+    func testProseWithHighVariationNeverFences() {
+        // Naive cells within 1.3% of each other: tight enough for any tolerance on its own.
+        let cells: [CGFloat] = [6.40, 6.44, 6.48, 6.45, 6.42]
+        let cvs: [CGFloat] = [0.12, 0.15, 0.18, 0.13, 0.16]
+        let text = String(repeating: "a", count: 60)
+        let lines: [OCRLine] = (0..<5).map { (i: Int) -> OCRLine in
+            let y: CGFloat = CGFloat(i) * 16
+            let w: CGFloat = cells[i] * 60
+            let box = CGRect(x: CGFloat(0), y: y, width: w, height: CGFloat(16))
+            return OCRLine(text: text, bbox: box, confidence: 1, cellWidth: cells[i], cellVariation: cvs[i])
+        }
+        XCTAssertEqual(Layout.monospaceRuns(lines), [], "proportional words must not form a run")
+        XCTAssertFalse(Layout.text(Layout.render(lines)).contains("```"), "prose was fenced")
+    }
+
+    func testNilFieldsKeepOldBehaviour() {
+        let lines = [
+            mono("def main():", x: 100, y: 0),
+            mono("x = compute()", x: 132, y: 16),      // 4 cells in
+            mono("return x", x: 132, y: 32),
+            mono("print(main())", x: 100, y: 48),
+        ]
+        XCTAssertTrue(lines.allSatisfy { $0.cellWidth == nil && $0.cellVariation == nil })
+        let r = Layout.render(lines)
+        XCTAssertEqual(r.map(\.text), ["def main():", "    x = compute()", "    return x", "print(main())"])
+        XCTAssertTrue(r.allSatisfy(\.fenced))
+        XCTAssertEqual(Layout.text(r), "```\ndef main():\n    x = compute()\n    return x\nprint(main())\n```")
+    }
 }
