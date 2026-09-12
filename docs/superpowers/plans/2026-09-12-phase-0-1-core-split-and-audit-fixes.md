@@ -3466,6 +3466,10 @@ Custom rules are a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b
 They run before the built-in rules.
 ```
 
+- [ ] **Step 2b: Accessibility check (spec section "Accessibility")**
+
+Confirm and fix if needed: every `<img>` and `![...]` in `README.md` has non-empty alt text; `docs/licensing-animated.svg` still contains `prefers-reduced-motion`, `role="img"`, and a `<title>` element (add `<title>Scan for commercial licensing</title>` as the first child of the root `<svg>` if it is missing); `Output.usage()` and every `io.err` message use plain words with no ANSI escapes or box-drawing characters (`grep -rn $'\x1b' Sources` returns nothing).
+
 - [ ] **Step 3: Build, test, acceptance sweep**
 
 Run:

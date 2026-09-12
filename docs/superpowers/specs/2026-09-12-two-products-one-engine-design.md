@@ -225,6 +225,27 @@ Dropping a PDF on the menu bar icon behaves like dropping an image. Free tier, s
 
 Docling, chunking, embeddings, vector or keyword search, retrieval tools, orchestration, object storage. If Ryan builds the knowledge base, cheapshot's `--json` is its input for Mac-side documents and screenshots, and Docling handles the rest. Do not add a `cheapshot index` or `cheapshot search` command.
 
+## Accessibility
+
+Added 2026-09-12 at Ryan's request. Accessibility is a requirement in every phase, not a polish item.
+
+### CLI and docs (Phase 1 onward)
+
+1. Output is plain text. No ANSI colour, no box-drawing characters, no spinners, no cursor tricks. Screen readers and agents both read the same bytes. Meaning never rides on colour alone; status lines say "saved 1496 tokens" in words.
+2. Errors go to stderr as one plain sentence that names the file and the cause, and exit codes carry the outcome (0, 1, 2) so a script or a screen-reader user does not have to parse prose.
+3. `--help` is a short, left-aligned list with consistent two-column alignment, readable line by line. No tables that only make sense visually.
+4. Code fences and rebuilt indentation (Structured output) are plain characters, so they read correctly in a terminal screen reader and in an agent's context.
+5. README: every image carries alt text that says what the image is for. `docs/licensing-animated.svg` keeps `role="img"`, a `<title>`, and its `prefers-reduced-motion` branch so the animation stops for users who ask the OS to reduce motion. Any future badge or chart ships with a text equivalent next to it.
+
+### App (Phase 4)
+
+1. VoiceOver: every menu item, toggle, button, and chart element has an accessibility label and, where the visual is a number, an accessibility value. The menu bar icon has a label that includes the current state ("Cheapshot, watching Desktop").
+2. Keyboard: everything reachable by keyboard alone, including the first-launch folder picker flow, the ledger window, and the rules editor. The clipboard guard hotkey is rebindable and the default avoids conflicts with VoiceOver's own bindings.
+3. The ledger chart has a table view alternative with the same numbers, and a one-sentence summary ("41,200 tokens saved this week") that VoiceOver reads first.
+4. Notifications carry the useful text (token count, redaction count), not only a title, so they are meaningful when read aloud.
+5. Respects Reduce Motion, Increase Contrast, and Reduce Transparency. Dynamic Type where SwiftUI supports it on macOS. Colour is never the only carrier of state; the paid and free tiers are distinguished by words.
+6. App Store listing states these commitments in the accessibility section once the app ships.
+
 ## Build order, revised
 
 Phase 0, half a day: create `Package.swift`, move `cheapshot.swift` into `Sources/CheapshotCore` and `Sources/cheapshot`, no behaviour change, commit. Homebrew formula becomes `swift build -c release`.
