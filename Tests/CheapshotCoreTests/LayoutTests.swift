@@ -90,4 +90,129 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(Layout.render([]), [])
         XCTAssertEqual(Layout.text([]), "")
     }
+
+    // MARK: - Fix round 1: proportional prose, sort order, trailing short lines
+
+    /// A proportional line: `cell` is the font's measured average character width.
+    func prose(_ cell: CGFloat, x: CGFloat, y: CGFloat, chars: Int = 64) -> OCRLine {
+        OCRLine(text: String(repeating: "a", count: chars),
+                bbox: CGRect(x: x, y: y, width: cell * CGFloat(chars), height: 16),
+                confidence: 1)
+    }
+
+    /// Per-line cell widths measured with CoreText at 14pt in a 460pt column. Long prose lines
+    /// converge on the font's average character width, so a loose tolerance fences paragraphs.
+    func column(_ cells: [CGFloat], x: CGFloat = 0) -> [OCRLine] {
+        cells.enumerated().map { i, c in prose(c, x: x, y: CGFloat(i) * 16) }
+    }
+
+    func testRealProseIsNotFenced() {
+        for (font, cells) in [("Helvetica", [6.48, 6.22, 6.25, 6.03, 6.10] as [CGFloat]),
+                              ("SF", [6.76, 6.55, 6.37, 6.59, 6.44, 6.17]),
+                              ("Times", [5.93, 5.58, 5.70, 5.41, 5.72])] {
+            let lines = column(cells)
+            XCTAssertEqual(Layout.monospaceRuns(lines), [], "\(font) prose was read as a monospace run")
+            XCTAssertFalse(Layout.text(Layout.render(lines)).contains("```"), "\(font) prose was fenced")
+        }
+    }
+
+    func testStaggeredChatLinesAreNotIndented() {
+        let cells: [CGFloat] = [6.11, 6.56, 6.20]
+        let xs: [CGFloat] = [320, 360, 330]
+        let lines = (0..<3).map { prose(cells[$0], x: xs[$0], y: CGFloat($0) * 16) }
+        let r = Layout.render(lines)
+        XCTAssertFalse(r.contains(where: \.fenced))
+        XCTAssertFalse(r.contains { $0.text.hasPrefix(" ") }, "proportional UI text got spurious indentation")
+        XCTAssertEqual(r.map(\.text), lines.map(\.text))
+    }
+
+    /// Deterministic shuffle, so a failure is reproducible.
+    struct LCG: RandomNumberGenerator {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            return state
+        }
+    }
+
+    func testSortedIsATotalOrderOnDenseInput() {
+        // Rows 7 px apart with a 16 px line height: under half a line, which the old
+        // tolerance-based comparator could not order transitively.
+        let lines = (0..<200).map { i in
+            OCRLine(text: "line \(i)",
+                    bbox: CGRect(x: 1000 - CGFloat(i), y: CGFloat(i) * 7, width: 48, height: 16),
+                    confidence: 1)
+        }
+        var outputs: [[CGFloat]] = []
+        for seed in [1, 99, 123_456] as [UInt64] {
+            var g = LCG(state: seed)
+            let s = Layout.sorted(lines.shuffled(using: &g))
+            let rows = s.map { Int(($0.bbox.minY / 16).rounded()) }
+            XCTAssertEqual(rows, rows.sorted(), "quantized rows came back out of order for seed \(seed)")
+            for (a, b) in zip(s, s.dropFirst()) {
+                XCTAssertGreaterThanOrEqual(b.bbox.minY, a.bbox.minY - 16, "dropped more than one row backwards")
+            }
+            outputs.append(s.map(\.bbox.minY))
+        }
+        XCTAssertEqual(outputs[0], outputs[1], "sort order depends on input order")
+        XCTAssertEqual(outputs[1], outputs[2], "sort order depends on input order")
+    }
+
+    func testTwoColumnsOffsetByHalfALine() {
+        let pitch: CGFloat = 18
+        let a = [0, 18, 36, 54].map { y in
+            OCRLine(text: "A\(y)", bbox: CGRect(x: 0, y: CGFloat(y), width: 120, height: pitch), confidence: 1)
+        }
+        let b = [9, 27, 45].map { y in
+            OCRLine(text: "B\(y)", bbox: CGRect(x: 400, y: CGFloat(y), width: 120, height: pitch), confidence: 1)
+        }
+        let s = Layout.sorted(a + b)
+        let rows = s.map { Int(($0.bbox.minY / pitch).rounded()) }
+        XCTAssertEqual(rows, rows.sorted(), "the two columns did not group by quantized row")
+        for i in s.indices {
+            for j in s.indices where j > i {
+                XCTAssertGreaterThanOrEqual(s[j].bbox.minY, s[i].bbox.minY - pitch,
+                                            "line \(s[j].text) came more than one row above \(s[i].text)")
+            }
+        }
+    }
+
+    func testTrailingFarLeftLabelStaysOutOfTheRun() {
+        let lines = [
+            mono("let a = compute()", x: 200, y: 0),
+            mono("let b = a + 1", x: 200, y: 16),
+            mono("return b", x: 200, y: 32),
+            mono("OK", x: 0, y: 48),
+        ]
+        XCTAssertEqual(Layout.monospaceRuns(lines), [0..<3])
+        let r = Layout.render(lines)
+        XCTAssertEqual(r.map(\.text), ["let a = compute()", "let b = a + 1", "return b", "OK"])
+        XCTAssertEqual(r.map(\.fenced), [true, true, true, false])
+    }
+
+    func testTrailingAlignedBraceJoinsTheRun() {
+        let lines = [
+            mono("func f() {", x: 200, y: 0),
+            mono("let x = 1", x: 200, y: 16),
+            mono("return x", x: 200, y: 32),
+            mono("}", x: 200, y: 48),
+        ]
+        XCTAssertEqual(Layout.monospaceRuns(lines), [0..<4])
+        let r = Layout.render(lines)
+        XCTAssertTrue(r.allSatisfy(\.fenced))
+        XCTAssertEqual(r.map(\.text), ["func f() {", "let x = 1", "return x", "}"])
+    }
+
+    func testGutterDigitsDoNotShiftIndent() {
+        var lines: [OCRLine] = []
+        for (i, code) in ["let a = 1", "let b = 2", "let c = 3"].enumerated() {
+            let y = CGFloat(i) * 16
+            lines.append(mono("\(i + 1)", x: 0, y: y))
+            lines.append(mono(code, x: 30, y: y))
+        }
+        let r = Layout.render(lines)
+        let code = r.filter { $0.text.contains("let") }
+        XCTAssertEqual(code.map(\.text), ["let a = 1", "let b = 2", "let c = 3"])
+        XCTAssertFalse(r.contains { $0.text.hasPrefix(" ") }, "gutter digits shifted the block")
+    }
 }

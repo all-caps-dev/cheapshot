@@ -32,7 +32,13 @@ public struct RenderedLine: Equatable {
 /// has a constant per-character width, so runs of lines with the same cell width are code,
 /// and their x offset divided by the cell width is the indentation.
 public enum Layout {
-    public static let monospaceTolerance: CGFloat = 0.08
+    /// How tightly a run's cell widths must agree, measured as the spread of the run's voting
+    /// lines (max minus min) over their median. Long proportional prose lines converge on the
+    /// font's average character width: measured with CoreText at 14pt in a 460pt column,
+    /// Helvetica spreads 7.4%, Times 9.5% and SF 9.5% across five or six lines, so anything
+    /// near 8% fences whole paragraphs. Monospace text on tight boxes stays under 2%.
+    /// Task 10 retunes this against a real terminal screenshot if fences start vanishing.
+    public static let monospaceTolerance: CGFloat = 0.03
     public static let minimumVotingLines = 3
     public static let minimumVotingChars = 4
     public static let maxIndent = 40
@@ -43,13 +49,27 @@ public enum Layout {
         return line.bbox.width / CGFloat(n)
     }
 
-    /// Top to bottom, then left to right. Two lines whose tops are within half a line height
-    /// of each other are on the same row.
+    /// The typical line height, used to quantize rows. Falls back to 1 for empty or degenerate input.
+    static func rowPitch(_ lines: [OCRLine]) -> CGFloat {
+        let heights = lines.map(\.bbox.height).filter { $0 > 0 }
+        guard !heights.isEmpty else { return 1 }
+        let m = median(heights)
+        return m > 0 ? m : 1
+    }
+
+    /// Top to bottom, then left to right. Rows are quantized to a multiple of the median line
+    /// height first, so the comparison is a total order on `(row, minX, minY)`. Comparing raw
+    /// `minY` against a tolerance is not transitive (a and b within half a line, b and c within
+    /// half a line, a and c not), which lets the result depend on the input order: dense pages
+    /// came back reversed and columns offset by half a line interleaved wrongly.
     static func sorted(_ lines: [OCRLine]) -> [OCRLine] {
-        lines.sorted { a, b in
-            let tolerance = min(a.bbox.height, b.bbox.height) * 0.5
-            if abs(a.bbox.minY - b.bbox.minY) > tolerance { return a.bbox.minY < b.bbox.minY }
-            return a.bbox.minX < b.bbox.minX
+        let pitch = rowPitch(lines)
+        return lines.sorted { a, b in
+            let ra = Int((a.bbox.minY / pitch).rounded())
+            let rb = Int((b.bbox.minY / pitch).rounded())
+            if ra != rb { return ra < rb }
+            if a.bbox.minX != b.bbox.minX { return a.bbox.minX < b.bbox.minX }
+            return a.bbox.minY < b.bbox.minY
         }
     }
 
@@ -58,37 +78,58 @@ public enum Layout {
         return s.count % 2 == 1 ? s[s.count / 2] : (s[s.count / 2 - 1] + s[s.count / 2]) / 2
     }
 
+    /// True when a set of cell widths is tight enough to be one fixed-width font: the whole
+    /// spread, not just the newest line against the running median, has to fit the tolerance.
+    /// Comparing only against the running median lets a run drift arbitrarily far over many
+    /// lines, which is how proportional paragraphs slipped through.
+    static func isTight(_ widths: [CGFloat]) -> Bool {
+        guard let lo = widths.min(), let hi = widths.max() else { return true }
+        let m = median(widths)
+        guard m > 0 else { return false }
+        return (hi - lo) / m <= monospaceTolerance
+    }
+
     /// Runs of consecutive lines (in the given order) whose voting lines' cell widths stay within
-    /// `monospaceTolerance` of the run's median. Returns runs with at least `minimumVotingLines` voters.
+    /// `monospaceTolerance`. A run needs at least `minimumVotingLines` voters, spans from its
+    /// first voter to its last, and then absorbs the short lines trailing it only while they sit
+    /// horizontally inside the block: an aligned closing brace is code, a far-left status label
+    /// or gutter digit is not, and letting one in would drag the run's left edge with it.
     public static func monospaceRuns(_ lines: [OCRLine]) -> [Range<Int>] {
         var runs: [Range<Int>] = []
-        var start = 0
-        var voters: [CGFloat] = []
+        var start = 0                    // index of the run's first voter
+        var lastVoter = -1               // index of the run's last voter
+        var widths: [CGFloat] = []
+        var voterMinX: [CGFloat] = []
 
-        func close(at end: Int) {
-            if voters.count >= minimumVotingLines { runs.append(start..<end) }
-            voters = []
+        func close(upTo limit: Int) {
+            defer { widths = []; voterMinX = []; lastVoter = -1 }
+            guard widths.count >= minimumVotingLines, lastVoter >= start else { return }
+            let cell = median(widths)
+            let minX = voterMinX.min() ?? 0
+            var end = lastVoter + 1
+            while end < limit, cellWidth(lines[end]) == nil, lines[end].bbox.minX >= minX - 0.5 * cell {
+                end += 1
+            }
+            runs.append(start..<end)
+        }
+
+        func open(at i: Int, _ cw: CGFloat, _ minX: CGFloat) {
+            start = i; lastVoter = i; widths = [cw]; voterMinX = [minX]
         }
 
         for (i, line) in lines.enumerated() {
-            guard let cw = cellWidth(line) else { continue }          // short line: joins, does not vote
-            if voters.isEmpty {
+            guard let cw = cellWidth(line) else { continue }          // short line: may join, does not vote
+            if widths.isEmpty {
                 // Drop leading short lines from the run: start at the first voter.
-                start = i
-                voters = [cw]
-                continue
-            }
-            let m = median(voters)
-            if abs(cw - m) / m <= monospaceTolerance {
-                voters.append(cw)
+                open(at: i, cw, line.bbox.minX)
+            } else if isTight(widths + [cw]) {
+                widths.append(cw); voterMinX.append(line.bbox.minX); lastVoter = i
             } else {
-                close(at: i)
-                start = i
-                voters = [cw]
+                close(upTo: i)
+                open(at: i, cw, line.bbox.minX)
             }
         }
-        close(at: lines.count)
-        // Trim trailing short lines only if they come after the last voter? They stay: a closing "}" is code.
+        close(upTo: lines.count)
         return runs
     }
 
@@ -98,10 +139,12 @@ public enum Layout {
             RenderedLine(n: i + 1, text: l.text, bbox: l.bbox, confidence: l.confidence, fenced: false)
         }
         for run in monospaceRuns(s) {
-            let cws = run.compactMap { cellWidth(s[$0]) }
-            guard !cws.isEmpty else { continue }
-            let cell = median(cws)
-            let minX = run.map { s[$0].bbox.minX }.min() ?? 0
+            // Only voting lines set the cell width and the left edge; a short line inside the run
+            // that starts further left than the block would otherwise shift every indent right.
+            let voting = run.compactMap { i in cellWidth(s[i]).map { (i, $0) } }
+            guard !voting.isEmpty else { continue }
+            let cell = median(voting.map(\.1))
+            let minX = voting.map { s[$0.0].bbox.minX }.min() ?? 0
             for i in run {
                 let indent = min(maxIndent, max(0, Int(((s[i].bbox.minX - minX) / cell).rounded())))
                 out[i].text = String(repeating: " ", count: indent) + s[i].text
