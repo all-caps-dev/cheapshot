@@ -14,7 +14,7 @@ Written 2026-09-12 from docs/product-brief.md plus four decisions Ryan made in t
 ```
 all-caps-dev/cheapshot (public, MIT)
   Package.swift
-  Sources/CheapshotCore/     OCR, redaction, rules, ledger, tokens, video
+  Sources/CheapshotCore/     OCR, redaction, rules, ledger, tokens, video, pdf
   Sources/cheapshot/         thin CLI: arg parsing, output formatting, exit codes
   Tests/CheapshotCoreTests/  redaction golden files, ledger, arg parsing
   plugin/                    Claude Code plugin (hook, SKILL.md, MCP config)
@@ -37,6 +37,7 @@ Core knows nothing about licenses, tiers, or the App Store. Every feature is cal
 | `Rule` | name, pattern, options, optional `validator` closure | Luhn, ABA, and `looksLikeSecret` become validators on the rule instead of string checks inside the loop. |
 | `RuleFile.load(url) -> [Rule]` | Reads a JSON array of `{name, pattern, caseInsensitive}` | CLI: `--rules path`. App: the rules editor writes the same file. |
 | `OCR.recognize(image: CGImage, minConfidence: Float, languageCorrection: Bool) -> OCRResult` | Wraps `VNRecognizeTextRequest` | Takes `CGImage`, not a path, so the app can pass clipboard images. `OCRResult` carries lines with confidence and bounding boxes. |
+| `PDFSource.pages(of: URL, range: ClosedRange<Int>?) -> [PDFPageResult]` | PDFKit text lane, Vision scan lane per page | Returns lane, lines with bbox, and the rendered image size for the ledger. See "PDF input". |
 | `Tokens.image(width:height:)` and `Tokens.text(_:)` | Today's estimators | Unchanged. |
 | `Ledger(at: URL)` with `append(Entry)` and `summary(days:) -> Summary` | JSONL, one line per run, `O_APPEND` single write | Location rule below. |
 | `FrameSource` protocol, `FFmpegFrameSource`, `AVFoundationFrameSource` | Yield `(timestamp, CGImage)` for a video | See "Video". |
@@ -70,7 +71,7 @@ Install: `claude plugin marketplace add all-caps-dev/cheapshot` then `claude plu
 
 Hook behaviour:
 
-1. Fires on `Read` where `file_path` ends in png, jpg, jpeg, webp, gif.
+1. Fires on `Read` where `file_path` ends in png, jpg, jpeg, webp, gif, or pdf (PDF rules in the PDF input section).
 2. If `CHEAPSHOT_PASSTHROUGH=1`, or `cheapshot` is not on PATH, or the path is on the one-shot allowlist, exit 0 with no output so the Read proceeds. When the binary is missing, print one stderr line with the brew command, once per session (marker file in `$TMPDIR`).
 3. Otherwise run `cheapshot --json --stats <path>`, return `permissionDecision: deny` with `permissionDecisionReason` = redacted text plus one line: `cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, run: cheapshot allow <path>, then Read again.`
 4. Print the same savings line to stderr so the user sees it.
@@ -185,15 +186,53 @@ Items 1 to 3 add about one day to Phase 1 and become the fourth README edge afte
 
 Reading-order and multi-column solvers, formula recognition, header and footer classifiers trained on paper, DocTags, any VLM parser (kills the sandbox and the no-GPU premise), `VNDetectDocumentSegmentationRequest` (finds paper edges only), and HTML or JSON as the primary payload.
 
+## PDF input
+
+Added 2026-09-12 after Ryan pasted a Docling-based knowledge-base architecture (saved as `docs/research/2026-09-12-pdf-pipeline-notes.md`). That architecture is a Python pipeline with a parser, chunker, embeddings, vector and keyword search, object storage, and an orchestrator. None of it fits inside a sandboxed Swift engine, and the earlier research already ruled out VLM parsers for the same reason. So the split is: **cheapshot is the on-Mac lane that turns a PDF into redacted, page-addressed text; the knowledge base is a separate project that consumes that output.** Docling stays the right choice for that project on the Proxmox side.
+
+### What cheapshot does with a PDF
+
+`cheapshot report.pdf` and `cheapshot --pages 3-5 report.pdf`. Two lanes, chosen per page:
+
+1. **Text lane.** `PDFKit` `PDFPage.attributedString`. Native text with fonts, so monospace detection and indentation come for free. Near-zero cost, macOS 10.4+, sandbox-safe.
+2. **Scan lane.** If a page's text layer is under 20 characters, render the page at 2x with `PDFPage.draw(with:to:)` into a `CGImage` and run the same Vision OCR path as screenshots. The lane is recorded per page so a downstream consumer can route low-confidence pages for review.
+
+Redaction, the ledger, and the code-aware output fixes apply unchanged. Ledger entry counts what the agent would have paid: Claude Code's `Read` renders PDF pages as images, so the image-token estimate per page is real savings.
+
+Output: the plain text payload gains `--- page N ---` separators. `--json` gains:
+
+```json
+{ "source": { "path": "report.pdf", "sha256": "ab12...", "pages": 42 },
+  "pages": [ { "n": 3, "lane": "text", "lines": [ { "n": 1, "text": "...", "bbox": [72,136,523,150], "confidence": 1.0 } ] } ] }
+```
+
+The `sha256` and per-line `bbox` are the two things the pasted architecture needs from an extractor to build citations. Nothing else from its data contract belongs in cheapshot; chunk ids, embeddings, and section paths are the consumer's job.
+
+### Tables
+
+PDFKit exposes no table structure. On macOS 26, run `RecognizeDocumentsRequest` on the rendered page and emit each table twice, as the pasted notes recommend: a Markdown table in the text payload and `{columns, rows}` JSON in the sidecar under `pages[].tables`. On macOS 13, the column-clustering approach from the Structured output section applies. Both are in the "later" bucket with the screenshot table work.
+
+### Hook and MCP
+
+The PreToolUse matcher adds `.pdf`. The hook reads the `pages` argument from the tool input and passes it as `--pages`. For a PDF over 20 pages with no `pages` argument, the hook passes through with a stderr hint instead of dumping the whole document into context. `cheapshot_ocr` in the MCP server accepts PDF paths and an optional `pages` range with the same cap.
+
+### App
+
+Dropping a PDF on the menu bar icon behaves like dropping an image. Free tier, since it is OCR plus redaction.
+
+### Not in scope
+
+Docling, chunking, embeddings, vector or keyword search, retrieval tools, orchestration, object storage. If Ryan builds the knowledge base, cheapshot's `--json` is its input for Mac-side documents and screenshots, and Docling handles the rest. Do not add a `cheapshot index` or `cheapshot search` command.
+
 ## Build order, revised
 
 Phase 0, half a day: create `Package.swift`, move `cheapshot.swift` into `Sources/CheapshotCore` and `Sources/cheapshot`, no behaviour change, commit. Homebrew formula becomes `swift build -c release`.
 
-Phase 1, four days: the brief's five audit items, each as a Core change with a test. Plus the `-fps_mode vfr` video fix and the filter chain above, and the three code-aware output fixes (indentation, fences, line-addressable JSON). Add `--text` stdin mode and the 30-case golden suite. Add `--rules`, `--ledger --json`, `--ledger --migrate`. Move the ledger to the location rule above.
+Phase 1, four and a half days: the brief's five audit items, each as a Core change with a test. Plus the `-fps_mode vfr` video fix and the filter chain above, the three code-aware output fixes (indentation, fences, line-addressable JSON), and PDF input (text lane and scan lane, `--pages`, `source.sha256` in `--json`). PDF tables stay in the later bucket. Add `--text` stdin mode and the 30-case golden suite. Add `--rules`, `--ledger --json`, `--ledger --migrate`. Move the ledger to the location rule above.
 
 Phase 2, one day: relicense to MIT, Developer ID cert, release workflow, tap repo, tag v0.5.0.
 
-Phase 3, two to three days: plugin, SKILL.md, MCP package, status line segment.
+Phase 3, two to three days: plugin with the image and PDF matcher, SKILL.md, MCP package, status line segment.
 
 Phase 4, after CLI traction: private app repo. Order inside it: folder watcher and free tier first, then StoreKit, then clipboard guard, then video, then rules editor. Clipboard guard before video because it is the stronger reason to pay.
 
