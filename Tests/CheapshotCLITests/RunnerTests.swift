@@ -140,11 +140,25 @@ final class RunnerTests: XCTestCase {
         let r = await run(["--json", png.path])
         XCTAssertEqual(r.code, 0, r.err)
         let results = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])
-        XCTAssertEqual(results[0]["file"] as? String, png.path)
-        XCTAssertNotNil(results[0]["lines"] as? [[String: Any]])
-        XCTAssertEqual(results[0]["image_tokens"] as? Int, 27)   // 200*100/750
-        XCTAssertNotNil(results[0]["text"] as? String)
+        let first = try XCTUnwrap(results.first)
+        XCTAssertEqual(first["file"] as? String, png.path)
+        XCTAssertNotNil(first["lines"] as? [[String: Any]])
+        XCTAssertEqual(first["image_tokens"] as? Int, 27)   // 200*100/750
+        XCTAssertNotNil(first["text"] as? String)
         XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path), "successful run writes the ledger")
+    }
+
+    /// The JSON line array is redacted line by line and its box is integer pixels, top-left origin.
+    func testLineJSONRedactsEachLineAndRoundsTheBox() throws {
+        let line = RenderedLine(n: 1, text: "key AKIAIOSFODNN7EXAMPLE",
+                                bbox: CGRect(x: 10.4, y: 20.6, width: 100, height: 16),
+                                confidence: 0.97, fenced: false)
+        let out = CLI.lineJSON([line], redactor: Redactor())
+        let o = try XCTUnwrap(out.first)
+        XCTAssertEqual(o["n"] as? Int, 1)
+        XCTAssertEqual(o["text"] as? String, "key [AWS_KEY]")
+        XCTAssertEqual(o["bbox"] as? [Int], [10, 21, 110, 37])
+        XCTAssertNotNil(o["confidence"] as? Double)
     }
 
     func testHelpAndVersion() async {

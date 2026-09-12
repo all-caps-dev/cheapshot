@@ -23,7 +23,11 @@ public enum OCR {
     public static func recognizeLayout(image: CGImage, minConfidence: Float) throws -> [RenderedLine] {
         let first = try recognize(image: image, minConfidence: minConfidence)
         var lines = Layout.sorted(first.lines)
-        for run in Layout.monospaceRuns(lines).reversed() {      // reversed so earlier indices stay valid
+        // Detected once, on the first pass, and then used verbatim for the render. Re-detecting
+        // after the replacement would judge different strings: the uncorrected text has different
+        // character counts, so a region that was worth re-OCR'ing could come back unfenced.
+        let runs = Layout.monospaceRuns(lines)
+        for run in runs.reversed() {                             // reversed so earlier indices stay valid
             let union = run.reduce(CGRect.null) { $0.union(lines[$1].bbox) }
             let pad: CGFloat = 4
             let region = union.insetBy(dx: -pad, dy: -pad)
@@ -33,11 +37,16 @@ public enum OCR {
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = false
             request.regionOfInterest = normalized(region, width: image.width, height: image.height)
+            // Only a line-for-line replacement is safe to take. The confidence floor, the pad, and
+            // Vision merging or splitting rows inside a crop can all return fewer lines than the
+            // run had, and swapping that in would silently drop text from the output and the
+            // ledger. A short replacement falls back to the corrected first-pass lines, which stay
+            // fenced, and keeps every run range valid for the render below.
             guard let replacement = try? perform(request, on: image, minConfidence: minConfidence, roi: request.regionOfInterest),
-                  !replacement.isEmpty else { continue }
+                  replacement.count == run.count else { continue }
             lines.replaceSubrange(run, with: Layout.sorted(replacement))
         }
-        return Layout.render(lines)
+        return Layout.render(lines, runs: runs)
     }
 
     static func perform(_ request: VNRecognizeTextRequest, on image: CGImage, minConfidence: Float, roi: CGRect?) throws -> [OCRLine] {

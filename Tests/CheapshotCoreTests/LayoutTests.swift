@@ -223,4 +223,20 @@ final class LayoutTests: XCTestCase {
         ]
         XCTAssertEqual(Layout.render(lines).first?.text, "second line", "a non-finite row sorts last")
     }
+
+    func testRenderWithExplicitRunsIgnoresDetection() {
+        // Proportional-looking widths: monospaceRuns would find nothing here.
+        let lines = [
+            OCRLine(text: "a heading in prose", bbox: CGRect(x: 0, y: 0, width: 140, height: 16), confidence: 0.9),
+            OCRLine(text: "func f() {", bbox: CGRect(x: 40, y: 16, width: 96, height: 16), confidence: 0.9),
+            OCRLine(text: "return 1", bbox: CGRect(x: 56, y: 32, width: 61, height: 16), confidence: 0.9),
+            OCRLine(text: "}", bbox: CGRect(x: 40, y: 48, width: 8, height: 16), confidence: 0.9),
+            OCRLine(text: "more prose after it", bbox: CGRect(x: 0, y: 64, width: 210, height: 16), confidence: 0.9),
+        ]
+        XCTAssertEqual(Layout.monospaceRuns(lines), [], "precondition: detection finds no run here")
+        let r = Layout.render(lines, runs: [1..<4])
+        XCTAssertEqual(r.map(\.fenced), [false, true, true, true, false])
+        XCTAssertEqual(r.map(\.n), [1, 2, 3, 4, 5])
+        XCTAssertEqual(r[2].text, "  return 1", "indent still comes from the run's own cell width")
+    }
 }

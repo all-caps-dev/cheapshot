@@ -37,7 +37,7 @@ public enum Layout {
     /// font's average character width: measured with CoreText at 14pt in a 460pt column,
     /// Helvetica spreads 7.4%, Times 9.5% and SF 9.5% across five or six lines, so anything
     /// near 8% fences whole paragraphs. Monospace text on tight boxes stays under 2%.
-    /// Task 10 retunes this against a real terminal screenshot if fences start vanishing.
+    /// Tuned separately against real captures; see the layout tuning card.
     public static let monospaceTolerance: CGFloat = 0.03
     public static let minimumVotingLines = 3
     public static let minimumVotingChars = 4
@@ -141,10 +141,18 @@ public enum Layout {
 
     public static func render(_ lines: [OCRLine]) -> [RenderedLine] {
         let s = sorted(lines)
+        return render(s, runs: monospaceRuns(s))
+    }
+
+    /// The render half on its own, for a caller that already sorted the lines and already knows
+    /// the runs. `lines` is taken as sorted and `runs` verbatim: nothing is re-sorted and nothing
+    /// is re-detected, so a caller that rewrote the text of a run (the uncorrected second OCR
+    /// pass) still gets the fences it asked for rather than a fresh verdict on different strings.
+    public static func render(_ s: [OCRLine], runs: [Range<Int>]) -> [RenderedLine] {
         var out = s.enumerated().map { i, l in
             RenderedLine(n: i + 1, text: l.text, bbox: l.bbox, confidence: l.confidence, fenced: false)
         }
-        for run in monospaceRuns(s) {
+        for run in runs where run.lowerBound >= 0 && run.upperBound <= s.count {
             // Only voting lines set the cell width and the left edge; a short line inside the run
             // that starts further left than the block would otherwise shift every indent right.
             let voting = run.compactMap { i in cellWidth(s[i]).map { (i, $0) } }
