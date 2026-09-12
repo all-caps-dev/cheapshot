@@ -161,6 +161,28 @@ final class RunnerTests: XCTestCase {
         XCTAssertNotNil(o["confidence"] as? Double)
     }
 
+    /// The three --json failure paths must all produce an envelope, not just the missing-file one.
+    func testJSONVideoMissingFileIsAnErrorEntryAndExit1() async throws {
+        let path = tmp.appendingPathComponent("missing.mp4").path
+        let r = await run(["--json", "--no-ledger", "--video", path])
+        XCTAssertEqual(r.code, 1)
+        let results = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(results[0]["file"] as? String, path)
+        XCTAssertEqual(results[0]["error"] as? String, "no such video")
+    }
+
+    func testJSONVideoUnreadableFileIsAnErrorEntryAndExit1() async throws {
+        try XCTSkipIf(FFmpegFrameSource.findFFmpeg() == nil, "ffmpeg not installed")
+        let bad = tmp.appendingPathComponent("bad.mp4")
+        try Data((0..<16).map { _ in UInt8.random(in: 0...255) }).write(to: bad)
+        let r = await run(["--json", "--no-ledger", "--video", bad.path])
+        XCTAssertEqual(r.code, 1)
+        let results = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0]["file"] as? String, bad.path)
+        XCTAssertFalse((try XCTUnwrap(results[0]["error"] as? String)).isEmpty)
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)

@@ -94,6 +94,11 @@ public struct FFmpegFrameSource: FrameSource {
         }
         let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
             .filter { $0.hasSuffix(".jpg") }.sorted()
+        // A short timestamp list means the fallback below invents seconds. Say so rather than
+        // handing back plausible-looking times nobody can tell from measured ones.
+        if times.count < files.count {
+            FileHandle.standardError.write(Data("cheapshot: ffmpeg printed \(times.count) timestamps for \(files.count) frames; later frames use their index as seconds\n".utf8))
+        }
         return files.enumerated().map { i, f in (i < times.count ? times[i] : TimeInterval(i), dir.appendingPathComponent(f)) }
     }
 

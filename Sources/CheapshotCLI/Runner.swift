@@ -176,8 +176,16 @@ public enum CLI {
         let transcriber = VideoTranscriber(source: source, dedupe: opts.dedupe, minConfidence: opts.minConfidence, redactor: redactor)
         let t: VideoTranscript
         do { t = try await transcriber.transcribe(URL(fileURLWithPath: path), maxFrames: opts.maxFrames) }
-        catch { io.err("cheapshot: \(error)\n"); return 1 }
-        guard t.frameCount > 0 else { io.err("cheapshot: no frames extracted\n"); return 1 }
+        catch {
+            if opts.json { io.out(Output.json(payload([["file": path, "error": "\(error)"]], imageTokens: 0, textTokens: 0))) }
+            io.err("cheapshot: \(error)\n")
+            return 1
+        }
+        guard t.frameCount > 0 else {
+            if opts.json { io.out(Output.json(payload([["file": path, "error": "no frames extracted"]], imageTokens: 0, textTokens: 0))) }
+            io.err("cheapshot: no frames extracted\n")
+            return 1
+        }
 
         var body = ""
         for s in t.segments { body += "[\(VideoTranscriber.stamp(s.time))]\n\(s.text)\n\n" }

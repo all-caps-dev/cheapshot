@@ -6,13 +6,17 @@ import XCTest
 /// scores under 0.25) and writes exactly 3 files. The old chain wrote 39 files for 3 frames.
 final class FFmpegFrameSourceTests: XCTestCase {
     var tmp: URL!
-    var clip: URL!
 
     override func setUpWithError() throws {
-        guard let ff = FFmpegFrameSource.findFFmpeg() else { throw XCTSkip("ffmpeg not installed") }
         tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ffsrc-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        clip = tmp.appendingPathComponent("clip.mp4")
+    }
+    override func tearDownWithError() throws { if let tmp = tmp { try? FileManager.default.removeItem(at: tmp) } }
+
+    /// Only the tests that need real frames build the clip, so the pure ones never skip.
+    func makeClip() throws -> URL {
+        guard let ff = FFmpegFrameSource.findFFmpeg() else { throw XCTSkip("ffmpeg not installed") }
+        let clip = tmp.appendingPathComponent("clip.mp4")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ff)
         p.arguments = ["-hide_banner", "-loglevel", "error", "-y",
@@ -23,14 +27,15 @@ final class FFmpegFrameSourceTests: XCTestCase {
                        "-filter_complex", "[0][1][2][3]concat=n=4:v=1:a=0", "-pix_fmt", "yuv420p", clip.path]
         try p.run(); p.waitUntilExit()
         XCTAssertEqual(p.terminationStatus, 0)
+        return clip
     }
-    override func tearDownWithError() throws { if let tmp = tmp { try? FileManager.default.removeItem(at: tmp) } }
 
     func leftoverDirs() throws -> [String] {
         try FileManager.default.contentsOfDirectory(atPath: tmp.path).filter { $0.hasPrefix("cheapshot-") }
     }
 
     func testThreeChangesYieldThreeFramesAndNoLeftoverDir() async throws {
+        let clip = try makeClip()
         let source = FFmpegFrameSource(tempBase: tmp)
         var times: [TimeInterval] = []
         var sizes: [(Int, Int)] = []
@@ -45,6 +50,7 @@ final class FFmpegFrameSourceTests: XCTestCase {
     }
 
     func testMaxFramesCapsKeptFrames() async throws {
+        let clip = try makeClip()
         var n = 0
         for try await _ in try FFmpegFrameSource(tempBase: tmp).frames(of: clip, maxFrames: 2) { n += 1 }
         XCTAssertEqual(n, 2)
@@ -64,11 +70,19 @@ final class FFmpegFrameSourceTests: XCTestCase {
                        "fps=4,mpdecimate=hi=64*12:lo=64*5:frac=0.1,select=eq(n\\,0)+gt(scene\\,0.25),metadata=print:file=-")
     }
 
-    func testFindFFmpegFallsBackWhenPathIsEmpty() {
+    func testFindFFmpegFallsBackWhenPathIsEmpty() throws {
+        // Only meaningful where ffmpeg sits in one of the four hard-coded fallbacks; a MacPorts
+        // or ~/bin install is reachable through PATH alone and must not fail this.
+        let fallbacks = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg",
+                         NSHomeDirectory() + "/.local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+        try XCTSkipUnless(fallbacks.contains { FileManager.default.isExecutableFile(atPath: $0) },
+                          "ffmpeg is not in a fallback location")
         XCTAssertNotNil(FFmpegFrameSource.findFFmpeg(environment: ["PATH": ""]))
     }
 
     func testMissingFFmpegThrows() {
-        XCTAssertThrowsError(try FFmpegFrameSource(ffmpegPath: "/nonexistent/ffmpeg", tempBase: tmp).frames(of: clip, maxFrames: 1))
+        // No clip: the ffmpeg-missing guard runs before the video is ever looked at.
+        let anyPath = tmp.appendingPathComponent("unused.mp4")
+        XCTAssertThrowsError(try FFmpegFrameSource(ffmpegPath: "/nonexistent/ffmpeg", tempBase: tmp).frames(of: anyPath, maxFrames: 1))
     }
 }
