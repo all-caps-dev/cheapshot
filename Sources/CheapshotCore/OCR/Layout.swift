@@ -108,7 +108,7 @@ public enum Layout {
         guard !lines.isEmpty else { return [] }
         let gap = columnGap * rowPitch(lines)
         // A non-finite box has no span to place with. Those lines ride along with the rightmost
-        // column, where the row quantization parks them at the end.
+        // column and take their row position there; a non-finite row parks at the end besides.
         var spans: [(i: Int, lo: CGFloat, hi: CGFloat)] = []
         var unplaced: [Int] = []
         for (i, l) in lines.enumerated() {
@@ -190,51 +190,56 @@ public enum Layout {
     }
 
     /// Runs of consecutive lines (in the given order) whose voting lines' cell widths stay within
-    /// `monospaceTolerance`. A run needs at least `minimumVotingLines` voters, spans from its
-    /// first voter to its last, and then absorbs the non-voting lines trailing it only while they
-    /// sit horizontally inside the block, on both edges: an aligned closing brace is code, a
-    /// far-left status label or gutter digit is not, and neither is a neighbouring pane's prose,
-    /// which runs past the right edge of everything the run has voted on. Letting one in would
-    /// drag the run's left edge with it, or fence a whole other column.
+    /// `monospaceTolerance`. A run needs at least `minimumVotingLines` voters and spans from its
+    /// first voter to its last.
+    ///
+    /// Every non-voting line the run would hold, inside it or trailing it, has to sit horizontally
+    /// inside the block on both edges, `minX - 0.5 * cell ... maxX + 0.5 * cell` over the run's
+    /// whole voter span: an aligned closing brace is code, a far-left status label or gutter digit
+    /// is not, and neither is a neighbouring pane's prose, which runs past the right edge of
+    /// everything the run voted on. Letting one in would drag the run's left edge with it, or
+    /// fence a whole other column. The span is the run's final one rather than the part of it seen
+    /// so far, so a long line with too few measurable words to vote is not thrown out merely for
+    /// preceding the widest voter. An interior line that fails splits the run at that line, and
+    /// each side is then judged the same way on its own narrower span, so a run may split more
+    /// than once; a side survives only while it still has `minimumVotingLines` voters.
     public static func monospaceRuns(_ lines: [OCRLine]) -> [Range<Int>] {
         var runs: [Range<Int>] = []
-        var start = 0                    // index of the run's first voter
-        var lastVoter = -1               // index of the run's last voter
-        var widths: [CGFloat] = []
-        var voterSpan: [(lo: CGFloat, hi: CGFloat)] = []
+        var voters: [(i: Int, cell: CGFloat, lo: CGFloat, hi: CGFloat)] = []
 
-        func close(upTo limit: Int) {
-            defer { widths = []; voterSpan = []; lastVoter = -1 }
-            guard widths.count >= minimumVotingLines, lastVoter >= start else { return }
-            let cell = median(widths)
-            let minX = voterSpan.map(\.lo).min() ?? 0
-            let maxX = voterSpan.map(\.hi).max() ?? 0
-            var end = lastVoter + 1
-            while end < limit, vote(lines[end]) == nil,
-                  lines[end].bbox.minX >= minX - 0.5 * cell,
-                  lines[end].bbox.maxX <= maxX + 0.5 * cell {
-                end += 1
+        /// One stretch of mutually tight voters, emitted as a run once every non-voter it would
+        /// hold fits inside the voters' span. `limit` is the first index the run may not reach.
+        func emit(_ v: ArraySlice<(i: Int, cell: CGFloat, lo: CGFloat, hi: CGFloat)>, upTo limit: Int) {
+            guard v.count >= minimumVotingLines, let first = v.first, let last = v.last else { return }
+            let cell = median(v.map(\.cell))
+            let minX = v.map(\.lo).min() ?? 0
+            let maxX = v.map(\.hi).max() ?? 0
+            func inside(_ i: Int) -> Bool {
+                lines[i].bbox.minX >= minX - 0.5 * cell && lines[i].bbox.maxX <= maxX + 0.5 * cell
             }
-            runs.append(start..<end)
-        }
-
-        func open(at i: Int, _ cw: CGFloat, _ box: CGRect) {
-            start = i; lastVoter = i; widths = [cw]; voterSpan = [(box.minX, box.maxX)]
+            for i in (first.i + 1)..<last.i where vote(lines[i]) == nil && !inside(i) {
+                emit(v.prefix { $0.i < i }, upTo: i)                  // the prefix stops short of it
+                emit(v.drop { $0.i < i }, upTo: limit)
+                return
+            }
+            var end = last.i + 1
+            while end < limit, vote(lines[end]) == nil, inside(end) { end += 1 }
+            runs.append(first.i..<end)
         }
 
         for (i, line) in lines.enumerated() {
-            guard let cw = vote(line) else { continue }               // no evidence: may join, does not vote
-            if widths.isEmpty {
-                // Drop leading short lines from the run: start at the first voter.
-                open(at: i, cw, line.bbox)
-            } else if isTight(widths + [cw]) {
-                widths.append(cw); voterSpan.append((line.bbox.minX, line.bbox.maxX)); lastVoter = i
+            guard let cell = vote(line) else { continue }             // no evidence: may join, does not vote
+            let v = (i: i, cell: cell, lo: line.bbox.minX, hi: line.bbox.maxX)
+            if voters.isEmpty {
+                voters = [v]                                          // a run starts at its first voter
+            } else if isTight(voters.map(\.cell) + [cell]) {
+                voters.append(v)
             } else {
-                close(upTo: i)
-                open(at: i, cw, line.bbox)
+                emit(voters[...], upTo: i)
+                voters = [v]
             }
         }
-        close(upTo: lines.count)
+        emit(voters[...], upTo: lines.count)
         return runs
     }
 

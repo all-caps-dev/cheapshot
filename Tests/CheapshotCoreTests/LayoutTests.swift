@@ -390,4 +390,68 @@ final class LayoutTests: XCTestCase {
                        ["let a = compute()", "let b = a + 1", "let c = b * 2", "return c", "OK"])
         XCTAssertEqual(Layout.monospaceRuns(Layout.sorted(lines)), [0..<4])
     }
+
+    // MARK: - Fix round 2: the small-group merge, and interior passengers
+
+    /// Two real panes with one stray line between them, closer to the right pane. The stray is
+    /// too small to be a column of its own, so it merges into the nearest one and takes its place
+    /// in that column's row order rather than opening a third column.
+    func testStrayLineJoinsTheNearestColumn() {
+        let left = (0..<3).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
+        let right = (0..<3).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
+        let stray = pane("stray", x: 600, width: 100, y: 16)      // 300 px from left, 100 from right
+        let cols = Layout.columns(left + [stray] + right)
+        XCTAssertEqual(cols.count, 2, "the stray opened a column of its own")
+        XCTAssertEqual(cols[0].count, 3, "the stray was merged into the left column")
+        XCTAssertEqual(cols[1].count, 4, "the stray did not reach the nearer right column")
+        XCTAssertEqual(Layout.sorted(left + [stray] + right).map(\.text),
+                       ["left 0", "left 1", "left 2", "right 0", "stray", "right 1", "right 2"],
+                       "the stray did not land in the right column's row order")
+    }
+
+    /// A line whose span is not a number cannot be placed in any column. It rides with the last
+    /// one and takes its row position there, and nothing traps on the way.
+    func testNonFiniteSpanRidesWithTheLastColumn() {
+        let left = (0..<3).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
+        let right = (0..<3).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
+        let nan = OCRLine(text: "nan box",
+                          bbox: CGRect(x: 0, y: 48, width: CGFloat.nan, height: 16), confidence: 1)
+        let lines = left + [nan] + right
+        XCTAssertEqual(Layout.columns(lines).count, 2, "a non-finite span opened a column")
+        XCTAssertEqual(Layout.columns(lines)[1].count, 4, "the non-finite line did not ride with the last column")
+        XCTAssertEqual(Layout.sorted(lines).map(\.text).last, "nan box",
+                       "a non-finite span did not take its row position in the last column")
+        XCTAssertEqual(Layout.render(lines).count, 7)
+    }
+
+    /// A foreign pane's prose wedged between two voters is not a passenger. The run splits at it,
+    /// and each side survives only where it still has `minimumVotingLines` voters of its own.
+    func testForeignPaneLineSplitsTheRun() {
+        func code(_ i: Int) -> OCRLine {
+            pane(String(repeating: "a", count: 20), x: 0, width: 300, y: CGFloat(i) * 16)
+        }
+        var lines = (0..<3).map(code)
+        lines.append(pane(String(repeating: "b", count: 40), x: 400, width: 500, y: 48, cv: 0.15))
+        lines.append(contentsOf: (4..<7).map(code))
+        XCTAssertNil(Layout.vote(lines[3]), "precondition: the foreign line does not vote")
+        XCTAssertEqual(Layout.monospaceRuns(lines), [0..<3, 4..<7],
+                       "a foreign pane's line rode inside the run as an interior passenger")
+        XCTAssertEqual(Layout.render(lines, runs: Layout.monospaceRuns(lines)).map(\.fenced),
+                       [true, true, true, false, true, true, true])
+    }
+
+    /// The interior check uses the run's whole voter span, not the part of it seen so far: a wide
+    /// non-voter that precedes the run's widest voter stays in the run.
+    func testWideNonVoterStaysInsideTheRunsFullSpan() {
+        let lines = [
+            pane(String(repeating: "a", count: 20), x: 0, width: 300, y: 0),     // cell 15
+            pane(String(repeating: "a", count: 20), x: 0, width: 300, y: 16),
+            pane("end", x: 0, width: 420, y: 32),                                // 3 chars: no vote
+            pane(String(repeating: "a", count: 30), x: 0, width: 450, y: 48),    // cell 15, and wider
+            pane(String(repeating: "a", count: 30), x: 0, width: 450, y: 64),
+        ]
+        XCTAssertNil(Layout.vote(lines[2]), "precondition: a 3-character line does not vote")
+        XCTAssertEqual(Layout.monospaceRuns(lines), [0..<5],
+                       "a non-voter wider than the voters before it was thrown out of its own run")
+    }
 }
