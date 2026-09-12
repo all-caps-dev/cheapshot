@@ -158,6 +158,10 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(outputs[1], outputs[2], "sort order depends on input order")
     }
 
+    /// Two genuine columns, 280 px of white space apart and offset by half a line. They are two
+    /// panes, so they read column-major: the whole left column, then the whole right one. The
+    /// row-quantization guard this case used to carry now lives in the overlapping variant below,
+    /// where the spans really are one column.
     func testTwoColumnsOffsetByHalfALine() {
         let pitch: CGFloat = 18
         let a = [0, 18, 36, 54].map { y in
@@ -167,8 +171,24 @@ final class LayoutTests: XCTestCase {
             OCRLine(text: "B\(y)", bbox: CGRect(x: 400, y: CGFloat(y), width: 120, height: pitch), confidence: 1)
         }
         let s = Layout.sorted(a + b)
+        XCTAssertEqual(s.map(\.text), ["A0", "A18", "A36", "A54", "B9", "B27", "B45"],
+                       "two disjoint columns did not read column-major")
+    }
+
+    /// The same fixture with the right block moved inside the left block's span: one column, so
+    /// the rows interleave and the quantized total order still has to hold.
+    func testOverlappingColumnsKeepRowQuantization() {
+        let pitch: CGFloat = 18
+        let a = [0, 18, 36, 54].map { y in
+            OCRLine(text: "A\(y)", bbox: CGRect(x: 0, y: CGFloat(y), width: 120, height: pitch), confidence: 1)
+        }
+        let b = [9, 27, 45].map { y in
+            OCRLine(text: "B\(y)", bbox: CGRect(x: 100, y: CGFloat(y), width: 120, height: pitch), confidence: 1)
+        }
+        XCTAssertEqual(Layout.columns(a + b).count, 1, "overlapping spans were split into columns")
+        let s = Layout.sorted(a + b)
         let rows = s.map { Int(($0.bbox.minY / pitch).rounded()) }
-        XCTAssertEqual(rows, rows.sorted(), "the two columns did not group by quantized row")
+        XCTAssertEqual(rows, rows.sorted(), "the two blocks did not group by quantized row")
         for i in s.indices {
             for j in s.indices where j > i {
                 XCTAssertGreaterThanOrEqual(s[j].bbox.minY, s[i].bbox.minY - pitch,
@@ -296,5 +316,78 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(r.map(\.text), ["def main():", "    x = compute()", "    return x", "print(main())"])
         XCTAssertTrue(r.allSatisfy(\.fenced))
         XCTAssertEqual(Layout.text(r), "```\ndef main():\n    x = compute()\n    return x\nprint(main())\n```")
+    }
+
+    // MARK: - Fix round 2: column-aware reading order
+
+    /// A line with an explicit horizontal span, so a fixture can place panes precisely. Passing
+    /// `cv` also gives the line word-box evidence, with the box's own width/count as the cell.
+    func pane(_ text: String, x: CGFloat, width: CGFloat, y: CGFloat, cv: CGFloat? = nil) -> OCRLine {
+        OCRLine(text: text, bbox: CGRect(x: x, y: y, width: width, height: 16), confidence: 1,
+                cellWidth: cv == nil ? nil : width / CGFloat(text.count), cellVariation: cv)
+    }
+
+    func testDisjointColumnsReadColumnMajor() {
+        // Two panes 300 px apart. A's cell is 15 px, B's 20 px, so the two blocks are also two
+        // separate runs once the order stops interleaving them.
+        let a = (0..<4).map { i in pane(String(repeating: "a", count: 20), x: 0, width: 300, y: CGFloat(i) * 16) }
+        let b = (0..<4).map { i in pane(String(repeating: "b", count: 15), x: 600, width: 300, y: CGFloat(i) * 16) }
+        var interleaved: [OCRLine] = []
+        for i in 0..<4 { interleaved.append(a[i]); interleaved.append(b[i]) }
+        let s = Layout.sorted(interleaved)
+        XCTAssertEqual(s.map { $0.bbox.minX }, [0, 0, 0, 0, 600, 600, 600, 600],
+                       "columns did not read left to right, whole column first")
+        XCTAssertEqual(s.map { $0.bbox.minY }, [0, 16, 32, 48, 0, 16, 32, 48],
+                       "rows inside a column came back out of order")
+        XCTAssertEqual(Layout.monospaceRuns(s), [0..<4, 4..<8])
+    }
+
+    func testOverlappingSpansKeepRowOrder() {
+        // Chat bubbles: the right bubble starts inside the left bubble's span, so this is one
+        // column and the transcript keeps its row order.
+        let lines = [
+            pane("left one", x: 0, width: 500, y: 0),
+            pane("right one", x: 300, width: 500, y: 20),
+            pane("left two", x: 0, width: 500, y: 40),
+        ]
+        XCTAssertEqual(Layout.columns(lines).count, 1, "overlapping bubbles split into columns")
+        XCTAssertEqual(Layout.sorted(lines).map(\.text), ["left one", "right one", "left two"])
+    }
+
+    func testRaggedRightEdgeDoesNotSplitAPane() {
+        let widths: [CGFloat] = [100, 400, 180, 320, 140]
+        let lines = widths.enumerated().map { i, w in pane("line \(i)", x: 50, width: w, y: CGFloat(i) * 16) }
+        XCTAssertEqual(Layout.columns(lines).count, 1, "a ragged right edge split one pane into columns")
+        XCTAssertEqual(Layout.sorted(lines).map(\.text), lines.map(\.text))
+    }
+
+    func testThreePanesWithProseBetween() {
+        // The shape of a real three-pane capture: code left, prose in the middle, code right.
+        let a = (0..<5).map { i in pane(String(repeating: "a", count: 20), x: 60, width: 640, y: CGFloat(i) * 22, cv: 0.03) }
+        let b = (0..<4).map { i in pane(String(repeating: "b", count: 40), x: 900, width: 500, y: CGFloat(i) * 22 + 8, cv: 0.15) }
+        let c = (0..<4).map { i in pane(String(repeating: "c", count: 22), x: 1850, width: 550, y: CGFloat(i) * 22 + 4, cv: 0.04) }
+        let s = Layout.sorted(a + b + c)
+        XCTAssertEqual(s.map { $0.bbox.minX }, [60, 60, 60, 60, 60, 900, 900, 900, 900, 1850, 1850, 1850, 1850])
+        XCTAssertEqual(Layout.monospaceRuns(s), [0..<5, 9..<13], "the middle prose pane was swept into a run")
+        let text = Layout.text(Layout.render(s))
+        XCTAssertEqual(text.components(separatedBy: "```").count - 1, 4, "expected exactly two fenced blocks")
+    }
+
+    /// A span group needs `minimumVotingLines` lines before it is a column of its own. One
+    /// far-left status label beside a code pane is not a second column: it merges into the pane
+    /// it sits nearest and keeps its place in the row order, which is what leaves the trailing
+    /// absorb rule to decide whether it belongs to the run.
+    func testLoneFarLeftLabelIsNotItsOwnColumn() {
+        let lines = [
+            mono("let a = compute()", x: 200, y: 0),
+            mono("let b = a + 1", x: 200, y: 16),
+            mono("let c = b * 2", x: 200, y: 32),
+            mono("return c", x: 200, y: 48),
+            mono("OK", x: 0, y: 64),
+        ]
+        XCTAssertEqual(Layout.columns(lines).count, 1, "a lone far-left label became its own column")
+        XCTAssertEqual(Layout.sorted(lines).map(\.text),
+                       ["let a = compute()", "let b = a + 1", "let c = b * 2", "return c", "OK"])
+        XCTAssertEqual(Layout.monospaceRuns(Layout.sorted(lines)), [0..<4])
     }
 }

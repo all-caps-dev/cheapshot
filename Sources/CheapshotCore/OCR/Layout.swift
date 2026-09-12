@@ -55,6 +55,9 @@ public enum Layout {
     /// cell widths: on a real capture, monospace lines land at 1 to 8% and proportional lines
     /// at 9 to 21%. A line above this does not vote and cannot start a run.
     public static let maxWordVariation: CGFloat = 0.08
+    /// How far apart two horizontal spans must sit, in median line heights, before they are two
+    /// columns rather than one pane with a ragged right edge.
+    public static let columnGap: CGFloat = 1.5
     public static let minimumVotingLines = 3
     public static let minimumVotingChars = 4
     public static let maxIndent = 40
@@ -86,25 +89,87 @@ public enum Layout {
         return m > 0 ? m : 1
     }
 
-    /// Top to bottom, then left to right. Rows are quantized to a multiple of the median line
-    /// height first, so the comparison is a total order on `(row, minX, minY)`. Comparing raw
-    /// `minY` against a tolerance is not transitive (a and b within half a line, b and c within
-    /// half a line, a and c not), which lets the result depend on the input order: dense pages
-    /// came back reversed and columns offset by half a line interleaved wrongly.
+    /// The lines grouped into columns, each group already in reading order and the groups left to
+    /// right: the whole reading order, as indices into the input.
+    ///
+    /// A screenshot is rarely one column. Ordering a whole frame by row interleaves an editor, a
+    /// browser pane and a sidebar line by line, and `monospaceRuns` only sees consecutive indices,
+    /// so a real code block never gets three voters in a row while unrelated panes get swept into
+    /// the same run. Columns are the lines' horizontal spans, merged where they overlap at all or
+    /// sit closer than `columnGap` line heights apart, so a ragged right edge stays one pane and
+    /// chat bubbles that overlap horizontally stay one transcript in row order.
+    ///
+    /// A span group is only a column once `minimumVotingLines` lines agree on it. A far-left "OK"
+    /// status label, one lone indented line or a single right-aligned word is not a pane: it
+    /// merges into the column nearest it horizontally and keeps its place in that column's row
+    /// order. Fewer than two real columns means the frame is one column, and then the order is
+    /// exactly the old whole-frame row sort.
+    static func columns(_ lines: [OCRLine]) -> [[Int]] {
+        guard !lines.isEmpty else { return [] }
+        let gap = columnGap * rowPitch(lines)
+        // A non-finite box has no span to place with. Those lines ride along with the rightmost
+        // column, where the row quantization parks them at the end.
+        var spans: [(i: Int, lo: CGFloat, hi: CGFloat)] = []
+        var unplaced: [Int] = []
+        for (i, l) in lines.enumerated() {
+            let lo = l.bbox.minX, hi = l.bbox.maxX
+            if lo.isFinite, hi.isFinite, hi >= lo { spans.append((i, lo, hi)) } else { unplaced.append(i) }
+        }
+        var groups: [(idx: [Int], lo: CGFloat, hi: CGFloat)] = []
+        // Sorted by left edge, so `s.lo - last.hi` is the gap to the group so far; a negative
+        // value is an overlap.
+        for s in spans.sorted(by: { $0.lo != $1.lo ? $0.lo < $1.lo : $0.hi < $1.hi }) {
+            if var last = groups.last, s.lo - last.hi < gap {
+                last.idx.append(s.i); last.hi = max(last.hi, s.hi)
+                groups[groups.count - 1] = last
+            } else {
+                groups.append(([s.i], s.lo, s.hi))
+            }
+        }
+        let real = groups.indices.filter { groups[$0].idx.count >= minimumVotingLines }
+        guard real.count >= 2 else { return [readingOrder(Array(lines.indices), in: lines)] }
+        let isColumn = Set(real)
+        var buckets: [[Int]] = real.map { groups[$0].idx }       // already left to right
+        for (g, group) in groups.enumerated() where !isColumn.contains(g) {
+            var best = 0
+            var bestDistance = CGFloat.infinity
+            for (k, c) in real.enumerated() {
+                let d = max(0, max(groups[c].lo - group.hi, group.lo - groups[c].hi))
+                if d < bestDistance { bestDistance = d; best = k }
+            }
+            buckets[best].append(contentsOf: group.idx)
+        }
+        buckets[buckets.count - 1].append(contentsOf: unplaced)
+        return buckets.map { readingOrder($0, in: lines) }
+    }
+
+    /// Column-major: the columns left to right, each one in its own reading order.
     static func sorted(_ lines: [OCRLine]) -> [OCRLine] {
-        let pitch = rowPitch(lines)
+        columns(lines).flatMap { $0.map { lines[$0] } }
+    }
+
+    /// One column's indices, top to bottom then left to right. Rows are quantized to a multiple of
+    /// that column's median line height first, so the comparison is a total order on
+    /// `(row, minX, minY)`. Comparing raw `minY` against a tolerance is not transitive (a and b
+    /// within half a line, b and c within half a line, a and c not), which lets the result depend
+    /// on the input order: dense pages came back reversed and rows offset by half a line
+    /// interleaved wrongly. Quantizing per column keeps a sidebar set in 11pt from being rowed off
+    /// an editor's 14pt.
+    static func readingOrder(_ idx: [Int], in lines: [OCRLine]) -> [Int] {
+        let pitch = rowPitch(idx.map { lines[$0] })
         // `Int(_:)` traps on a non-finite value, so a NaN box would crash the sort. Park those
         // rows at the end instead.
         func row(_ y: CGFloat) -> Int {
             let r = (y / pitch).rounded()
             return r.isFinite ? Int(r) : Int.max
         }
-        return lines.sorted { a, b in
-            let ra = row(a.bbox.minY)
-            let rb = row(b.bbox.minY)
+        return idx.sorted { a, b in
+            let (p, q) = (lines[a].bbox, lines[b].bbox)
+            let ra = row(p.minY)
+            let rb = row(q.minY)
             if ra != rb { return ra < rb }
-            if a.bbox.minX != b.bbox.minX { return a.bbox.minX < b.bbox.minX }
-            return a.bbox.minY < b.bbox.minY
+            if p.minX != q.minX { return p.minX < q.minX }
+            return p.minY < q.minY
         }
     }
 
@@ -126,42 +191,47 @@ public enum Layout {
 
     /// Runs of consecutive lines (in the given order) whose voting lines' cell widths stay within
     /// `monospaceTolerance`. A run needs at least `minimumVotingLines` voters, spans from its
-    /// first voter to its last, and then absorbs the non-voting lines trailing it only while they sit
-    /// horizontally inside the block: an aligned closing brace is code, a far-left status label
-    /// or gutter digit is not, and letting one in would drag the run's left edge with it.
+    /// first voter to its last, and then absorbs the non-voting lines trailing it only while they
+    /// sit horizontally inside the block, on both edges: an aligned closing brace is code, a
+    /// far-left status label or gutter digit is not, and neither is a neighbouring pane's prose,
+    /// which runs past the right edge of everything the run has voted on. Letting one in would
+    /// drag the run's left edge with it, or fence a whole other column.
     public static func monospaceRuns(_ lines: [OCRLine]) -> [Range<Int>] {
         var runs: [Range<Int>] = []
         var start = 0                    // index of the run's first voter
         var lastVoter = -1               // index of the run's last voter
         var widths: [CGFloat] = []
-        var voterMinX: [CGFloat] = []
+        var voterSpan: [(lo: CGFloat, hi: CGFloat)] = []
 
         func close(upTo limit: Int) {
-            defer { widths = []; voterMinX = []; lastVoter = -1 }
+            defer { widths = []; voterSpan = []; lastVoter = -1 }
             guard widths.count >= minimumVotingLines, lastVoter >= start else { return }
             let cell = median(widths)
-            let minX = voterMinX.min() ?? 0
+            let minX = voterSpan.map(\.lo).min() ?? 0
+            let maxX = voterSpan.map(\.hi).max() ?? 0
             var end = lastVoter + 1
-            while end < limit, vote(lines[end]) == nil, lines[end].bbox.minX >= minX - 0.5 * cell {
+            while end < limit, vote(lines[end]) == nil,
+                  lines[end].bbox.minX >= minX - 0.5 * cell,
+                  lines[end].bbox.maxX <= maxX + 0.5 * cell {
                 end += 1
             }
             runs.append(start..<end)
         }
 
-        func open(at i: Int, _ cw: CGFloat, _ minX: CGFloat) {
-            start = i; lastVoter = i; widths = [cw]; voterMinX = [minX]
+        func open(at i: Int, _ cw: CGFloat, _ box: CGRect) {
+            start = i; lastVoter = i; widths = [cw]; voterSpan = [(box.minX, box.maxX)]
         }
 
         for (i, line) in lines.enumerated() {
             guard let cw = vote(line) else { continue }               // no evidence: may join, does not vote
             if widths.isEmpty {
                 // Drop leading short lines from the run: start at the first voter.
-                open(at: i, cw, line.bbox.minX)
+                open(at: i, cw, line.bbox)
             } else if isTight(widths + [cw]) {
-                widths.append(cw); voterMinX.append(line.bbox.minX); lastVoter = i
+                widths.append(cw); voterSpan.append((line.bbox.minX, line.bbox.maxX)); lastVoter = i
             } else {
                 close(upTo: i)
-                open(at: i, cw, line.bbox.minX)
+                open(at: i, cw, line.bbox)
             }
         }
         close(upTo: lines.count)
