@@ -18,9 +18,11 @@ Screenshots are also full of things you do not want in an agent's context.
 ## Install
 
 ```bash
-swiftc -O cheapshot.swift -o cheapshot -framework Vision -framework AppKit
-cp cheapshot ~/local-dev/bin/
+make            # universal binary at ./cheapshot, macOS 13 or newer
+make install    # copies it to /usr/local/bin (PREFIX=... to change)
 ```
+
+Needs the Xcode command line tools. `swift test` runs the test suite.
 
 ## Use
 
