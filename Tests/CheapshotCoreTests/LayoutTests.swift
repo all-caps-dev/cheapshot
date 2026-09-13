@@ -506,23 +506,22 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(Layout.render(lines).count, 7)
     }
 
-    /// A line with a finite row but no usable left edge (`minX` NaN) rides with the last column,
-    /// and inside that column it sorts last in its row, after every line with a real left edge.
-    /// That has to hold whatever order the lines arrive in: a NaN compared with `<` is never
-    /// less and never equal, so a comparator that reads it raw is not an order at all and the
-    /// sort may put the line anywhere. The columns are long enough that the sort is no longer a
-    /// stable insertion sort, which is what hid this on a handful of lines.
+    /// A line with a finite row but no usable left edge (`minX` NaN) sorts last in its row, after
+    /// every line with a real left edge, whatever order the lines arrive in. A NaN compared with
+    /// `<` is never less and never greater, so a comparator that reads it raw treats the line as
+    /// equivalent to its row-mates and a stable sort leaves it wherever the input put it. On the
+    /// two-column path `columns()` appends unplaced lines after the placed ones, which hides that
+    /// by accident; the single-column path sorts the input as given, so a shuffle exposes it.
     func testUnplacedFiniteRowLineSortsLastInItsRow() {
-        let left = (0..<30).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
-        let right = (0..<30).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
+        let column = (0..<30).map { i in pane("line \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
         let nan = OCRLine(text: "nan x", bbox: CGRect(x: CGFloat.nan, y: 16 * 16, width: 100, height: 16), confidence: 1)
-        let lines = left + [nan] + right
-        var expected = left.map(\.text) + right.map(\.text)
-        expected.insert("nan x", at: 30 + 17)                     // after "right 16", before "right 17"
-        XCTAssertEqual(Layout.sorted(lines).map(\.text), expected)
+        var expected = column.map(\.text)
+        expected.insert("nan x", at: 17)                          // after "line 16", before "line 17"
+        XCTAssertEqual(Layout.columns(column + [nan]).count, 1, "precondition: one column")
+        XCTAssertEqual(Layout.sorted(column + [nan]).map(\.text), expected)
         for seed in 1...24 as ClosedRange<UInt64> {
             var g = LCG(state: seed)
-            XCTAssertEqual(Layout.sorted(lines.shuffled(using: &g)).map(\.text), expected,
+            XCTAssertEqual(Layout.sorted((column + [nan]).shuffled(using: &g)).map(\.text), expected,
                            "the unplaced line's row position depended on input order (seed \(seed))")
         }
     }

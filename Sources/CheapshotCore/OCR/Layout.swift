@@ -113,8 +113,9 @@ public enum Layout {
         guard !lines.isEmpty else { return [] }
         let gap = columnGap * rowPitch(lines)
         // A non-finite box has no span to place with. Those lines ride along with the rightmost
-        // column and take their row position there, after that row's placed lines (`readingOrder`
-        // sorts a non-finite left edge last in its row); a non-finite row parks at the end besides.
+        // column and take their row position there; within the row a line with a finite left edge
+        // sorts by it, and one without sorts last (`readingOrder`). A non-finite row parks at the
+        // end besides.
         var spans: [(i: Int, lo: CGFloat, hi: CGFloat)] = []
         var unplaced: [Int] = []
         for (i, l) in lines.enumerated() {
