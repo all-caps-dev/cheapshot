@@ -50,6 +50,13 @@ final class OCRGeometryTests: XCTestCase {
         XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5)], lineWidth: 200), "two words are no evidence")
         XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (16, 2), (8, 1)], lineWidth: 200),
                      "short words must not count toward the three-word minimum")
+        // The short-word cutoff is one constant, shared with the Vision walk in wordCells so the
+        // box lookup is skipped for the same words the statistics would drop.
+        let short = (width: CGFloat(8 * (OCR.minimumWordChars - 1)), count: OCR.minimumWordChars - 1)
+        let long = (width: CGFloat(8 * OCR.minimumWordChars), count: OCR.minimumWordChars)
+        XCTAssertNil(OCR.cellStatistics(words: [long, long, short], lineWidth: 200),
+                     "a word one under minimumWordChars counted as a cell")
+        XCTAssertEqual(OCR.cellStatistics(words: [long, long, long], lineWidth: 200)?.width, 8)
         XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (190, 10)], lineWidth: 200),
                      "a box wider than 90% of the line is Vision handing back the line box")
         XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (0, 4)], lineWidth: 200), "a zero-width word is not a cell")

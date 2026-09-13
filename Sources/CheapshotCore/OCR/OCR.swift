@@ -3,6 +3,10 @@ import Vision
 import CoreGraphics
 
 public enum OCR {
+    /// Words shorter than this are too short for width / count to mean anything. `wordCells`
+    /// skips the Vision box lookup for them and `cellStatistics` drops them, one constant for both.
+    public static let minimumWordChars = 3
+
     public struct Failure: Error, CustomStringConvertible {
         public let message: String
         public var description: String { message }
@@ -88,20 +92,21 @@ public enum OCR {
             var j = i
             while j < s.endIndex, !s[j].isWhitespace { j = s.index(after: j) }
             defer { i = j }
-            guard let word = try? top.boundingBox(for: i..<j) else { continue }
+            let n = s.distance(from: i, to: j)
+            guard n >= minimumWordChars, let word = try? top.boundingBox(for: i..<j) else { continue }
             var box = word.boundingBox
             if let roi = roi {
                 box = CGRect(x: roi.minX + box.minX * roi.width, y: roi.minY + box.minY * roi.height,
                              width: box.width * roi.width, height: box.height * roi.height)
             }
-            words.append((box.width * CGFloat(width), s.distance(from: i, to: j)))
+            words.append((box.width * CGFloat(width), n))
         }
         return cellStatistics(words: words, lineWidth: lineWidth)
     }
 
     /// The pure half of `wordCells`: each word's box width in pixels and its character count,
     /// into the line's median per-word cell width and the coefficient of variation of those cells.
-    /// Words under 3 characters are too short for the division to mean anything, and a box wider
+    /// Words under `minimumWordChars` are too short for the division to mean anything, and a box wider
     /// than 90% of the line is Vision handing back the line box for a range it could not resolve;
     /// a non-positive or non-finite width is no box at all. Fewer than three usable words is no
     /// evidence at all.
@@ -109,7 +114,7 @@ public enum OCR {
         -> (width: CGFloat, variation: CGFloat)? {
         var cells: [CGFloat] = []
         for (w, n) in words {
-            guard n >= 3, w.isFinite, w > 0, w <= 0.9 * lineWidth else { continue }
+            guard n >= minimumWordChars, w.isFinite, w > 0, w <= 0.9 * lineWidth else { continue }
             cells.append(w / CGFloat(n))
         }
         guard cells.count >= 3 else { return nil }
