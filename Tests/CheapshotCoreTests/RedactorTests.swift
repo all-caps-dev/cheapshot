@@ -26,6 +26,20 @@ final class RedactorTests: XCTestCase {
         XCTAssertEqual(Redactor(rules: []).redact("ryan@example.com").text, "ryan@example.com")
     }
 
+    // Card 1862718065041474800: a rule that does not compile is reported, never dropped in silence.
+    func testCompileFailuresAreReported() throws {
+        let bad = Rule(name: "BAD", pattern: "(")
+        let good = Rule(name: "GOOD", pattern: "x")
+        let r = Redactor(rules: [good, bad])
+        XCTAssertEqual(r.compileFailures.map(\.name), ["BAD"])
+        XCTAssertEqual(r.redact("x").text, "[GOOD]")
+        XCTAssertThrowsError(try Redactor(validating: [good, bad])) { error in
+            XCTAssertTrue("\(error)".contains("BAD"), "error should name the rule: \(error)")
+        }
+        XCTAssertNoThrow(try Redactor(validating: [good]))
+        XCTAssertTrue(Redactor().compileFailures.isEmpty)
+    }
+
     func testVersionConstant() {
         XCTAssertEqual(cheapshotVersion, "0.5.0-dev")
     }

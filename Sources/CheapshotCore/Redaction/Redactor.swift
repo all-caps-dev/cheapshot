@@ -8,18 +8,42 @@ public struct RedactionReport: Equatable {
 
 public struct Redactor {
     public let rules: [Rule]
+    /// Rules whose pattern did not compile. They run as nothing, so a caller that built the
+    /// redactor from untrusted rules must check this (or use ``init(validating:)``).
+    public let compileFailures: [Rule]
     private let compiled: [(Rule, NSRegularExpression)]
 
-    /// A rule whose pattern will not compile is dropped, which silently un-redacts whatever it
-    /// covered. That is only ever a programming error here: ``RuleFile`` is the validating entry
-    /// point for anything a user wrote, and it rejects an uncompilable pattern with a message
-    /// before a `Redactor` is ever built. The assertion catches a bad builtin in debug.
+    public struct CompileError: Error, Equatable, CustomStringConvertible {
+        public let failures: [String]
+        public var description: String {
+            "rules do not compile: " + failures.joined(separator: ", ")
+        }
+    }
+
+    /// A rule whose pattern will not compile is skipped and listed in ``compileFailures``.
+    /// ``RuleFile`` is the validating entry point for anything a user wrote and rejects an
+    /// uncompilable pattern before a `Redactor` is ever built.
     public init(rules: [Rule] = Rule.builtin) {
         self.rules = rules
-        self.compiled = rules.compactMap { rule in
-            (try? NSRegularExpression(pattern: rule.pattern, options: rule.options)).map { (rule, $0) }
+        var compiled: [(Rule, NSRegularExpression)] = []
+        var failures: [Rule] = []
+        for rule in rules {
+            if let re = try? NSRegularExpression(pattern: rule.pattern, options: rule.options) {
+                compiled.append((rule, re))
+            } else {
+                failures.append(rule)
+            }
         }
-        assert(compiled.count == rules.count, "uncompilable rule")
+        self.compiled = compiled
+        self.compileFailures = failures
+    }
+
+    /// Same as ``init(rules:)`` but throws ``CompileError`` naming every rule that did not compile.
+    public init(validating rules: [Rule]) throws {
+        self.init(rules: rules)
+        if !compileFailures.isEmpty {
+            throw CompileError(failures: compileFailures.map(\.name))
+        }
     }
 
     /// Custom rules go first so they win over the built-ins.
