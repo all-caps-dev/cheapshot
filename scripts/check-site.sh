@@ -27,12 +27,22 @@ for n in video-frames structured-output pdf-pipeline; do
   diff "$a" "$b" > /dev/null || { rm -f "$a" "$b"; echo "research page drifted: $n"; exit 1; }
   rm -f "$a" "$b"
 done
+# the two facts rescued from the README live on the site now; keep them there
+grep -q '1,018' src/content/docs/index.md || { echo "site index lost the 1,018-run ledger figure"; exit 1; }
+test -f src/content/docs/research/no-llm.md || { echo "site lost research/no-llm.md"; exit 1; }
+# the credits page is the docs/credits.md body under a 4-line frontmatter and a blank line;
+# the note's own h1 and its blank line are the only lines the page does not carry
+a=$(mktemp); b=$(mktemp)
+tail -n +6 src/content/docs/credits.md > "$a"; tail -n +3 ../docs/credits.md > "$b"
+diff "$a" "$b" > /dev/null || { rm -f "$a" "$b"; echo "credits drifted between docs/ and site/"; exit 1; }
+rm -f "$a" "$b"
 # the theme's body text on its background passes AA in light and dark. The pairs are read out of
 # the CSS the build just emitted, not out of a hand-typed file, so a theme upgrade that darkens
 # the text fails here even if nobody re-measures. The ratio maths is vendored in scripts/, so
 # this runs on a bare CI runner with no skills directory.
 cr=../scripts/contrast-ratio.sh
 test -x "$cr" || { echo "scripts/contrast-ratio.sh missing or not executable"; exit 1; }
+ls dist/_astro/*.css > /dev/null 2>&1 || { echo "no emitted stylesheet; contrast gate needs a CSS file"; exit 1; }
 live=
 for t in light dark; do
   blk=$(cat dist/_astro/*.css | tr -d '\n' | grep -o "data-theme=$t\]{[^}]*}" | head -1)

@@ -38,6 +38,7 @@ jobs:
           ASC_ISSUER: ${{ secrets.ASC_ISSUER }}
           TAG: ${{ github.ref_name }}
         run: |
+          trap 'rm -f AuthKey.p8 notary.json' EXIT
           codesign --force --timestamp --options runtime --sign "Developer ID Application" cheapshot
           codesign --verify --verbose=2 cheapshot
           ditto -c -k --norsrc cheapshot "cheapshot-${TAG}-macos.zip"
@@ -48,7 +49,6 @@ jobs:
           cat notary.json
           grep -qE '"status"[[:space:]]*:[[:space:]]*"Accepted"' notary.json || { echo "notarization not Accepted"; exit 1; }
           shasum -a 256 "cheapshot-${TAG}-macos.zip" | tee "cheapshot-${TAG}-macos.zip.sha256"
-          rm -f AuthKey.p8 notary.json
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
