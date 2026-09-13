@@ -266,6 +266,26 @@ final class LayoutTests: XCTestCase {
         XCTAssertTrue(r.allSatisfy(\.fenced), "the non-finite line sits inside the run")
     }
 
+    /// The run's left edge comes from its voters, and a voter with a non-finite left edge must
+    /// not poison it: `[CGFloat].min()` keeps a leading NaN, and then every indent in the run
+    /// divides by NaN and lands at zero. The block's real lines keep their indentation; only the
+    /// broken line rides at zero.
+    func testNonFiniteVoterDoesNotZeroTheRunsIndent() {
+        let lines = [
+            OCRLine(text: "nan voter", bbox: CGRect(x: CGFloat.nan, y: 0, width: 72, height: 16),
+                    confidence: 0.9, cellWidth: 8),
+            mono("def main():", x: 100, y: 16),
+            mono("x = compute()", x: 132, y: 32),      // 4 cells in
+            mono("return x", x: 132, y: 48),
+        ]
+        XCTAssertNotNil(Layout.vote(lines[0]), "precondition: the non-finite line votes")
+        XCTAssertEqual(Layout.monospaceRuns(Layout.sorted(lines)), [0..<4], "precondition: one run over all four")
+        let r = Layout.render(lines)
+        XCTAssertEqual(r.map(\.text), ["nan voter", "def main():", "    x = compute()", "    return x"],
+                       "a NaN voter's left edge zeroed the whole run's indentation")
+        XCTAssertTrue(r.allSatisfy(\.fenced))
+    }
+
     func testRenderWithExplicitRunsIgnoresDetection() {
         // Proportional-looking widths: monospaceRuns would find nothing here.
         let lines = [

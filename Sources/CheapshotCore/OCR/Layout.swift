@@ -284,7 +284,9 @@ public enum Layout {
             if voting.isEmpty { voting = run.compactMap { i in cellWidth(s[i]).map { (i, $0) } } }
             guard !voting.isEmpty else { continue }
             let cell = median(voting.map(\.1))
-            let minX = voting.map { s[$0.0].bbox.minX }.min() ?? 0
+            // Only finite left edges set the block's left edge. `min()` keeps a leading NaN, and a
+            // NaN left edge would zero every indent in the run, not just the broken line's.
+            let minX = voting.map { s[$0.0].bbox.minX }.filter(\.isFinite).min() ?? 0
             for i in run {
                 // `Int(_:)` traps on a non-finite value, so a NaN origin on a line the run holds
                 // would crash rather than measure wrong. No usable origin means no indent.
