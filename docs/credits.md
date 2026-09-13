@@ -27,6 +27,11 @@ Everything cheapshot stands on, with links. Add a line whenever a dependency, to
 - [actions/deploy-pages](https://github.com/actions/deploy-pages) publishes it to GitHub Pages.
 - [actions/checkout](https://github.com/actions/checkout) in every workflow.
 
+## MCP server
+
+- [@modelcontextprotocol/sdk](https://www.npmjs.com/package/@modelcontextprotocol/sdk), the server and stdio transport behind `cheapshot-mcp`.
+- [zod](https://zod.dev/) for the tool argument schemas.
+
 ## Distribution
 
 - [GitHub Actions](https://github.com/features/actions) builds, tests, signs, and notarizes.

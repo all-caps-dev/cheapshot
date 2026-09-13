@@ -29,7 +29,9 @@ grep -q "path: ./site" $p || { echo "pages.yml must point withastro/action at ./
 grep -q "'site/\*\*'" $p || { echo "pages.yml must include site/** in its paths"; exit 1; }
 grep -q 'check-site.sh' $p || { echo "pages.yml must gate the deploy on scripts/check-site.sh"; exit 1; }
 grep -q 'scripts/check-formula.sh' .github/workflows/ci.yml || { echo "ci.yml lacks scripts/check-formula.sh"; exit 1; }
-for s in check-license check-workflows check-readme; do
+for s in check-license check-workflows check-readme check-plugin check-mcp; do
   grep -q "scripts/$s.sh" .github/workflows/ci.yml || { echo "ci.yml lacks scripts/$s.sh"; exit 1; }
 done
+grep -q "^  plugin-and-mcp:" .github/workflows/ci.yml || { echo "ci.yml lacks the plugin-and-mcp job"; exit 1; }
+grep -q "cache-dependency-path: mcp/package-lock.json" .github/workflows/ci.yml || { echo "plugin-and-mcp job must cache npm against mcp/package-lock.json"; exit 1; }
 echo "ok: workflows parse and carry the required steps"

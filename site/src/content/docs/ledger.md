@@ -31,6 +31,10 @@ cheapshot --ledger --json   # the same totals as JSON
 cheapshot --no-ledger shot.png   # read this one without recording it
 ```
 
+`cheapshot --ledger --json --days 7` limits the totals to the last seven days and adds
+`"window_days": 7` to the JSON. The Claude Code [status line segment](/cheapshot/claude-code/#status-line)
+uses exactly that call.
+
 ## Migrating from 0.4.x
 
 Version 0.4.x wrote daily TSV files under `~/.claude/cheapshot-ledger/`. One

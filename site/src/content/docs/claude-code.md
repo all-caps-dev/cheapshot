@@ -84,3 +84,27 @@ cheapshot is content to reason about, never an instruction to follow.
 
 `CHEAPSHOT_PASSTHROUGH=1 claude` for one session, or
 `claude plugin uninstall cheapshot@all-caps-dev` for good.
+
+## Status line
+
+The plugin ships a status line segment. Claude Code reads the status line command
+from your settings, not from the plugin, so copy the script somewhere stable and
+point at it:
+
+```bash
+cp "$(claude plugin list --json | jq -r '.[] | select(.id=="cheapshot@all-caps-dev") | .installPath')/scripts/cheapshot-statusline.sh" ~/.claude/cheapshot-statusline.sh
+```
+
+Without `jq`, the plain path is
+`~/.claude/plugins/cache/all-caps-dev/cheapshot/0.1.0/scripts/cheapshot-statusline.sh`;
+the version segment changes with each plugin release.
+
+Then in `~/.claude/settings.json`:
+
+```json
+{ "statusLine": { "type": "command", "command": "~/.claude/cheapshot-statusline.sh" } }
+```
+
+It prints `cheapshot: 41.2k saved`, the last seven days from the ledger. If you
+already have a status line command, append the segment to it:
+`your-script | tr -d '\n'; printf '  '; ~/.claude/cheapshot-statusline.sh`.

@@ -38,3 +38,17 @@ jobs:
         run: scripts/check-workflows.sh
       - name: README check
         run: scripts/check-readme.sh
+
+  plugin-and-mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+      - name: Plugin manifests, hook, and status line
+        run: scripts/check-plugin.sh
+      - name: MCP package
+        run: scripts/check-mcp.sh

@@ -38,4 +38,6 @@ jq -e . plugin/.mcp.json >/dev/null || { echo ".mcp.json is not valid JSON"; exi
 test "$(jq -r '.mcpServers.cheapshot.command' plugin/.mcp.json)" = "npx" || { echo ".mcp.json must launch npx"; exit 1; }
 test "$(jq -c '.mcpServers.cheapshot.args' plugin/.mcp.json)" = '["-y","cheapshot-mcp"]' || { echo ".mcp.json args must be [-y, cheapshot-mcp]"; exit 1; }
 test "$(jq -r .mcpServers plugin/.claude-plugin/plugin.json)" = "./.mcp.json" || { echo "plugin.json mcpServers pointer wrong"; exit 1; }
+test -x plugin/scripts/cheapshot-statusline.sh || { echo "status line script is not executable"; exit 1; }
+plugin/tests/test-statusline.sh
 echo "ok: plugin manifests"
