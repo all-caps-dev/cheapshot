@@ -4,7 +4,8 @@ description: Install the plugin, what the Read hook does, the allow escape hatch
 ---
 
 The cheapshot plugin makes Claude Code read the words in a screenshot or PDF
-instead of the pixels. It is a hook, a skill, and an MCP server in one install.
+instead of the pixels. It is a hook and a skill in one install; the MCP server
+lands with Task 7.
 
 ## Install
 
@@ -35,15 +36,15 @@ denies the Read. The deny reason is the redacted text plus one line:
 cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, run: cheapshot allow /path/shot.png, then Read again.
 ```
 
-The same line goes to stderr so you see the saving as it happens, and every run
-adds a line to the [ledger](/cheapshot/ledger/).
+The same line goes to stderr and to the hook's `systemMessage`, so you see the
+saving as it happens, and every run adds a line to the [ledger](/cheapshot/ledger/).
 
 The Read goes ahead untouched, with no output from the hook, when any of these
 hold:
 
 - `CHEAPSHOT_PASSTHROUGH=1` is set in the environment.
-- `cheapshot` is not on `PATH`. The hook prints the brew command to stderr once
-  per session and steps aside.
+- `cheapshot` is not on `PATH`. The hook prints the brew command once per
+  session, to stderr and as a system message, and steps aside.
 - The path is on the one-shot allowlist (below).
 - The binary fails on the file. The hook says so on stderr and lets the pixels
   through rather than blocking the agent.

@@ -27,13 +27,16 @@ The user can turn that off for a session with `CHEAPSHOT_PASSTHROUGH=1`.
 cheapshot shot.png                  # redacted text of one image
 cheapshot --json --stats shot.png   # text, lines with boxes, redaction counts; savings on stderr
 cheapshot --newest ~/Desktop 2      # newest two images or PDFs in a folder
-cheapshot --pages 3-5 report.pdf    # a page range; PDFs over 20 pages need one
+cheapshot --pages 3-5 report.pdf    # a page range; the Claude Code hook asks for one on PDFs over 20 pages
 cheapshot --video screen.mp4        # timestamped transcript of a screen recording
 cheapshot --text notes.txt          # redact text with no OCR ("-" reads stdin)
 cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot allow /abs/path/shot.png  # let the next Read of that path see the pixels
 ```
+
+The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot report.pdf`
+reads every page.
 
 ## Rules
 
@@ -44,9 +47,10 @@ cheapshot allow /abs/path/shot.png  # let the next Read of that path see the pix
 3. Never retype a macOS screenshot path. Apple puts U+202F (narrow no-break space) before AM/PM
    in every timestamp it formats; it looks like a space and is not one. Glob the folder, or use
    `--newest`.
-4. Redaction is on by default: emails, cards, SSNs, phones, IPs, AWS, GitHub, OpenAI, and Slack
-   keys, JWTs, bearer tokens, PEM headers, and opaque long tokens become `[LABEL]`. Use `--raw`
-   only when the frame is known-safe and the literal text matters.
+4. Redaction is on by default: emails, cards, SSNs, phones, IPs, bank account and routing
+   numbers, AWS, GitHub, OpenAI, and Slack keys, JWTs, bearer tokens, PEM headers, and opaque
+   long tokens become `[LABEL]`. Use `--raw` only when the frame is known-safe and the literal
+   text matters.
 5. Quote the lines you rely on. OCR reads UI text cleanly but garbles stylised text and long
    random strings (`0` to `Ø`, `l` to `I`); check anything odd against the image, do not guess.
 6. For a folder of screenshots, run once with a glob and grep the output. Do not open them one
