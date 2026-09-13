@@ -49,6 +49,7 @@ public struct Options: Equatable {
         if args.first == "allow" {
             guard args.count >= 2 else { throw UsageError(message: "allow needs a path") }
             guard args.count == 2 else { throw UsageError(message: "allow takes exactly one path") }
+            guard !args[1].hasPrefix("-") else { throw UsageError(message: "unknown option \(args[1])") }
             return Options(command: .allow(path: args[1]))
         }
 

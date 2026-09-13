@@ -82,6 +82,7 @@ final class OptionsTests: XCTestCase {
             XCTAssertEqual(e as? UsageError, UsageError(message: "allow needs a path"))
         }
         XCTAssertThrowsError(try Options.parse(["allow", "a.png", "b.png"]))
+        XCTAssertThrowsError(try Options.parse(["allow", "--json"]))       // a flag is not a path
     }
 
     func testNumericBoundsAreValidated() {
