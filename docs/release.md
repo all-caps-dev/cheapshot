@@ -67,7 +67,7 @@ Verify, in this order:
 3. Download the asset and check the archive shape: `unzip -l cheapshot-v0.5.0-rc1-macos.zip` lists exactly one entry, `cheapshot`, at the archive root. A nested folder or a second file means the packaging step regressed and Homebrew will install the wrong path.
 4. On a second Mac or a fresh user: `brew install all-caps-dev/tap/cheapshot && cheapshot --version`.
 
-If notarization comes back anything other than Accepted, run `xcrun notarytool log <submission-id> --key 'AuthKey_<KEYID>.p8' --key-id '<KEYID>' --issuer '<ISSUER>'` locally to read the rejection; the submission id is in the job log.
+If notarization comes back anything other than Accepted, run `xcrun notarytool log '<submission-id>' --key 'AuthKey_<KEYID>.p8' --key-id '<KEYID>' --issuer '<ISSUER>'` locally to read the rejection; the submission id is in the job log.
 
 If anything fails, fix the workflow here, delete the rc release and tag (`gh release delete v0.5.0-rc1 -y && git push --delete origin v0.5.0-rc1 && git tag -d v0.5.0-rc1`), and revert the tap commit (`cd ../homebrew-tap && git revert --no-edit HEAD && git push`), then repeat.
 
