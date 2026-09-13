@@ -1,0 +1,26 @@
+{
+  "name": "cheapshot-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for cheapshot: on-device OCR for coding agents with secrets redacted first. Shells out to the cheapshot binary.",
+  "license": "MIT",
+  "author": "Ryan Ilano",
+  "homepage": "https://all-caps-dev.github.io/cheapshot/mcp/",
+  "repository": { "type": "git", "url": "https://github.com/all-caps-dev/cheapshot", "directory": "mcp" },
+  "type": "module",
+  "bin": { "cheapshot-mcp": "./dist/src/index.js" },
+  "files": ["dist/src", "README.md", "LICENSE"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.0"
+  }
+}
