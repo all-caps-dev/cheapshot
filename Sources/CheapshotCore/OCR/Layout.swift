@@ -58,7 +58,12 @@ public enum Layout {
     /// How far apart two horizontal spans must sit, in median line heights, before they are two
     /// columns rather than one pane with a ragged right edge.
     public static let columnGap: CGFloat = 1.5
+    /// How many voting lines a monospace run needs before it is a run.
     public static let minimumVotingLines = 3
+    /// How many lines a span group needs before it is a column of its own. Set equal to
+    /// `minimumVotingLines` today, but it is a different question (is this a pane?) from the
+    /// run-voting one (is this block fixed-width?), so the two are tuned apart.
+    public static let minimumColumnLines = 3
     public static let minimumVotingChars = 4
     public static let maxIndent = 40
 
@@ -99,7 +104,7 @@ public enum Layout {
     /// sit closer than `columnGap` line heights apart, so a ragged right edge stays one pane and
     /// chat bubbles that overlap horizontally stay one transcript in row order.
     ///
-    /// A span group is only a column once `minimumVotingLines` lines agree on it. A far-left "OK"
+    /// A span group is only a column once `minimumColumnLines` lines agree on it. A far-left "OK"
     /// status label, one lone indented line or a single right-aligned word is not a pane: it
     /// merges into the column nearest it horizontally and keeps its place in that column's row
     /// order. Fewer than two real columns means the frame is one column, and then the order is
@@ -126,7 +131,7 @@ public enum Layout {
                 groups.append(([s.i], s.lo, s.hi))
             }
         }
-        let real = groups.indices.filter { groups[$0].idx.count >= minimumVotingLines }
+        let real = groups.indices.filter { groups[$0].idx.count >= minimumColumnLines }
         guard real.count >= 2 else { return [readingOrder(Array(lines.indices), in: lines)] }
         let isColumn = Set(real)
         var buckets: [[Int]] = real.map { groups[$0].idx }       // already left to right

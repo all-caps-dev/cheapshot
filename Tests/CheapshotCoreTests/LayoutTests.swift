@@ -415,7 +415,26 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(text.components(separatedBy: "```").count - 1, 4, "expected exactly two fenced blocks")
     }
 
-    /// A span group needs `minimumVotingLines` lines before it is a column of its own. One
+    /// The column threshold is its own constant, tunable apart from the run-voting minimum. Two
+    /// span groups with exactly `minimumColumnLines` lines each are two columns; one line fewer
+    /// on either side collapses the frame to a single column in row order.
+    func testMinimumColumnLinesIsTheColumnThreshold() {
+        XCTAssertEqual(Layout.minimumColumnLines, 3)
+        func frame(left: Int, right: Int) -> [OCRLine] {
+            (0..<left).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
+                + (0..<right).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
+        }
+        let n = Layout.minimumColumnLines
+        XCTAssertEqual(Layout.columns(frame(left: n, right: n)).count, 2,
+                       "two groups of minimumColumnLines lines did not become two columns")
+        XCTAssertEqual(Layout.columns(frame(left: n, right: n - 1)).count, 1,
+                       "a group one short of minimumColumnLines opened a column")
+        XCTAssertEqual(Layout.sorted(frame(left: n, right: n - 1)).map(\.text),
+                       ["left 0", "right 0", "left 1", "right 1", "left 2"],
+                       "a single-column frame did not keep whole-frame row order")
+    }
+
+    /// A span group needs `minimumColumnLines` lines before it is a column of its own. One
     /// far-left status label beside a code pane is not a second column: it merges into the pane
     /// it sits nearest and keeps its place in the row order, which is what leaves the trailing
     /// absorb rule to decide whether it belongs to the run.
