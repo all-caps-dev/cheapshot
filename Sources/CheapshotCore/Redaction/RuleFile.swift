@@ -25,11 +25,21 @@ public enum RuleFile {
         let entries: [Entry]
         do { entries = try JSONDecoder().decode([Entry].self, from: data) }
         catch { throw LoadError(message: "rules file must be a JSON array of {name, pattern, caseInsensitive}: \(error.localizedDescription)") }
+        var seen = Set<String>()
         return try entries.map { e in
+            // The name is printed verbatim inside the [NAME] placeholder, so it must be a plain
+            // ASCII token, and it must be unique or two rules' counts merge in the report.
+            let name = e.name.uppercased()
+            guard !name.isEmpty, name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) else {
+                throw LoadError(message: "rule name \"\(e.name)\" must be letters, digits, _ or - only")
+            }
+            guard seen.insert(name).inserted else {
+                throw LoadError(message: "duplicate rule name \(name)")
+            }
             let opts: NSRegularExpression.Options = (e.caseInsensitive ?? true) ? [.caseInsensitive] : []
             do { _ = try NSRegularExpression(pattern: e.pattern, options: opts) }
-            catch { throw LoadError(message: "rule \(e.name.uppercased()): invalid pattern \(e.pattern)") }
-            return Rule(name: e.name.uppercased(), pattern: e.pattern, options: opts)
+            catch { throw LoadError(message: "rule \(name): invalid pattern \(e.pattern)") }
+            return Rule(name: name, pattern: e.pattern, options: opts)
         }
     }
 }
