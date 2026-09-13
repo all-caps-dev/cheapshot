@@ -4,7 +4,7 @@ Give your coding agent the words on your screen, not the pixels: on-device OCR t
 
 ## Why
 
-An image costs roughly `(width x height) / 750` tokens and it stays in the conversation, riding along on every later turn, while the words are usually all the agent needed. Screenshots are also full of things you do not want in an agent's context, so cheapshot redacts by default.
+An image costs roughly `(width x height) / 750` tokens and it stays in the conversation, riding along on every later turn. The words are usually all the agent needed. Screenshots are also full of things you do not want in an agent's context, so cheapshot redacts by default.
 
 Apple Vision framework. No network. No API cost. macOS only.
 

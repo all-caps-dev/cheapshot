@@ -25,9 +25,10 @@ One click: https://github.com/all-caps-dev/cheapshot/settings/pages > Build and 
 4. Export: Keychain Access > My Certificates > right-click the certificate > Export as .p12 with a password. Keep the password for step 5.
 
 ## 4. App Store Connect API key for notarization (RYAN, 5 minutes)
+Substitute the bracketed values before pasting.
 1. https://appstoreconnect.apple.com/access/integrations/api > Generate API Key, name `cheapshot-notary`, access Developer.
 2. Download the `.p8` once (it cannot be downloaded again). Note the Key ID and the Issuer ID shown on that page.
-3. Verify locally: `xcrun notarytool history --key AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER>` returns without an auth error.
+3. Verify locally: `xcrun notarytool history --key 'AuthKey_<KEYID>.p8' --key-id '<KEYID>' --issuer '<ISSUER>'` returns without an auth error.
 
 ## 5. Repository secrets (RYAN, 5 minutes; paste values, never into chat)
 `KEYCHAIN_PASSWORD` is a throwaway. It only unlocks the temporary keychain the release job builds and deletes on that runner, so a fresh random string is correct and it never needs to be written down or reused.
@@ -37,7 +38,7 @@ The certificate and the key go in by pipe, not by `-b`, so neither ever lands in
 base64 -i cheapshot-devid.p12 | gh secret set BUILD_CERTIFICATE_BASE64 -R all-caps-dev/cheapshot
 gh secret set P12_PASSWORD -R all-caps-dev/cheapshot
 gh secret set KEYCHAIN_PASSWORD -R all-caps-dev/cheapshot -b "$(openssl rand -hex 16)"
-base64 -i AuthKey_<KEYID>.p8 | gh secret set ASC_KEY_BASE64 -R all-caps-dev/cheapshot
+base64 -i 'AuthKey_<KEYID>.p8' | gh secret set ASC_KEY_BASE64 -R all-caps-dev/cheapshot
 gh secret set ASC_KEY_ID -R all-caps-dev/cheapshot -b "<KEYID>"
 gh secret set ASC_ISSUER -R all-caps-dev/cheapshot -b "<ISSUER>"
 ```
@@ -66,7 +67,7 @@ Verify, in this order:
 3. Download the asset and check the archive shape: `unzip -l cheapshot-v0.5.0-rc1-macos.zip` lists exactly one entry, `cheapshot`, at the archive root. A nested folder or a second file means the packaging step regressed and Homebrew will install the wrong path.
 4. On a second Mac or a fresh user: `brew install all-caps-dev/tap/cheapshot && cheapshot --version`.
 
-If notarization comes back anything other than Accepted, run `xcrun notarytool log <submission-id> --key AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER>` locally to read the rejection; the submission id is in the job log.
+If notarization comes back anything other than Accepted, run `xcrun notarytool log <submission-id> --key 'AuthKey_<KEYID>.p8' --key-id '<KEYID>' --issuer '<ISSUER>'` locally to read the rejection; the submission id is in the job log.
 
 If anything fails, fix the workflow here, delete the rc release and tag (`gh release delete v0.5.0-rc1 -y && git push --delete origin v0.5.0-rc1 && git tag -d v0.5.0-rc1`), and revert the tap commit (`cd ../homebrew-tap && git revert --no-edit HEAD && git push`), then repeat.
 

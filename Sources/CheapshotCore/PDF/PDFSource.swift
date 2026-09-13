@@ -22,8 +22,8 @@ public struct PDFDocumentResult {
 }
 
 /// Two lanes per page. Text lane: PDFKit's text layer, with fonts, so fixed-pitch fonts fence
-/// for free. Scan lane: when the text layer has under 20 characters, render at 2x and run the
-/// same Vision path as screenshots.
+/// for free. Scan lane: when the text layer has under 20 non-whitespace characters, render at
+/// 2x and run the same Vision path as screenshots.
 public enum PDFSource {
     public struct Failure: Error, CustomStringConvertible {
         public let message: String
