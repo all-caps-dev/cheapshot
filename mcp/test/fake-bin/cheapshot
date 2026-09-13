@@ -1,12 +1,22 @@
 #!/bin/sh
 # Fake cheapshot for tests. Prints canned JSON shaped exactly like the real --json output.
 # Never runs OCR. Env: FAKE_PAGES (PDF page count, default 5), FAKE_EXIT (exit code, default 0),
-# FAKE_LOG (append argv here, one line per call).
+# FAKE_LOG (append argv here, one line per call), FAKE_RAW (print this on stdout verbatim, nothing if empty,
+# and exit 0, for malformed-output tests), FAKE_EMPTY_TEXT=1 (every result has text "").
 [ -n "$FAKE_LOG" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
 exit_code="${FAKE_EXIT:-0}"
 if [ "$exit_code" != "0" ]; then
   echo "cheapshot: fake failure" >&2
   exit "$exit_code"
+fi
+if [ -n "${FAKE_RAW+set}" ]; then
+  [ -n "$FAKE_RAW" ] && printf '%s\n' "$FAKE_RAW"; exit 0
+fi
+if [ "${FAKE_EMPTY_TEXT:-0}" = "1" ]; then
+  cat <<'JSON'
+{"version":"0.5.0-dev","results":[{"file":"/tmp/blank.png","text":"","redactions":{},"image_tokens":1018,"text_tokens":0,"lines":[]}],"image_tokens":1018,"text_tokens":0}
+JSON
+  exit 0
 fi
 case " $* " in
   *" --version "*)
