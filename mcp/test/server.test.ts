@@ -116,3 +116,10 @@ test("cheapshot://ledger resource is the summary as JSON", async () => {
   assert.equal(item.mimeType, "application/json");
   assert.equal(JSON.parse(item.text ?? "{}").saved, 41200);
 });
+
+test("cheapshot_ocr newest without dir is an error result, never bare --newest", async () => {
+  const c = await connected();
+  const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { newest: { count: 2 } } })) as ToolResult;
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text ?? "", /dir/);
+});

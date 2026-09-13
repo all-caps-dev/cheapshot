@@ -74,7 +74,7 @@ export function createServer(): McpServer {
       inputSchema: {
         paths: z.array(z.string()).optional().describe("Absolute paths to png, jpg, jpeg, webp, gif, or pdf files"),
         newest: z.object({
-          dir: z.string().optional().describe("Folder to scan, default the current directory"),
+          dir: z.string().describe("Absolute path of the folder to scan. Required: the server's own working directory is arbitrary under an MCP host"),
           count: z.number().int().min(1).optional().describe("How many newest files, default 1"),
         }).optional().describe("Instead of paths: the newest image or PDF files in a folder"),
         raw: z.boolean().optional().describe("Skip redaction"),
