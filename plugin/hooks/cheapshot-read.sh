@@ -16,7 +16,7 @@ case "$ext" in png|jpg|jpeg|webp|gif|pdf) ;; *) exit 0 ;; esac
 [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ] && exit 0
 
 tmp="${TMPDIR:-/tmp}"
-sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"' | tr -c 'A-Za-z0-9._-\n' '_')
+sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"' | tr -c 'A-Za-z0-9._\n-' '_')
 
 # A hint that lets the Read proceed: one line on stderr, the same text as systemMessage on stdout.
 hint() {

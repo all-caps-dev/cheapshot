@@ -2,7 +2,9 @@
 # Fake cheapshot for tests. Prints canned JSON shaped exactly like the real --json output.
 # Never runs OCR. Env: FAKE_PAGES (PDF page count, default 5), FAKE_EXIT (exit code, default 0),
 # FAKE_LOG (append argv here, one line per call), FAKE_RAW (print this on stdout verbatim, nothing if empty,
-# and exit 0, for malformed-output tests), FAKE_EMPTY_TEXT=1 (every result has text "").
+# and exit 0, for malformed-output tests), FAKE_EMPTY_TEXT=1 (every result has text ""),
+# FAKE_PARTIAL=1 (one good result plus one {"file","error"} entry, exit 1). A --newest run answers
+# with the PDF result when FAKE_PAGES is set, else the image result.
 [ -n "$FAKE_LOG" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
 exit_code="${FAKE_EXIT:-0}"
 if [ "$exit_code" != "0" ]; then
@@ -18,6 +20,23 @@ if [ "${FAKE_EMPTY_TEXT:-0}" = "1" ]; then
 JSON
   exit 0
 fi
+if [ "${FAKE_PARTIAL:-0}" = "1" ]; then
+  cat <<'JSON'
+{"version":"0.5.0-dev","results":[{"file":"/tmp/shot.png","text":"hello world\nkey [AWS_KEY]","redactions":{"AWS_KEY":1},"image_tokens":1018,"text_tokens":37,"lines":[{"n":1,"text":"hello world","bbox":[0,0,100,10],"confidence":0.98},{"n":2,"text":"key [AWS_KEY]","bbox":[0,12,140,22],"confidence":0.91}]},{"file":"/tmp/missing.png","error":"no such file"}],"image_tokens":1018,"text_tokens":37}
+JSON
+  exit 1
+fi
+image_result() {
+  cat <<'JSON'
+{"version":"0.5.0-dev","results":[{"file":"/tmp/shot.png","text":"hello world\nkey [AWS_KEY]","redactions":{"AWS_KEY":1},"image_tokens":1018,"text_tokens":37,"lines":[{"n":1,"text":"hello world","bbox":[0,0,100,10],"confidence":0.98},{"n":2,"text":"key [AWS_KEY]","bbox":[0,12,140,22],"confidence":0.91}]}],"image_tokens":1018,"text_tokens":37}
+JSON
+}
+pdf_result() {
+  pages="${FAKE_PAGES:-5}"
+  cat <<JSON
+{"version":"0.5.0-dev","results":[{"file":"/tmp/report.pdf","text":"--- page 1 ---\nQuarterly notes\ncontact [EMAIL]","redactions":{"EMAIL":1},"image_tokens":2200,"text_tokens":18,"source":{"path":"/tmp/report.pdf","sha256":"ab12","pages":$pages},"pages":[{"n":1,"lane":"text","width":1224,"height":1584,"lines":[{"n":1,"text":"Quarterly notes","bbox":[72,136,523,150],"confidence":1.0}]}]}],"image_tokens":2200,"text_tokens":18}
+JSON
+}
 case " $* " in
   *" --version "*)
     echo "0.5.0-dev"; exit 0 ;;
@@ -34,14 +53,9 @@ JSON
 JSON
     exit 0 ;;
   *".pdf "*)
-    pages="${FAKE_PAGES:-5}"
-    cat <<JSON
-{"version":"0.5.0-dev","results":[{"file":"/tmp/report.pdf","text":"--- page 1 ---\nQuarterly notes\ncontact [EMAIL]","redactions":{"EMAIL":1},"image_tokens":2200,"text_tokens":18,"source":{"path":"/tmp/report.pdf","sha256":"ab12","pages":$pages},"pages":[{"n":1,"lane":"text","width":1224,"height":1584,"lines":[{"n":1,"text":"Quarterly notes","bbox":[72,136,523,150],"confidence":1.0}]}]}],"image_tokens":2200,"text_tokens":18}
-JSON
-    exit 0 ;;
+    pdf_result; exit 0 ;;
+  *" --newest "*)
+    if [ -n "${FAKE_PAGES+set}" ]; then pdf_result; else image_result; fi; exit 0 ;;
   *)
-    cat <<'JSON'
-{"version":"0.5.0-dev","results":[{"file":"/tmp/shot.png","text":"hello world\nkey [AWS_KEY]","redactions":{"AWS_KEY":1},"image_tokens":1018,"text_tokens":37,"lines":[{"n":1,"text":"hello world","bbox":[0,0,100,10],"confidence":0.98},{"n":2,"text":"key [AWS_KEY]","bbox":[0,12,140,22],"confidence":0.91}]}],"image_tokens":1018,"text_tokens":37}
-JSON
-    exit 0 ;;
+    image_result; exit 0 ;;
 esac
