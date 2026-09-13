@@ -1,7 +1,3 @@
-# typed: strict
-# frozen_string_literal: true
-
-# Cheapshot formula for Homebrew
 class Cheapshot < Formula
   desc "On-device screenshot, video, and PDF OCR with redaction, for AI agents"
   homepage "https://github.com/all-caps-dev/cheapshot"
