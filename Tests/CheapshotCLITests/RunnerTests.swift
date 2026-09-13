@@ -478,6 +478,10 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(i.err.contains("cheapshot: 1 image(s)"), i.err)
         let m = await run([pdf.path, png.path, "--stats", "--no-ledger"])
         XCTAssertTrue(m.err.contains("cheapshot: 2 input(s)"), m.err)
+        // The noun comes from what was asked for, so a PDF run that fails entirely is still pdf(s).
+        let f = await run([tmp.appendingPathComponent("missing.pdf").path, "--stats", "--no-ledger"])
+        XCTAssertEqual(f.code, 1)
+        XCTAssertTrue(f.err.contains("cheapshot: 0 pdf(s)"), f.err)
     }
 
     func testHelpAndVersion() async {

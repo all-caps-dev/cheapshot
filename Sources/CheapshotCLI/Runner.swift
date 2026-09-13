@@ -256,7 +256,11 @@ public enum CLI {
                                textTokens: t.textTokens, redactions: t.redactions), opts, io)
         }
         if opts.stats {
-            let noun = pdfs.inputs > 0 ? (images.inputs > 0 ? "input(s)" : "pdf(s)") : "image(s)"
+            // From the inputs asked for, not the ones that succeeded, so a PDF run that fails
+            // entirely still says pdf(s).
+            let isPDF = paths.map { ($0 as NSString).pathExtension.lowercased() == "pdf" }
+            let hasPDF = isPDF.contains(true), hasImage = isPDF.contains(false)
+            let noun = hasPDF ? (hasImage ? "input(s)" : "pdf(s)") : "image(s)"
             io.err(statsLine(inputs: ok, noun: noun, imageTokens: totalImage, textTokens: totalText))
         }
         return failed > 0 ? 1 : 0
