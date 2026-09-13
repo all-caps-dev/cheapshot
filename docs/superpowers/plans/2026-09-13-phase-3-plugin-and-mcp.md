@@ -40,6 +40,9 @@
 - Commit trailer on every commit: `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. Commits are signed (`git commit -S`); on a signing failure leave the work staged and report the exact `git commit -S -F <file>` line.
 - Accessibility (spec "CLI and docs"): plain text everywhere. The hook's stderr lines and the status line carry meaning in words, never colour. Every new site page image, if any, has non-empty alt text.
 - Plain writing in every doc and comment: simple words, complete sentences, no em dashes.
+- README limit: `scripts/check-readme.sh` allows at most 100 lines after the Task 4 sections land (not 110).
+- No `os` field in `mcp/package.json`: npm enforces it on `npm ci`, which would break the ubuntu CI job. The server is macOS-only in practice because the binary is; the README says so instead.
+- Hook output rule: anything the user should see goes in the top-level `systemMessage` field of the hook's stdout JSON (the documented universal hook output field). Stderr on exit 0 is not shown to the user, so a stderr line is a log copy, never the only channel.
 - Version strings: `plugin.json` and `mcp/package.json` both start at `0.1.0`. The CLI stays `0.5.0-dev` until the Phase 2 runbook's version step.
 
 ---
@@ -114,7 +117,7 @@ jq -e '.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")' plugin/.claude-plugin/plug
 test "$(jq -r .hooks plugin/.claude-plugin/plugin.json)" = "./hooks/hooks.json" || { echo "plugin.json hooks pointer wrong"; exit 1; }
 test "$(jq -r '.hooks.PreToolUse[0].matcher' plugin/hooks/hooks.json)" = "Read" || { echo "hook matcher must be Read"; exit 1; }
 cmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' plugin/hooks/hooks.json)
-test "$cmd" = '${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh' || { echo "hook command must be \${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh, got $cmd"; exit 1; }
+case "$cmd" in *'${CLAUDE_PLUGIN_ROOT}'*/hooks/cheapshot-read.sh*) ;; *) echo "hook command must contain \${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh, got $cmd"; exit 1 ;; esac
 echo "ok: plugin manifests"
 ```
 `chmod +x scripts/check-plugin.sh`.
@@ -171,7 +174,7 @@ The `mcpServers` pointer is added in Task 7 when `.mcp.json` exists, so an insta
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/cheapshot-read.sh",
             "timeout": 120
           }
         ]
@@ -292,7 +295,7 @@ fresh
 out=$(input /tmp/main.swift | run_hook 2>/dev/null); code=$?
 [ "$code" = 0 ] && [ -z "$out" ] && pass "non-image passes through" || fail "non-image passes through (code=$code out=$out)"
 
-# 2. a png is denied with the text and the savings line, on stdout and stderr
+# 2. a png is denied with the text and the savings line, in systemMessage and on stderr
 fresh
 err=$(mktemp)
 out=$(input /tmp/shot.png | run_hook 2>"$err"); code=$?
@@ -303,6 +306,7 @@ case "$reason" in *"hello world"*"key [AWS_KEY]"*) pass "reason carries the reda
 line='cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, run: cheapshot allow /tmp/shot.png, then Read again.'
 case "$reason" in *"$line") pass "reason ends with the savings line";; *) fail "reason ends with the savings line: $reason";; esac
 grep -qF "$line" "$err" && pass "savings line on stderr" || fail "savings line on stderr"
+[ "$(printf '%s' "$out" | jq -r '.systemMessage')" = "$line" ] && pass "savings line in systemMessage" || fail "savings line in systemMessage"
 grep -q -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "binary called with --json --stats" || fail "binary called with --json --stats: $(cat "$FAKE_LOG")"
 [ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')" = PreToolUse ] && pass "hookEventName set" || fail "hookEventName set"
 
@@ -322,14 +326,13 @@ out=$(input /tmp/shot.png | CHEAPSHOT_PASSTHROUGH=1 run_hook 2>/dev/null); code=
 fresh
 err=$(mktemp)
 out=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>"$err"); code=$?
-[ "$code" = 0 ] && [ -z "$out" ] && pass "missing binary passes through" || fail "missing binary passes through"
-grep -q 'brew install all-caps-dev/tap/cheapshot' "$err" && pass "missing binary hint names brew" || fail "missing binary hint names brew"
-err2=$(mktemp)
-input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>"$err2" >/dev/null
-[ ! -s "$err2" ] && pass "hint printed once per session" || fail "hint printed once per session"
-err3=$(mktemp)
-input /tmp/shot.png "" s2 | PATH="$NOBIN_PATH" sh "$hook" 2>"$err3" >/dev/null
-[ -s "$err3" ] && pass "new session gets the hint again" || fail "new session gets the hint again"
+[ "$code" = 0 ] && [ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" = "" ] && pass "missing binary passes through (no decision)" || fail "missing binary passes through (code=$code out=$out)"
+printf '%s' "$out" | jq -r '.systemMessage' | grep -q 'brew install all-caps-dev/tap/cheapshot' && pass "missing binary hint in systemMessage names brew" || fail "missing binary hint in systemMessage names brew: $out"
+grep -q 'brew install all-caps-dev/tap/cheapshot' "$err" && pass "missing binary hint on stderr too" || fail "missing binary hint on stderr too"
+out2=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null)
+[ -z "$out2" ] && pass "hint printed once per session" || fail "hint printed once per session"
+out3=$(input /tmp/shot.png "" s2 | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null)
+[ -n "$(printf '%s' "$out3" | jq -r '.systemMessage // empty')" ] && pass "new session gets the hint again" || fail "new session gets the hint again"
 
 # 6. allowlist: a live entry is consumed once, an expired entry is ignored
 fresh
@@ -359,8 +362,10 @@ grep -q -- '--json --no-ledger --pages 1-1 /tmp/report.pdf' "$FAKE_LOG" && pass 
 fresh
 err=$(mktemp)
 out=$(input /tmp/report.pdf | FAKE_PAGES=42 run_hook 2>"$err")
-[ -z "$out" ] && pass "42 page pdf passes through" || fail "42 page pdf passes through"
-grep -q 'pages' "$err" && grep -q '42' "$err" && pass "big pdf hint names the page count and pages" || fail "big pdf hint: $(cat "$err")"
+[ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" = "" ] && pass "42 page pdf passes through (no decision)" || fail "42 page pdf passes through: $out"
+msg=$(printf '%s' "$out" | jq -r '.systemMessage // empty')
+case "$msg" in *pages*42*"cheapshot --pages 1-5 /tmp/report.pdf"*) pass "big pdf hint in systemMessage names the page count, pages, and the Bash fallback";; *) fail "big pdf hint in systemMessage: $msg";; esac
+grep -q '42' "$err" && pass "big pdf hint on stderr too" || fail "big pdf hint on stderr too: $(cat "$err")"
 grep -q -- '--json --stats' "$FAKE_LOG" && fail "big pdf never fully run" || pass "big pdf never fully run"
 
 # 9. binary failure passes through with a stderr line
@@ -411,7 +416,9 @@ if ! command -v cheapshot >/dev/null 2>&1; then
   marker="$tmp/cheapshot-missing-$sid"
   if [ ! -e "$marker" ]; then
     : > "$marker"
-    echo "cheapshot: binary not found, reading the image as pixels. Install it: brew install all-caps-dev/tap/cheapshot" >&2
+    hint="cheapshot: binary not found, reading the image as pixels. Install it: brew install all-caps-dev/tap/cheapshot"
+    echo "$hint" >&2
+    jq -n --arg m "$hint" '{systemMessage: $m}'
   fi
   exit 0
 fi
@@ -439,7 +446,9 @@ if [ "$ext" = pdf ] && [ -z "$pages" ]; then
   probe=$(cheapshot --json --no-ledger --pages 1-1 "$path" 2>/dev/null) || exit 0
   count=$(printf '%s' "$probe" | jq -r '.results[0].source.pages // 0')
   if [ "$count" -gt 20 ] 2>/dev/null; then
-    echo "cheapshot: $path has $count pages, reading it as-is. Pass pages (for example pages: \"1-5\") to get redacted text for a range instead." >&2
+    hint="cheapshot: $path has $count pages, reading it as-is. Pass pages (for example pages: \"1-5\") to get redacted text for a range instead, or run from Bash: cheapshot --pages 1-5 $path"
+    echo "$hint" >&2
+    jq -n --arg m "$hint" '{systemMessage: $m}'
     exit 0
   fi
 fi
@@ -461,12 +470,12 @@ tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, run: cheapshot allow $path, then Read again."
 echo "$line" >&2
 jq -n --arg text "$text" --arg line "$line" \
-  '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: ($text + "\n\n" + $line)}}'
+  '{systemMessage: $line, hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: ($text + "\n\n" + $line)}}'
 exit 0
 ```
 `chmod +x plugin/hooks/cheapshot-read.sh`.
 
-Notes for the implementer: the deny object is built by `jq -n` from two `--arg` strings, so the text is JSON-escaped by jq and never by hand. `${path##*.}` on a path with no dot returns the whole path, which never matches the extension list, so it falls through to exit 0. The `[ "$exp" -ge "$now" ] 2>/dev/null` guard drops malformed lines instead of aborting the loop.
+Notes for the implementer: the deny object is built by `jq -n` from two `--arg` strings, so the text is JSON-escaped by jq and never by hand. The top-level `systemMessage` is the documented universal hook output field and is what the user actually sees; stderr on exit 0 is not shown to the user, so the stderr copy stays only as a log. The two hints (missing binary, big PDF) are `{"systemMessage": ...}` with no decision, so the Read proceeds. `${path##*.}` on a path with no dot returns the whole path, which never matches the extension list, so it falls through to exit 0. The `[ "$exp" -ge "$now" ] 2>/dev/null` guard drops malformed lines instead of aborting the loop.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -649,7 +658,8 @@ Change the `runLedger` signature and body:
     }
 
     static func runAllow(path: String, io: CLIIO) -> Int32 {
-        let absolute = path.hasPrefix("/") ? path : FileManager.default.currentDirectoryPath + "/" + path
+        let cwd = FileManager.default.currentDirectoryPath
+        let absolute = ((path.hasPrefix("/") ? path : cwd + "/" + path) as NSString).standardizingPath
         let expiry = Int(Date().timeIntervalSince1970) + allowSeconds
         let line = Data("\(expiry)\t\(absolute)\n".utf8)
         let url = allowFile(io)
@@ -679,7 +689,13 @@ Expected: one `Executed N tests, with 0 failures` line for each test target, no 
 
 - [ ] **Step 7: Check the site's use page and commit**
 
-`site/src/content/docs/use.md` lists every flag. Add `--days <n>` under the ledger flags and a line for `cheapshot allow <path>` that points at the Claude Code page (`/cheapshot/claude-code/`, written in Task 4). Then:
+`site/src/content/docs/use.md` lists every flag. Three edits:
+
+1. In the flag block, under `cheapshot --ledger                 # cumulative savings across every run`, add the line `cheapshot --ledger --days 7   # savings for the last week`.
+2. After the flag list, add the sentence: "`cheapshot allow <path>` lets the next Read of that image or PDF through the plugin's hook for five minutes." and link it to the Claude Code page (`/cheapshot/claude-code/`, written in Task 4).
+3. Where use.md shows the ledger form `cheapshot --ledger [--json] [--migrate]`, change it to `cheapshot --ledger [--json] [--migrate] [--days <n>]`.
+
+Then:
 ```bash
 git add Sources/CheapshotCLI Tests/CheapshotCLITests site/src/content/docs/use.md
 git commit -S -m "cli: cheapshot allow <path> for the hook, --ledger --days for the status line
@@ -717,7 +733,7 @@ grep -q -- '--video' "$skill" || { echo "SKILL.md lacks --video"; exit 1; }
 if grep -n 'local-dev\|CleanShot\|Ryan' "$skill"; then echo "SKILL.md still has personal paths or names"; exit 1; fi
 ```
 
-In `scripts/check-readme.sh`, change the limit line to `test "$n" -le 110 || { echo "README is $n lines, limit 110"; exit 1; }` and add `'## Claude Code'` and `'## MCP'` to the header list (between `'## Ledger'` and `'## Docs'`). Then append before the final `echo`:
+In `scripts/check-readme.sh`, change the limit line to `test "$n" -le 100 || { echo "README is $n lines, limit 100"; exit 1; }` and add `'## Claude Code'` and `'## MCP'` to the header list (between `'## Ledger'` and `'## Docs'`). Then append before the final `echo`:
 ```bash
 grep -q 'ignore previous instructions' README.md || { echo "README lacks the injection note"; exit 1; }
 grep -q 'claude plugin install cheapshot@all-caps-dev' README.md || { echo "README lacks the plugin install line"; exit 1; }
@@ -921,7 +937,7 @@ Stdio server for any MCP host. Tools `cheapshot_ocr`, `cheapshot_video`, `cheaps
 - [ ] **Step 5: Run the checks**
 
 Run: `scripts/check-plugin.sh && scripts/check-readme.sh && scripts/check-site.sh`
-Expected: `0 failure(s)`, `ok: plugin manifests`, `ok: README N lines` with N at most 110, `ok: site builds`.
+Expected: `0 failure(s)`, `ok: plugin manifests`, `ok: README N lines` with N at most 100, `ok: site builds`.
 
 - [ ] **Step 6: Commit**
 
@@ -962,9 +978,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
   "repository": { "type": "git", "url": "https://github.com/all-caps-dev/cheapshot", "directory": "mcp" },
   "type": "module",
   "bin": { "cheapshot-mcp": "./dist/src/index.js" },
-  "files": ["dist/src", "README.md"],
+  "files": ["dist/src", "README.md", "LICENSE"],
   "engines": { "node": ">=22" },
-  "os": ["darwin"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/test/",
@@ -1055,6 +1070,8 @@ OCR text enters the agent's context as data. A screenshot of a web page that con
 
 MIT.
 ```
+
+Copy the root `LICENSE` into `mcp/LICENSE` and add it to `files` (done above): `cp LICENSE mcp/LICENSE`.
 
 Copy the fake binary: `mkdir -p mcp/test/fake-bin && cp plugin/tests/fake-bin/cheapshot mcp/test/fake-bin/cheapshot && chmod +x mcp/test/fake-bin/cheapshot`. The npm package tests must stand alone in `mcp/`, so this is a copy, and `scripts/check-phase3.sh` (Task 8) asserts the two files are identical.
 
@@ -1268,6 +1285,8 @@ Add to `docs/credits.md` under the dependencies list (and the same line to `site
 ```
 
 - [ ] **Step 7: Commit**
+
+Commit `mcp/package-lock.json` too (the CI cache key needs it); `git add mcp` below picks it up because only `node_modules/` and `dist/` are ignored.
 
 ```bash
 git add .gitignore mcp scripts/check-mcp.sh docs/credits.md site/src/content/docs/credits.md
@@ -1585,13 +1604,13 @@ Expected: 17 passing (8 from Task 5, 9 here), 0 failing. Then `scripts/check-mcp
 
 Run from the repo root:
 ```bash
-PATH="$PWD/plugin/tests/fake-bin:$PATH" printf '%s\n' \
+printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-  | node mcp/dist/src/index.js | jq -c '.id, (.result.tools // [] | map(.name))'
+  | PATH="$PWD/plugin/tests/fake-bin:$PATH" node mcp/dist/src/index.js | jq -c '.id, (.result.tools // [] | map(.name))'
 ```
-Expected: `1`, `null`, `2`, `["cheapshot_ocr","cheapshot_video","cheapshot_ledger"]` in some order over the lines.
+Expected, one per line: `1`, `[]` (the initialize result has no `tools`, so the `// []` default prints), `2`, `["cheapshot_ocr","cheapshot_video","cheapshot_ledger"]` in some order. `PATH` is set on the `node` process, not on `printf`, so the server finds the fake binary.
 
 - [ ] **Step 6: Commit**
 
@@ -1910,14 +1929,17 @@ scripts/check-readme.sh
 scripts/check-workflows.sh
 scripts/check-site.sh
 cmp plugin/tests/fake-bin/cheapshot mcp/test/fake-bin/cheapshot || { echo "the two fake binaries drifted apart"; exit 1; }
-swift test 2>&1 | grep -E "Executed|error" | tail -2
-grep -q '^        cheapshot allow <path>' Sources/CheapshotCLI/Output.swift || { echo "usage lacks allow"; exit 1; }
+swift test > /tmp/cheapshot-swift-test.log 2>&1 || { tail -20 /tmp/cheapshot-swift-test.log; exit 1; }
+grep -E "Executed" /tmp/cheapshot-swift-test.log | tail -1
+grep -q '^ *cheapshot allow <path>' Sources/CheapshotCLI/Output.swift || { echo "usage lacks allow"; exit 1; }
 test -f docs/release-phase3.md || { echo "phase 3 runbook missing"; exit 1; }
 grep -q 'npm publish' docs/release-phase3.md || { echo "runbook lacks npm publish"; exit 1; }
 grep -q 'claude plugin marketplace add all-caps-dev/cheapshot' docs/release-phase3.md || { echo "runbook lacks the marketplace step"; exit 1; }
 echo "ok: phase 3"
 ```
 `chmod +x scripts/check-phase3.sh`. Run it: expected failure `phase 3 runbook missing`.
+
+Apply the same change to `scripts/check-phase2.sh`: replace its `swift test 2>&1 | grep -E "Executed|error" | tail -2` line with the two `swift test > /tmp/cheapshot-swift-test.log ...` and `grep -E "Executed" ...` lines above, so a failing test exits non-zero instead of being swallowed by the pipe.
 
 - [ ] **Step 6: Write the runbook**
 
@@ -1990,4 +2012,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Additions the spec did not name, and why: `--ledger --days <n>` (the brief's `cheapshot_ledger (days)` argument and the status line window need it; Core already had `summary(days:)`); the one page `--no-ledger --pages 1-1` probe so the hook and the MCP tool can learn a page count without a Spotlight dependency and without writing a ledger line; `CHEAPSHOT_BIN` in the MCP runner for hosts whose PATH lacks Homebrew.
 - Type consistency: the allowlist line format `<expiry>\t<path>` is identical in Task 2's hook and tests and Task 3's `runAllow` and test. `Options.Command.ledger(json:migrate:days:)` is used with three labels everywhere it appears. `window_days` is the key in Task 3's runner, the fake binary (Task 2), the MCP ledger test (Task 6), and the ledger page (Task 8). The savings line is byte for byte the same in the hook, its test, the site page, and the spec. `createServer` and `VERSION` are exported from `mcp/src/server.ts` in both its Task 5 stub and its Task 6 body. `PAGE_CAP` is defined in Task 5 and read in Task 6. Fake binary env names `FAKE_PAGES`, `FAKE_EXIT`, `FAKE_LOG` match across Tasks 2, 6, and 8.
 - Placeholder scan: no TBD or TODO. The `mcpServers` pointer is deliberately deferred from Task 1 to Task 7 and the reason is stated. The one conditional in Task 8 Step 4 (`claude plugin list --json` may not exist) gives both forms in full.
+- Pre-flight edits applied 2026-09-13:
+  - Task 5: dropped the `os` field (darwin only) from `mcp/package.json` (npm enforces it on `npm ci` and the CI job runs on ubuntu); `LICENSE` copied into `mcp/` and listed in `files`; `mcp/package-lock.json` is committed for the CI cache key.
+  - Task 8: `check-phase3.sh` usage grep is `'^ *cheapshot allow <path>'`; `swift test` writes a log and exits non-zero on failure instead of piping through grep; the same change is applied to `check-phase2.sh`.
+  - Task 2: the deny JSON carries the savings line in a top-level `systemMessage`; the missing-binary and big-PDF hints are `{"systemMessage": ...}` with no decision plus the stderr copy; the big-PDF hint names the Bash fallback `cheapshot --pages 1-5 <path>`; tests assert `.systemMessage`.
+  - Task 1: `hooks.json` quotes the variable as `"\"${CLAUDE_PLUGIN_ROOT}\"/hooks/cheapshot-read.sh"` and `check-plugin.sh` does a substring match.
+  - Task 3: `runAllow` runs the path through `standardizingPath`; Step 7 spells out the three use.md edits (`--days 7` example line, the `cheapshot allow <path>` sentence, `[--days <n>]` in the ledger form).
+  - Task 6 Step 5: the second expected line is `[]`, and `PATH` is set on the `node` process, not `printf`.
+  - Global Constraints: README limit 100 lines, no `os` field in `mcp/package.json`, the `systemMessage` rule.
 - Thinner than the rest: Task 8's status line install instructions depend on how the installed Claude Code exposes a plugin's path, which was not verified against a live install; the plan gives both forms and the runbook step 4 is where Ryan sees which one is true. Task 6 leans on the SDK 1.30 `registerTool` callback typing; the note gives the cast to use if the compiler objects.
