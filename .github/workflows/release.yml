@@ -46,8 +46,9 @@ jobs:
             --key AuthKey.p8 --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" \
             --wait --timeout 30m --output-format json > notary.json
           cat notary.json
-          grep -q '"status": *"Accepted"' notary.json || { echo "notarization not Accepted"; exit 1; }
+          grep -qE '"status"[[:space:]]*:[[:space:]]*"Accepted"' notary.json || { echo "notarization not Accepted"; exit 1; }
           shasum -a 256 "cheapshot-${TAG}-macos.zip" | tee "cheapshot-${TAG}-macos.zip.sha256"
+          rm -f AuthKey.p8 notary.json
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
