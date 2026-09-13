@@ -21,3 +21,16 @@ jobs:
         run: swift test
       - name: Universal release build and gate
         run: make build check
+      - name: Homebrew formula check
+        run: scripts/check-formula.sh
+
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: License check
+        run: scripts/check-license.sh
+      - name: Workflow check
+        run: scripts/check-workflows.sh
+      - name: README check
+        run: scripts/check-readme.sh

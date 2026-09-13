@@ -15,7 +15,7 @@ for p in $(cd src/content/docs && find . -name '*.md' | sed 's|^\./||; s|\.md$||
   test -f "$t" || { echo "page $p did not build"; exit 1; }
 done
 # every image in every page has alt text
-if grep -rn '!\[\]' src/content/docs; then echo "image without alt text"; exit 1; fi
+if grep -rn '!\[[[:space:]]*\]' src/content/docs; then echo "image without alt text"; exit 1; fi
 if grep -rn '<img' src/content/docs | grep -v 'alt="[^"]\+"'; then echo "img tag without alt"; exit 1; fi
 # the research pages are verbatim copies of the notes in docs/research, so they cannot drift:
 # skip the 4-line frontmatter, the blank line, the "kept as written" line and its blank line on

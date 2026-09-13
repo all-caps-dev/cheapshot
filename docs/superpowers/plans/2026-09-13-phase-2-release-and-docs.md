@@ -58,7 +58,7 @@
 - Consumes: nothing.
 - Produces: the string `MIT License` on line 1 of `LICENSE`; README "## License" section of exactly three lines that Task 7 keeps verbatim.
 
-- [ ] **Step 1: Write the check that must fail now**
+- [x] **Step 1: Write the check that must fail now**
 
 Create `scripts/check-license.sh`:
 ```bash
@@ -73,12 +73,12 @@ echo "ok: MIT everywhere"
 ```
 `chmod +x scripts/check-license.sh`.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `scripts/check-license.sh`
 Expected: `LICENSE is not MIT`, exit 1.
 
-- [ ] **Step 3: Replace LICENSE**
+- [x] **Step 3: Replace LICENSE**
 
 Write `LICENSE` with exactly:
 ```
@@ -105,7 +105,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-- [ ] **Step 4: Replace the README License section**
+- [x] **Step 4: Replace the README License section**
 
 Delete everything from the line `## License` to the end of the file (it currently runs through the "Commercial licensing" subsection and the `<img src="docs/licensing-animated.svg" ...>` tag) and append:
 ```markdown
@@ -114,14 +114,14 @@ Delete everything from the line `## License` to the end of the file (it currentl
 MIT. See [LICENSE](LICENSE). The Mac App Store app that will sit on this engine is a separate, private repo; the engine and the CLI stay MIT.
 ```
 
-- [ ] **Step 5: Delete the QR art and re-run the check**
+- [x] **Step 5: Delete the QR art and re-run the check**
 
 Run: `git rm -q docs/licensing-animated.svg docs/licensing.png && scripts/check-license.sh`
 Expected: `ok: MIT everywhere`.
 
 Also run: `grep -n "licensing" README.md docs/README.md 2>/dev/null` and remove any remaining reference to the deleted files (docs/README.md may index them).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A LICENSE README.md docs scripts/check-license.sh
@@ -139,7 +139,7 @@ git commit -m "license: MIT for the public engine and CLI (spec decision 2)"
 **Interfaces:**
 - Produces: `scripts/check-workflows.sh` that parses every workflow file and asserts the strings later tasks rely on; Tasks 3 and 5 extend its assertion list.
 
-- [ ] **Step 1: Write the check**
+- [x] **Step 1: Write the check**
 
 `scripts/check-workflows.sh`:
 ```bash
@@ -155,12 +155,12 @@ echo "ok: workflows parse and carry the required steps"
 ```
 `chmod +x scripts/check-workflows.sh`. If `python3 -c "import yaml"` fails on this Mac, use `ruby -ryaml -e "YAML.load_file('$f')"` instead; Ruby ships with macOS.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `scripts/check-workflows.sh`
 Expected: fails because `.github/workflows/` does not exist (glob yields the literal pattern and the parse errors), or `ci.yml lacks swift test`.
 
-- [ ] **Step 3: Write ci.yml**
+- [x] **Step 3: Write ci.yml**
 
 ```yaml
 name: CI
@@ -189,12 +189,12 @@ jobs:
         run: make build check
 ```
 
-- [ ] **Step 4: Run the check**
+- [x] **Step 4: Run the check**
 
 Run: `scripts/check-workflows.sh`
 Expected: `ok: workflows parse and carry the required steps`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/ci.yml scripts/check-workflows.sh
@@ -213,7 +213,7 @@ git commit -m "ci: swift test and the universal-binary gate on every push and PR
 - Consumes: `make build check` (Makefile), the seven repository secrets named in the runbook (Task 8): `BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`, `KEYCHAIN_PASSWORD`, `ASC_KEY_BASE64`, `ASC_KEY_ID`, `ASC_ISSUER`, `COMMITTER_TOKEN`.
 - Produces: a GitHub Release asset named `cheapshot-<tag>-macos.zip` at `https://github.com/all-caps-dev/cheapshot/releases/download/<tag>/cheapshot-<tag>-macos.zip`, which the formula URL (Task 4) and the bump step both use.
 
-- [ ] **Step 1: Extend the check (fails first)**
+- [x] **Step 1: Extend the check (fails first)**
 
 Append to `scripts/check-workflows.sh` before the final `echo`:
 ```bash
@@ -227,12 +227,12 @@ grep -q 'softprops/action-gh-release@v2' $r || { echo "release action not pinned
 grep -q 'homebrew-tap: all-caps-dev/homebrew-tap' $r || { echo "wrong tap"; exit 1; }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `scripts/check-workflows.sh`
 Expected: `release.yml does not trigger on v* tags` (grep on a missing file), exit 1.
 
-- [ ] **Step 3: Verify the action tags exist, then write release.yml**
+- [x] **Step 3: Verify the action tags exist, then write release.yml**
 
 Run: `gh api repos/softprops/action-gh-release/tags --jq '.[].name' | head -3` and `gh api repos/mislav/bump-homebrew-formula-action/tags --jq '.[].name' | head -3`.
 Expected: a `v2` (or `v2.x`) tag for action-gh-release and `v4.2` for the bump action. If action-gh-release has no v2 tag, pin the newest major it does have and update the check in Step 1 to match; record that in the report.
@@ -316,12 +316,12 @@ jobs:
 
 Notes for the implementer: the `--sign "Developer ID Application"` identity string works because the keychain holds exactly one such certificate; `notarytool --wait` fails the job on rejection, which is what we want; bare executables cannot be stapled, so there is no `stapler` step (Gatekeeper fetches the ticket online). Nothing in this workflow can be exercised locally; the runbook's dry-run section (Task 8) is where Ryan tests it with a `v0.5.0-rc1` tag.
 
-- [ ] **Step 4: Run the check**
+- [x] **Step 4: Run the check**
 
 Run: `scripts/check-workflows.sh`
 Expected: `ok: workflows parse and carry the required steps`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github/workflows/release.yml scripts/check-workflows.sh
@@ -341,7 +341,7 @@ git commit -m "release: tag-triggered universal build, sign, notarize, GitHub Re
 - Consumes: the release asset URL shape from Task 3.
 - Produces: the formula the runbook (Task 8) copies into `all-caps-dev/homebrew-tap/Formula/cheapshot.rb`.
 
-- [ ] **Step 1: Write the check (fails first)**
+- [x] **Step 1: Write the check (fails first)**
 
 `scripts/check-formula.sh`:
 ```bash
@@ -359,12 +359,12 @@ echo "ok: formula"
 ```
 `chmod +x scripts/check-formula.sh`.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `scripts/check-formula.sh`
 Expected: `formula missing`, exit 1.
 
-- [ ] **Step 3: Write the formula**
+- [x] **Step 3: Write the formula**
 
 `packaging/homebrew/cheapshot.rb`:
 ```ruby
@@ -395,12 +395,12 @@ The `sha256` placeholder is replaced by `bump-homebrew-formula-action` on the fi
 `cheapshot.rb` is the source of truth. The runbook in `docs/release.md` copies it to `all-caps-dev/homebrew-tap/Formula/cheapshot.rb` once; after that, `release.yml` bumps `url` and `sha256` in the tap on every `v*` tag. Edit here first, then re-copy.
 ```
 
-- [ ] **Step 4: Run the check**
+- [x] **Step 4: Run the check**
 
 Run: `scripts/check-formula.sh`
 Expected: `ok: formula`. If `brew style` complains about the placeholder sha256 length or a cop, fix the formula, never the check, and note the cop in the report.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packaging scripts/check-formula.sh
@@ -419,7 +419,7 @@ git commit -m "packaging: Homebrew formula, MIT, macOS 13 floor, version test"
 **Interfaces:**
 - Produces: `npm --prefix site run build` succeeds and writes `site/dist/index.html`; the sidebar in `astro.config.mjs` lists every page Task 6 adds, so Task 6 only adds files and sidebar entries.
 
-- [ ] **Step 1: Write the check (fails first)**
+- [x] **Step 1: Write the check (fails first)**
 
 `scripts/check-site.sh`:
 ```bash
@@ -442,12 +442,12 @@ echo "ok: site builds"
 ```
 `chmod +x scripts/check-site.sh`.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `scripts/check-site.sh`
 Expected: `site/package.json missing`, exit 1.
 
-- [ ] **Step 3: Scaffold**
+- [x] **Step 3: Scaffold**
 
 `site/package.json`:
 ```json
@@ -593,7 +593,7 @@ sudo make install   # copies to /usr/local/bin
 
 `site/src/content/docs/use.md`: the README "Use" block (the fenced command list) and the exit-codes line, verbatim, under `title: Use`, plus one paragraph per flag group taken from `cheapshot --help` output (run it and paste; do not invent flags).
 
-- [ ] **Step 4: Ignore build output and run the check**
+- [x] **Step 4: Ignore build output and run the check**
 
 Append to `.gitignore`:
 ```
@@ -604,7 +604,7 @@ site/.astro/
 Run: `scripts/check-site.sh`
 Expected: `ok: site builds`. First run installs packages; record the versions `npm ls --prefix site --depth=0` prints in the report.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .gitignore site scripts/check-site.sh
@@ -626,7 +626,7 @@ git commit -m "site: Starlight docs scaffold under site/, builds for GitHub Page
 - Consumes: Task 5's scaffold and check script.
 - Produces: every sidebar slug has a page; `pages.yml` deploys on push to main; `scripts/check-site.sh` is the acceptance gate the final review and the runbook cite.
 
-- [ ] **Step 1: Extend the checks (fail first)**
+- [x] **Step 1: Extend the checks (fail first)**
 
 Append to `scripts/check-workflows.sh` before the final `echo`:
 ```bash
@@ -652,12 +652,12 @@ fi
 ```
 Create `docs/site-colors.txt` after measuring the built CSS (Step 4).
 
-- [ ] **Step 2: Run the checks to verify they fail**
+- [x] **Step 2: Run the checks to verify they fail**
 
 Run: `scripts/check-workflows.sh; scripts/check-site.sh`
 Expected: `pages.yml must use withastro/action@v6`; then the site check fails on the missing sidebar pages once the sidebar is restored.
 
-- [ ] **Step 3: Write the pages**
+- [x] **Step 3: Write the pages**
 
 Restore the full sidebar from Task 5 Step 3 in `astro.config.mjs`.
 
@@ -670,7 +670,7 @@ Each page has frontmatter `title` and `description` and is written from the READ
 - `research/video-frames.md`, `research/structured-output.md`, `research/pdf-pipeline.md`: `docs/research/2026-09-12-*.md` copied verbatim under a frontmatter block with `title` and `description`, plus one line at the top: "Research note from 2026-09-12, kept as written."
 - `credits.md`: `docs/credits.md` body under frontmatter, after Step 5 updates the source.
 
-- [ ] **Step 4: Write pages.yml, measure colours**
+- [x] **Step 4: Write pages.yml, measure colours**
 
 `.github/workflows/pages.yml`:
 ```yaml
@@ -716,16 +716,16 @@ Measure the theme: build the site, then in `site/dist/_astro/*.css` find the bod
 ```
 with the real hex values. If a pair fails AA, override the failing variable in `site/src/styles/custom.css`, add it to `starlight({ customCss: ['./src/styles/custom.css'] })`, rebuild, re-measure.
 
-- [ ] **Step 5: Update docs/credits.md**
+- [x] **Step 5: Update docs/credits.md**
 
 Under "## Docs site" add lines for `withastro/action`, `actions/deploy-pages`, `actions/checkout`, `softprops/action-gh-release`, and pin the measured `lucode-starlight` version. Under a new "## Distribution" heading list GitHub Actions, GitHub Pages, GitHub Releases, Apple notarization (`notarytool`). Then copy the body into `site/src/content/docs/credits.md`.
 
-- [ ] **Step 6: Run the checks**
+- [x] **Step 6: Run the checks**
 
 Run: `scripts/check-workflows.sh && scripts/check-site.sh`
 Expected: both print their `ok:` lines. Also run `npm --prefix site run preview -- --host 127.0.0.1 --port 4321 &` and `curl -s http://127.0.0.1:4321/cheapshot/pdf/ | grep -c '<h1'` (expect 1), then kill the preview.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add site docs/credits.md docs/site-colors.txt .github/workflows/pages.yml scripts
@@ -743,7 +743,7 @@ git commit -m "site: feature pages, research notes, credits; Pages deploy workfl
 **Interfaces:**
 - Consumes: the site URL `https://all-caps-dev.github.io/cheapshot/` (Task 5), the License section from Task 1 (kept verbatim).
 
-- [ ] **Step 1: Write the check (fails first)**
+- [x] **Step 1: Write the check (fails first)**
 
 `scripts/check-readme.sh`:
 ```bash
@@ -762,12 +762,12 @@ echo "ok: README $n lines"
 ```
 `chmod +x scripts/check-readme.sh`.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `scripts/check-readme.sh`
 Expected: `README is 1xx lines, limit 90` (or the missing site link), exit 1.
 
-- [ ] **Step 3: Rewrite the README**
+- [x] **Step 3: Rewrite the README**
 
 Keep, in this order: the title and the positioning line ("Give your coding agent the words on your screen, not the pixels: on-device OCR that redacts secrets first and shows you the tokens it saved."), a two-sentence "Why", `## Install` (brew line, then `make` and `sudo make install`, one clause on Intel best-effort, one clause on ffmpeg for `--video`), `## Use` with exactly these examples:
 ```bash
@@ -778,12 +778,12 @@ cat notes.txt | cheapshot --text - # redact text, no OCR
 ```
 then the line `Exit codes: 0 ok, 1 an input failed (its --json entry carries "error"), 2 usage error.`, then one example plus one sentence each for `## Redaction` (`--rules my-rules.json shot.png` and the JSON shape), `## Video` (`--video screen.mp4`), `## PDF` (`--pages 3-5 report.pdf`), `## Ledger` (`--ledger` and the location rule in one line), a `## Docs` section with the single link `https://all-caps-dev.github.io/cheapshot/` ("every flag, the rule table, the ledger format, and the research notes"), and the Task 1 `## License` section verbatim. Everything else moves to the site (it already lives there after Task 6); delete it from the README.
 
-- [ ] **Step 4: Run the check and the site check**
+- [x] **Step 4: Run the check and the site check**
 
 Run: `scripts/check-readme.sh && scripts/check-site.sh`
 Expected: `ok: README NN lines` and `ok: site builds` (the site does not read the README at build time, but Task 6's pages were written from it; confirm nothing on the site links to a README anchor that no longer exists: `grep -rn 'README.md#' site/src` must be empty).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md scripts/check-readme.sh
@@ -803,7 +803,7 @@ git commit -m "docs: README shrinks to install, one example per feature, and the
 - Consumes: every earlier task's check script.
 - Produces: the list of Ryan-hand steps with URLs, in order, each with its verification, ending at the `v0.5.0` tag.
 
-- [ ] **Step 1: Write the aggregate check (fails first on nothing; it must pass)**
+- [x] **Step 1: Write the aggregate check (fails first on nothing; it must pass)**
 
 `scripts/check-phase2.sh`:
 ```bash
@@ -822,7 +822,7 @@ echo "ok: phase 2"
 ```
 `chmod +x scripts/check-phase2.sh`. Run it: expected failure `runbook missing`.
 
-- [ ] **Step 2: Write docs/release.md**
+- [x] **Step 2: Write docs/release.md**
 
 Plain writing, no em dashes, every step names RYAN or AGENT, has a verification, and carries the full URL. Content:
 
@@ -890,12 +890,12 @@ Watch https://github.com/all-caps-dev/cheapshot/actions/workflows/release.yml . 
 Bundle id hyphen (dev.all-caps.cheapshot vs dev.allcaps.cheapshot) is not needed for the CLI; decide it when the app's App ID is created in Phase 4.
 ```
 
-- [ ] **Step 3: Run the aggregate check**
+- [x] **Step 3: Run the aggregate check**
 
 Run: `scripts/check-phase2.sh`
 Expected: every `ok:` line, the test count, `ok: universal, minos 13.0`, `ok: phase 2`.
 
-- [ ] **Step 4: Tick the plan and commit**
+- [x] **Step 4: Tick the plan and commit**
 
 Change every `- [ ]` at the start of a line in this plan file to `- [x]` (line-start checkboxes only; leave the two literal code spans alone).
 
