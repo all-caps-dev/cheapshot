@@ -95,13 +95,15 @@ public struct FFmpegFrameSource: FrameSource {
         let out = Pipe(), err = Pipe()
         p.standardOutput = out; p.standardError = err
         do { try p.run() } catch { throw Failure(message: "could not launch \(ffmpeg): \(error.localizedDescription)") }
-        var outData = Data(), errData = Data()
+        // Both pipes drain concurrently so neither can fill and stall ffmpeg. stderr is read on a
+        // background queue into a locked buffer; stdout is read here, so no captured var is mutated.
+        let errBuf = PipeBuffer()
         let g = DispatchGroup()
-        g.enter(); DispatchQueue.global().async { outData = out.fileHandleForReading.readDataToEndOfFile(); g.leave() }
-        g.enter(); DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+        g.enter(); DispatchQueue.global().async { errBuf.set(err.fileHandleForReading.readDataToEndOfFile()); g.leave() }
+        let outData = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit(); g.wait()
         if p.terminationStatus != 0 {
-            let tail = (String(data: errData, encoding: .utf8) ?? "").split(separator: "\n").suffix(6).joined(separator: "\n")
+            let tail = (String(data: errBuf.get(), encoding: .utf8) ?? "").split(separator: "\n").suffix(6).joined(separator: "\n")
             throw Failure(message: "ffmpeg exited \(p.terminationStatus)\n\(tail)")
         }
 
@@ -119,6 +121,14 @@ public struct FFmpegFrameSource: FrameSource {
             FileHandle.standardError.write(Data("cheapshot: ffmpeg printed \(times.count) timestamps for \(files.count) frames; later frames use their index as seconds\n".utf8))
         }
         return files.enumerated().map { i, f in (i < times.count ? times[i] : TimeInterval(i), dir.appendingPathComponent(f)) }
+    }
+
+    /// One pipe's bytes, written from the reader queue and read after the group completes.
+    final class PipeBuffer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+        func set(_ d: Data) { lock.lock(); data = d; lock.unlock() }
+        func get() -> Data { lock.lock(); defer { lock.unlock() }; return data }
     }
 
     static func loadJPEG(_ url: URL) -> CGImage? {
