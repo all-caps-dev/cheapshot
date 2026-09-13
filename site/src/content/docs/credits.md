@@ -43,7 +43,7 @@ Everything cheapshot stands on, with links. Add a line whenever a dependency, to
 - [mac-ocr](https://github.com/privatenumber/mac-ocr) by privatenumber: the closest neighbour, and the source of the "save vision tokens" framing.
 - [ocrmac](https://github.com/straussmaximilian/ocrmac), [macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr), [ocrtool-mcp](https://github.com/ihugang/ocrtool-mcp), [Peekaboo](https://github.com/openclaw/Peekaboo).
 - [Maus](https://www.mausformac.com/), [Supamaus Lite](https://lite.supamaus.com/), [Redaktr](https://redaktr.app/): the Mac apps in the same space.
-- [Presidio Image Redactor](https://microsoft.github.io/presidio/image-redactor/), [agent-sweep](https://github.com/Ishannaik/agent-sweep), [Strac MCP DLP](https://github.com/strac-io/strac-mcp-dlp).
+- [Presidio Image Redactor](https://github.com/microsoft/presidio/tree/main/presidio-image-redactor), [agent-sweep](https://github.com/Ishannaik/agent-sweep), [Strac MCP DLP](https://github.com/strac-io/strac-mcp-dlp).
 - [ffmpeg-skill](https://github.com/MastroMimmo/ffmpeg-skill) by MastroMimmo, and [ffmpeg-analyse-video-skill](https://github.com/fabriqaai/ffmpeg-analyse-video-skill).
 
 ## Ideas borrowed

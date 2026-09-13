@@ -238,7 +238,7 @@ Bottom line: the niche is nearly empty, not empty. Nobody ships on-device OCR + 
 | deepseek-v4-vision-ocr skill | https://github.com/sjx417/deepseek-v4-vision-ocr | Free | 9 stars | Claude Code skill wrapping Tesseract. |
 
 ## Adjacent (redaction)
-- Presidio Image Redactor https://microsoft.github.io/presidio/image-redactor/ : OCR + PII, outputs redacted image, no agent hook.
+- Presidio Image Redactor https://github.com/microsoft/presidio/tree/main/presidio-image-redactor : OCR + PII, outputs redacted image, no agent hook.
 - Redaktr https://redaktr.app/ : $39 one-time, 3 Macs. On-device scan for keys/PII/faces, "clipboard guard" before pasting into Claude. Exports cleaned image, not text. Closest in spirit.
 - Strac MCP DLP https://github.com/strac-io/strac-mcp-dlp : 7 stars. OCR + redact + MCP, server-side, enterprise pricing. Cloud, not on-device.
 - agent-sweep https://github.com/Ishannaik/agent-sweep : 80 stars, redacts secrets from Claude Code histories after the fact.
