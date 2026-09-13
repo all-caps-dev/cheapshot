@@ -22,4 +22,7 @@ case "$cmd" in
   *'${CLAUDE_PLUGIN_ROOT}'*/hooks/cheapshot-read.sh) ;;
   *) echo "hook command must go through \${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh, got $cmd"; exit 1 ;;
 esac
+test -x plugin/hooks/cheapshot-read.sh || { echo "hook is not executable"; exit 1; }
+test -x plugin/tests/fake-bin/cheapshot || { echo "fake binary is not executable"; exit 1; }
+plugin/tests/test-hook.sh
 echo "ok: plugin manifests"

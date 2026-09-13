@@ -1,0 +1,37 @@
+#!/bin/sh
+# Fake cheapshot for tests. Prints canned JSON shaped exactly like the real --json output.
+# Never runs OCR. Env: FAKE_PAGES (PDF page count, default 5), FAKE_EXIT (exit code, default 0),
+# FAKE_LOG (append argv here, one line per call).
+[ -n "$FAKE_LOG" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
+exit_code="${FAKE_EXIT:-0}"
+if [ "$exit_code" != "0" ]; then
+  echo "cheapshot: fake failure" >&2
+  exit "$exit_code"
+fi
+case " $* " in
+  *" --version "*)
+    echo "0.5.0-dev"; exit 0 ;;
+  *" allow "*)
+    echo "cheapshot: allowed $2 for 5 minutes"; exit 0 ;;
+  *" --ledger "*)
+    cat <<'JSON'
+{"days":3,"image_tokens":48000,"inputs":31,"path":"/tmp/ledger.jsonl","percent":85,"redactions":12,"runs":31,"saved":41200,"text_tokens":6800,"window_days":7}
+JSON
+    exit 0 ;;
+  *" --video "*)
+    cat <<'JSON'
+{"version":"0.5.0-dev","results":[{"file":"/tmp/screen.mp4","text":"[00:00]\nbuild ok\n\n[00:12]\ntests pass","segments":[{"time":0,"stamp":"00:00","text":"build ok"},{"time":12.4,"stamp":"00:12","text":"tests pass"}],"frames":2,"redactions":{},"image_tokens":3100,"text_tokens":22}],"image_tokens":3100,"text_tokens":22}
+JSON
+    exit 0 ;;
+  *".pdf "*)
+    pages="${FAKE_PAGES:-5}"
+    cat <<JSON
+{"version":"0.5.0-dev","results":[{"file":"/tmp/report.pdf","text":"--- page 1 ---\nQuarterly notes\ncontact [EMAIL]","redactions":{"EMAIL":1},"image_tokens":2200,"text_tokens":18,"source":{"path":"/tmp/report.pdf","sha256":"ab12","pages":$pages},"pages":[{"n":1,"lane":"text","width":1224,"height":1584,"lines":[{"n":1,"text":"Quarterly notes","bbox":[72,136,523,150],"confidence":1.0}]}]}],"image_tokens":2200,"text_tokens":18}
+JSON
+    exit 0 ;;
+  *)
+    cat <<'JSON'
+{"version":"0.5.0-dev","results":[{"file":"/tmp/shot.png","text":"hello world\nkey [AWS_KEY]","redactions":{"AWS_KEY":1},"image_tokens":1018,"text_tokens":37,"lines":[{"n":1,"text":"hello world","bbox":[0,0,100,10],"confidence":0.98},{"n":2,"text":"key [AWS_KEY]","bbox":[0,12,140,22],"confidence":0.91}]}],"image_tokens":1018,"text_tokens":37}
+JSON
+    exit 0 ;;
+esac
