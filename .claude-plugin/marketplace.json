@@ -1,0 +1,15 @@
+{
+  "name": "all-caps-dev",
+  "owner": { "name": "Ryan Ilano" },
+  "metadata": {
+    "description": "Plugins from all-caps-dev. cheapshot: on-device OCR for coding agents with secrets redacted first."
+  },
+  "plugins": [
+    {
+      "name": "cheapshot",
+      "source": "./plugin",
+      "description": "Read the words in a screenshot or PDF instead of the pixels. PreToolUse hook on Read, a skill, and the cheapshot MCP server.",
+      "version": "0.1.0"
+    }
+  ]
+}

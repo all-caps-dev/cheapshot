@@ -1,0 +1,19 @@
+#!/bin/sh
+# Manifests parse, names match the spec, every hook path goes through CLAUDE_PLUGIN_ROOT.
+set -e
+cd "$(dirname "$0")/.."
+command -v jq >/dev/null || { echo "jq is required (brew install jq)"; exit 1; }
+for f in .claude-plugin/marketplace.json plugin/.claude-plugin/plugin.json plugin/hooks/hooks.json; do
+  test -f "$f" || { echo "$f missing"; exit 1; }
+  jq -e . "$f" >/dev/null || { echo "$f is not valid JSON"; exit 1; }
+done
+test "$(jq -r .name .claude-plugin/marketplace.json)" = "all-caps-dev" || { echo "marketplace name must be all-caps-dev"; exit 1; }
+test "$(jq -r '.plugins[0].name' .claude-plugin/marketplace.json)" = "cheapshot" || { echo "marketplace plugin name must be cheapshot"; exit 1; }
+test "$(jq -r '.plugins[0].source' .claude-plugin/marketplace.json)" = "./plugin" || { echo "marketplace source must be ./plugin"; exit 1; }
+test "$(jq -r .name plugin/.claude-plugin/plugin.json)" = "cheapshot" || { echo "plugin name must be cheapshot"; exit 1; }
+jq -e '.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")' plugin/.claude-plugin/plugin.json >/dev/null || { echo "plugin.json needs a semver version"; exit 1; }
+test "$(jq -r .hooks plugin/.claude-plugin/plugin.json)" = "./hooks/hooks.json" || { echo "plugin.json hooks pointer wrong"; exit 1; }
+test "$(jq -r '.hooks.PreToolUse[0].matcher' plugin/hooks/hooks.json)" = "Read" || { echo "hook matcher must be Read"; exit 1; }
+cmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' plugin/hooks/hooks.json)
+test "$cmd" = '${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh' || { echo "hook command must be \${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh, got $cmd"; exit 1; }
+echo "ok: plugin manifests"
