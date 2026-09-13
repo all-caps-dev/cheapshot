@@ -14,4 +14,4 @@ hero:
       variant: minimal
 ---
 
-cheapshot reads screenshots, screen recordings, and PDFs with Apple's Vision framework, redacts secrets before the text leaves your Mac, and keeps a ledger of the image tokens your agent did not have to pay for. No model in the loop. MIT.
+cheapshot reads screenshots, screen recordings, and PDFs with Apple's Vision framework, redacts secrets before the text leaves your Mac, and keeps a ledger of the image tokens your agent did not have to pay for. No model in the loop. MIT. Phase 3 adds a Claude Code plugin and an MCP server.

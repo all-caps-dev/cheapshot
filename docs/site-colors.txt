@@ -1,0 +1,7 @@
+# Body text on page background for the docs theme, light then dark. Measured from site/dist CSS on the date below.
+# The theme is lucode-starlight 1.0.0, which overrides Starlight's --sl-color-text and --sl-color-bg
+# with its own --foreground and --background. Both are achromatic oklch, converted to sRGB hex here:
+#   light  --foreground oklch(14.5% 0 0) -> #0a0a0a   --background oklch(100% 0 0)  -> #ffffff
+#   dark   --foreground oklch(98.5% 0 0) -> #fafafa   --background oklch(14.5% 0 0) -> #0a0a0a
+# measured: 2026-09-12
+# contrast-pairs: #0a0a0a/#ffffff #fafafa/#0a0a0a

@@ -12,16 +12,29 @@ export default defineConfig({
       title: 'cheapshot',
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
-      // Task 6 adds redaction, ledger, video, pdf, research/*, credits.
       sidebar: [
         { label: 'Install', slug: 'install' },
         { label: 'Use', slug: 'use' },
+        { label: 'Redaction', slug: 'redaction' },
+        { label: 'Ledger', slug: 'ledger' },
+        { label: 'Video', slug: 'video' },
+        { label: 'PDF', slug: 'pdf' },
+        {
+          label: 'Research',
+          items: [
+            { label: 'Video frames', slug: 'research/video-frames' },
+            { label: 'Structured output', slug: 'research/structured-output' },
+            { label: 'PDF pipeline', slug: 'research/pdf-pipeline' },
+          ],
+        },
+        { label: 'Credits', slug: 'credits' },
       ],
       plugins: [
         lucode({
           navLinks: [
             { label: 'Install', link: '/install/' },
             { label: 'Use', link: '/use/' },
+            { label: 'Credits', link: '/credits/' },
           ],
           footerText: '© 2026 Ryan Ilano. MIT. [Source](https://github.com/all-caps-dev/cheapshot).',
         }),

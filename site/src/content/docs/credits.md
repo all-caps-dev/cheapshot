@@ -1,4 +1,7 @@
-# Credits and thanks
+---
+title: Credits
+description: Everything cheapshot stands on, with links. Dependencies, tools, prior art, and borrowed ideas.
+---
 
 Everything cheapshot stands on, with links. Add a line whenever a dependency, tool, or borrowed idea arrives.
 
