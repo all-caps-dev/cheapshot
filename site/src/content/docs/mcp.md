@@ -27,7 +27,7 @@ Then one entry in the host's MCP config:
 { "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp"] } } }
 ```
 
-Claude Code users who installed the plugin already have this entry. Cursor reads
+Claude Code users who installed the [plugin](/cheapshot/claude-code/) already have this entry. Cursor reads
 `.cursor/mcp.json`; Codex CLI reads `~/.codex/config.toml` with a
 `[mcp_servers.cheapshot]` table (`command = "npx"`, `args = ["-y", "cheapshot-mcp"]`).
 
@@ -35,9 +35,9 @@ Claude Code users who installed the plugin already have this entry. Cursor reads
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `cheapshot_ocr` | `paths` (string[]) or `newest` ({dir, count}); `raw`, `min_confidence`, `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload |
-| `cheapshot_video` | `path`; `scene`, `max_frames`, `dedupe`, `raw` | Timestamped transcript; `structuredContent` carries `segments[]` |
-| `cheapshot_ledger` | `days` (optional) | The ledger summary as one sentence and as `structuredContent` |
+| `cheapshot_ocr` | One of `paths` (string[], absolute) or `newest` ({`dir` required; `count` integer >= 1, default 1}); optional `raw` (boolean), `min_confidence` (0 to 1, default 0.3), `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox`, PDF `source` and `pages`) |
+| `cheapshot_video` | `path` (required); optional `scene` (0 to 1, default 0.25), `max_frames` (integer >= 1, default 200), `dedupe` (0 to 1, default 0.90), `raw` (boolean) | Timestamped transcript; `structuredContent` is the `--json` payload with `segments[]` |
+| `cheapshot_ledger` | `days` (integer >= 1, optional; default all time) | The ledger summary as text and as `structuredContent` |
 
 Resource `cheapshot://ledger` returns the all time summary as JSON.
 
@@ -48,8 +48,9 @@ payload.
 
 ## Limits
 
-- A PDF over 20 pages needs a `pages` range. The tool refuses to dump the whole
-  document and says how many pages it has.
+- A PDF over 20 pages, passed by path or found by `newest`, needs a `pages`
+  range. The tool refuses to dump the whole document and says how many pages it
+  has.
 - Video needs ffmpeg on the host machine's PATH.
 - The binary must be on PATH, or `CHEAPSHOT_BIN` must point at it. When it is
   missing, every tool returns an error result that names the brew command.

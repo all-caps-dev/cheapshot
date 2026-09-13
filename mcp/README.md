@@ -22,9 +22,9 @@ Claude Code users get this for free from the cheapshot plugin (`claude plugin in
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `cheapshot_ocr` | `paths` (string[]) or `newest` ({dir, count}); `raw`, `min_confidence`, `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox`, PDF `source` and `pages`) |
-| `cheapshot_video` | `path`; `scene`, `max_frames`, `dedupe`, `raw` | Timestamped transcript; `structuredContent` is the `--json` payload with `segments[]` |
-| `cheapshot_ledger` | `days` (optional) | The ledger summary as text and as `structuredContent` |
+| `cheapshot_ocr` | One of `paths` (string[], absolute) or `newest` ({`dir` required; `count` integer >= 1, default 1}); optional `raw` (boolean), `min_confidence` (0 to 1, default 0.3), `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox`, PDF `source` and `pages`) |
+| `cheapshot_video` | `path` (required); optional `scene` (0 to 1, default 0.25), `max_frames` (integer >= 1, default 200), `dedupe` (0 to 1, default 0.90), `raw` (boolean) | Timestamped transcript; `structuredContent` is the `--json` payload with `segments[]` |
+| `cheapshot_ledger` | `days` (integer >= 1, optional; default all time) | The ledger summary as text and as `structuredContent` |
 
 Resource `cheapshot://ledger` returns the same summary as JSON.
 
