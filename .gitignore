@@ -4,3 +4,6 @@
 /ocra
 .build/
 *.xcodeproj
+site/node_modules/
+site/dist/
+site/.astro/
