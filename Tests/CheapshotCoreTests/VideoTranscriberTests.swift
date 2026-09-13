@@ -2,17 +2,13 @@ import XCTest
 @testable import CheapshotCore
 
 final class VideoTranscriberTests: XCTestCase {
-    static func whiteImage() -> CGImage {
-        let ctx = CGContext(data: nil, width: 300, height: 150, bitsPerComponent: 8, bytesPerRow: 0,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 150))
-        return ctx.makeImage()!
-    }
-
     struct Blank: FrameSource {
         func frames(of video: URL, maxFrames: Int) throws -> AsyncThrowingStream<VideoFrame, Error> {
             AsyncThrowingStream { c in
-                let img = VideoTranscriberTests.whiteImage()
+                let ctx = CGContext(data: nil, width: 300, height: 150, bitsPerComponent: 8, bytesPerRow: 0,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 150))
+                let img = ctx.makeImage()!
                 for t in [0.0, 2.0, 3.0] { c.yield(VideoFrame(time: t, image: img)) }
                 c.finish()
             }
@@ -45,8 +41,10 @@ final class VideoTranscriberTests: XCTestCase {
             return [Self.line("call \(calls.n)")]
         }
         let t = try await VideoTranscriber(source: Blank(), redactor: nil, ocr: ocr).transcribe(URL(fileURLWithPath: "/x.mp4"), maxFrames: 10)
-        XCTAssertEqual(t.frameCount, 3)
+        // The failed frame is not read: it is out of frameCount and its 60 image tokens are not "saved".
+        XCTAssertEqual(t.frameCount, 2)
         XCTAssertEqual(t.failedFrames, 1)
+        XCTAssertEqual(t.imageTokens, 2 * 60)
         XCTAssertEqual(t.segments.map(\.text), ["call 1", "call 3"])
     }
 

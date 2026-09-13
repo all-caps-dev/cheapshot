@@ -10,8 +10,9 @@ public struct VideoSegment: Equatable {
 public struct VideoTranscript {
     public var segments: [VideoSegment]
     public var frameCount: Int
-    /// Frames Vision threw on. They still count in `frameCount` and `imageTokens` (the pixels were
-    /// paid for) but produce no segment; a run where every frame fails throws instead of returning.
+    /// Frames Vision threw on. A failed frame is not in `frameCount` or `imageTokens`: no text came
+    /// back, so nothing was read and nothing was saved (runImages skips the same way). A run where
+    /// every frame fails throws instead of returning.
     public var failedFrames: Int
     public var imageTokens: Int
     public var redactions: RedactionReport
@@ -44,11 +45,11 @@ public struct VideoTranscriber {
         var report = RedactionReport()
         var lastError: Error?
         for try await frame in try source.frames(of: video, maxFrames: maxFrames) {
-            frameCount += 1
-            imageTokens += Tokens.image(width: frame.image.width, height: frame.image.height)
             let rendered: [RenderedLine]
             do { rendered = try ocr(frame.image, minConfidence) }
             catch { failedFrames += 1; lastError = error; continue }
+            frameCount += 1
+            imageTokens += Tokens.image(width: frame.image.width, height: frame.image.height)
             var text = Layout.text(rendered)
             var frameReport = RedactionReport()
             if let r = redactor { (text, frameReport) = r.redact(text) }
@@ -61,8 +62,8 @@ public struct VideoTranscriber {
             // user got, not every duplicate screen that was OCR'd and dropped.
             for (k, v) in frameReport.counts { report.counts[k, default: 0] += v }
         }
-        if frameCount > 0 && failedFrames == frameCount {
-            throw Failure(message: "OCR failed on all \(frameCount) frame(s); last error: \(lastError.map { "\($0)" } ?? "unknown")")
+        if frameCount == 0 && failedFrames > 0 {
+            throw Failure(message: "OCR failed on all \(failedFrames) frame(s); last error: \(lastError.map { "\($0)" } ?? "unknown")")
         }
         return VideoTranscript(segments: segments, frameCount: frameCount, failedFrames: failedFrames,
                                imageTokens: imageTokens, redactions: report)
