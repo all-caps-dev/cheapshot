@@ -491,6 +491,40 @@ final class LayoutTests: XCTestCase {
         XCTAssertEqual(Layout.render(lines).count, 7)
     }
 
+    /// A line with a finite row but no usable left edge (`minX` NaN) rides with the last column,
+    /// and inside that column it sorts last in its row, after every line with a real left edge.
+    /// That has to hold whatever order the lines arrive in: a NaN compared with `<` is never
+    /// less and never equal, so a comparator that reads it raw is not an order at all and the
+    /// sort may put the line anywhere. The columns are long enough that the sort is no longer a
+    /// stable insertion sort, which is what hid this on a handful of lines.
+    func testUnplacedFiniteRowLineSortsLastInItsRow() {
+        let left = (0..<30).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
+        let right = (0..<30).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
+        let nan = OCRLine(text: "nan x", bbox: CGRect(x: CGFloat.nan, y: 16 * 16, width: 100, height: 16), confidence: 1)
+        let lines = left + [nan] + right
+        var expected = left.map(\.text) + right.map(\.text)
+        expected.insert("nan x", at: 30 + 17)                     // after "right 16", before "right 17"
+        XCTAssertEqual(Layout.sorted(lines).map(\.text), expected)
+        for seed in 1...24 as ClosedRange<UInt64> {
+            var g = LCG(state: seed)
+            XCTAssertEqual(Layout.sorted(lines.shuffled(using: &g)).map(\.text), expected,
+                           "the unplaced line's row position depended on input order (seed \(seed))")
+        }
+    }
+
+    /// A small group exactly as far from two columns merges into the leftmost of them: the search
+    /// keeps the first column at a given distance, and the columns are already left to right.
+    func testEquidistantStrayJoinsTheLeftmostColumn() {
+        let left = (0..<3).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
+        let right = (0..<3).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
+        let stray = pane("stray", x: 500, width: 100, y: 16)      // 200 px from each column
+        let cols = Layout.columns(left + [stray] + right)
+        XCTAssertEqual(cols.count, 2)
+        XCTAssertEqual(cols[0].count, 4, "an equidistant stray did not merge into the leftmost column")
+        XCTAssertEqual(Layout.sorted(left + [stray] + right).map(\.text),
+                       ["left 0", "left 1", "stray", "left 2", "right 0", "right 1", "right 2"])
+    }
+
     /// A foreign pane's prose wedged between two voters is not a passenger. The run splits at it,
     /// and each side survives only where it still has `minimumVotingLines` voters of its own.
     func testForeignPaneLineSplitsTheRun() {

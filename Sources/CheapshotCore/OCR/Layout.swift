@@ -113,7 +113,8 @@ public enum Layout {
         guard !lines.isEmpty else { return [] }
         let gap = columnGap * rowPitch(lines)
         // A non-finite box has no span to place with. Those lines ride along with the rightmost
-        // column and take their row position there; a non-finite row parks at the end besides.
+        // column and take their row position there, after that row's placed lines (`readingOrder`
+        // sorts a non-finite left edge last in its row); a non-finite row parks at the end besides.
         var spans: [(i: Int, lo: CGFloat, hi: CGFloat)] = []
         var unplaced: [Int] = []
         for (i, l) in lines.enumerated() {
@@ -138,6 +139,8 @@ public enum Layout {
         for (g, group) in groups.enumerated() where !isColumn.contains(g) {
             var best = 0
             var bestDistance = CGFloat.infinity
+            // Strictly closer wins, so a group exactly as far from two columns merges into the
+            // leftmost of them: `real` is already left to right.
             for (k, c) in real.enumerated() {
                 let d = max(0, max(groups[c].lo - group.hi, group.lo - groups[c].hi))
                 if d < bestDistance { bestDistance = d; best = k }
@@ -159,7 +162,9 @@ public enum Layout {
     /// within half a line, b and c within half a line, a and c not), which lets the result depend
     /// on the input order: dense pages came back reversed and rows offset by half a line
     /// interleaved wrongly. Quantizing per column keeps a sidebar set in 11pt from being rowed off
-    /// an editor's 14pt.
+    /// an editor's 14pt. A non-finite `minX` sorts last in its row and a non-finite row last of
+    /// all, so the order stays total instead of leaning on the sort's stability: `<` on a NaN is
+    /// never true, and a comparator that read it raw would leave the line's place to chance.
     static func readingOrder(_ idx: [Int], in lines: [OCRLine]) -> [Int] {
         let pitch = rowPitch(idx.map { lines[$0] })
         // `Int(_:)` traps on a non-finite value, so a NaN box would crash the sort. Park those
@@ -168,12 +173,14 @@ public enum Layout {
             let r = (y / pitch).rounded()
             return r.isFinite ? Int(r) : Int.max
         }
+        func left(_ x: CGFloat) -> CGFloat { x.isFinite ? x : .infinity }
         return idx.sorted { a, b in
             let (p, q) = (lines[a].bbox, lines[b].bbox)
             let ra = row(p.minY)
             let rb = row(q.minY)
             if ra != rb { return ra < rb }
-            if p.minX != q.minX { return p.minX < q.minX }
+            let (xa, xb) = (left(p.minX), left(q.minX))
+            if xa != xb { return xa < xb }
             return p.minY < q.minY
         }
     }
