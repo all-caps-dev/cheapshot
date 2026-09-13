@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public struct VideoSegment: Equatable {
     public var time: TimeInterval
@@ -9,30 +10,45 @@ public struct VideoSegment: Equatable {
 public struct VideoTranscript {
     public var segments: [VideoSegment]
     public var frameCount: Int
+    /// Frames Vision threw on. They still count in `frameCount` and `imageTokens` (the pixels were
+    /// paid for) but produce no segment; a run where every frame fails throws instead of returning.
+    public var failedFrames: Int
     public var imageTokens: Int
     public var redactions: RedactionReport
 }
 
 /// Frames -> OCR -> redaction -> drop screens too similar to the last one -> timestamped segments.
 public struct VideoTranscriber {
+    public typealias OCRFunction = (CGImage, Float) throws -> [RenderedLine]
+
+    public struct Failure: Error, CustomStringConvertible {
+        public let message: String
+        public var description: String { message }
+    }
+
     public let source: FrameSource
     public let dedupe: Double
     public let minConfidence: Float
     public let redactor: Redactor?
+    public let ocr: OCRFunction
 
-    public init(source: FrameSource, dedupe: Double = 0.90, minConfidence: Float = 0.3, redactor: Redactor? = Redactor()) {
-        self.source = source; self.dedupe = dedupe; self.minConfidence = minConfidence; self.redactor = redactor
+    public init(source: FrameSource, dedupe: Double = 0.90, minConfidence: Float = 0.3, redactor: Redactor? = Redactor(),
+                ocr: @escaping OCRFunction = { try OCR.recognizeLayout(image: $0, minConfidence: $1) }) {
+        self.source = source; self.dedupe = dedupe; self.minConfidence = minConfidence; self.redactor = redactor; self.ocr = ocr
     }
 
     public func transcribe(_ video: URL, maxFrames: Int) async throws -> VideoTranscript {
         var segments: [VideoSegment] = []
         var lastText = ""
-        var frameCount = 0, imageTokens = 0
+        var frameCount = 0, failedFrames = 0, imageTokens = 0
         var report = RedactionReport()
+        var lastError: Error?
         for try await frame in try source.frames(of: video, maxFrames: maxFrames) {
             frameCount += 1
             imageTokens += Tokens.image(width: frame.image.width, height: frame.image.height)
-            guard let rendered = try? OCR.recognizeLayout(image: frame.image, minConfidence: minConfidence) else { continue }
+            let rendered: [RenderedLine]
+            do { rendered = try ocr(frame.image, minConfidence) }
+            catch { failedFrames += 1; lastError = error; continue }
             var text = Layout.text(rendered)
             if let r = redactor {
                 let (t, rep) = r.redact(text)
@@ -45,7 +61,11 @@ public struct VideoTranscriber {
             segments.append(VideoSegment(time: frame.time, text: trimmed))
             lastText = trimmed
         }
-        return VideoTranscript(segments: segments, frameCount: frameCount, imageTokens: imageTokens, redactions: report)
+        if frameCount > 0 && failedFrames == frameCount {
+            throw Failure(message: "OCR failed on all \(frameCount) frame(s); last error: \(lastError.map { "\($0)" } ?? "unknown")")
+        }
+        return VideoTranscript(segments: segments, frameCount: frameCount, failedFrames: failedFrames,
+                               imageTokens: imageTokens, redactions: report)
     }
 
     /// Cheap token-set overlap. Screen recordings repeat; near-identical frames are dropped.
