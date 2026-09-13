@@ -33,6 +33,15 @@ final class RedactorTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("icon@1.5x.png and ryan@example.com").text, "icon@1.5x.png and [EMAIL]")
     }
 
+    // Card 1862921219007841881: Vision reads dots as spaces or middle dots on tailnet addresses.
+    func testIPv4WithSpacesOrMiddleDotsIsRedacted() {
+        let (text, report) = Redactor().redact("peer 100 102 55 50 and 100·64·0·1 and 192.168.1.10")
+        XCTAssertEqual(text, "peer [IPV4] and [IPV4] and [IPV4]")
+        XCTAssertEqual(report.counts["IPV4"], 3)
+        XCTAssertEqual(Redactor().redact("300 102 55 50").text, "300 102 55 50")
+        XCTAssertEqual(Redactor().redact("v 1 2 3 4").text, "v 1 2 3 4")
+    }
+
     // Card 1862718065041474800: a rule that does not compile is reported, never dropped in silence.
     func testCompileFailuresAreReported() throws {
         let bad = Rule(name: "BAD", pattern: "(")

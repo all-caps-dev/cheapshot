@@ -47,5 +47,12 @@ public struct Rule: Sendable {
         Rule(name: "PHONE",       pattern: #"(?<!\d)(?:\+?1[ \-.])?\(?\d{3}\)?[ \-.]\d{3}[ \-.]\d{4}(?!\d)"#, options: []),
         Rule(name: "TOKEN",       pattern: #"(?<![A-Za-z0-9_\-+/=.])(?=[A-Za-z0-9_\-+/=.]*[a-z])(?=[A-Za-z0-9_\-+/=.]*[A-Z])[A-Za-z0-9_\-+/=.]{20,}"#, options: [], validator: { Validators.looksLikeSecret($0) }),
         Rule(name: "IPV4",        pattern: #"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"#, options: []),
+        // Vision reads the dots of a small-font address as single spaces or middle dots
+        // ("100 102 55 50"). Same name so the counts merge. Octets are range-checked by the
+        // regex; the validator refuses four single digits ("1 2 3 4"), which is prose or a
+        // version, not an address. Accepted cost: a four-column row of numbers up to 255 with
+        // five or more digits, such as top output or CSS shorthand, also redacts; a miss is worse.
+        Rule(name: "IPV4",        pattern: #"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)[ \u00B7]){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"#, options: [],
+             validator: { $0.filter(\.isNumber).count > 4 }),
     ]
 }
