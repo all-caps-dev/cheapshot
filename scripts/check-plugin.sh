@@ -14,6 +14,12 @@ test "$(jq -r .name plugin/.claude-plugin/plugin.json)" = "cheapshot" || { echo 
 jq -e '.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")' plugin/.claude-plugin/plugin.json >/dev/null || { echo "plugin.json needs a semver version"; exit 1; }
 test "$(jq -r .hooks plugin/.claude-plugin/plugin.json)" = "./hooks/hooks.json" || { echo "plugin.json hooks pointer wrong"; exit 1; }
 test "$(jq -r '.hooks.PreToolUse[0].matcher' plugin/hooks/hooks.json)" = "Read" || { echo "hook matcher must be Read"; exit 1; }
+jq -e '.owner.name | type == "string" and length > 0' .claude-plugin/marketplace.json >/dev/null || { echo "marketplace.json needs a non-empty owner.name"; exit 1; }
+jq -e '.hooks.PreToolUse[0].hooks[0].type == "command"' plugin/hooks/hooks.json >/dev/null || { echo "hook type must be command"; exit 1; }
+jq -e '.hooks.PreToolUse[0].hooks[0].timeout | type == "number"' plugin/hooks/hooks.json >/dev/null || { echo "hook timeout must be a number"; exit 1; }
 cmd=$(jq -r '.hooks.PreToolUse[0].hooks[0].command' plugin/hooks/hooks.json)
-test "$cmd" = '${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh' || { echo "hook command must be \${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh, got $cmd"; exit 1; }
+case "$cmd" in
+  *'${CLAUDE_PLUGIN_ROOT}'*/hooks/cheapshot-read.sh) ;;
+  *) echo "hook command must go through \${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh, got $cmd"; exit 1 ;;
+esac
 echo "ok: plugin manifests"

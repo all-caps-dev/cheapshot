@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/cheapshot-read.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/cheapshot-read.sh",
             "timeout": 120
           }
         ]
