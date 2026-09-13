@@ -26,6 +26,13 @@ final class RedactorTests: XCTestCase {
         XCTAssertEqual(Redactor(rules: []).redact("ryan@example.com").text, "ryan@example.com")
     }
 
+    // Card 1862723135569134862: fractional scale suffixes are not email domains either.
+    func testEmailSkipsFractionalScaleSuffix() {
+        let name = "CleanShot 2026-09-12 at 10.22.33@2.5x.png"
+        XCTAssertEqual(Redactor().redact(name).text, name)
+        XCTAssertEqual(Redactor().redact("icon@1.5x.png and ryan@example.com").text, "icon@1.5x.png and [EMAIL]")
+    }
+
     // Card 1862718065041474800: a rule that does not compile is reported, never dropped in silence.
     func testCompileFailuresAreReported() throws {
         let bad = Rule(name: "BAD", pattern: "(")

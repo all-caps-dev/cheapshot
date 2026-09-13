@@ -32,9 +32,9 @@ public struct Rule: Sendable {
         // differently from the lines it was joined from, which changed the line count in the
         // `--json` line array and left the token in the clear there.
         Rule(name: "BEARER",      pattern: #"\bBearer[ \t]+[A-Za-z0-9._\-]{16,}"#),
-        // The domain must not be a @2x/@3x scale suffix, so "CleanShot 2026-09-12 at
+        // The domain must not be a @2x/@3x/@2.5x scale suffix, so "CleanShot 2026-09-12 at
         // 10.22.33@2x.png" is not an address. Digit-only local parts are still addresses.
-        Rule(name: "EMAIL",       pattern: #"\b[A-Za-z0-9._%+\-]+@(?!\d+x\.)[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"#),
+        Rule(name: "EMAIL",       pattern: #"\b[A-Za-z0-9._%+\-]+@(?!\d+(?:\.\d+)?x\.)[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"#),
         Rule(name: "SSN",         pattern: #"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"#, options: []),
         Rule(name: "ROUTING",     pattern: #"\b\d{4}[ \-]?\d{4}[ \-]?\d\b"#, options: [], validator: { Validators.aba($0) }),
         Rule(name: "CARD",        pattern: #"\b\d(?:[ \-]?\d){12,18}\b"#, options: [], validator: { Validators.luhn($0) }),
