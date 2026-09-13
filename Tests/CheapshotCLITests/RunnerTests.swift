@@ -391,6 +391,17 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(v.out, cheapshotVersionForTests + "\n")
     }
 
+    /// --pages was only read by the PDF branch, so `cheapshot --pages 1-2 shot.png` accepted the
+    /// flag and ignored it. A page range on a non-PDF input is a usage error.
+    func testPagesWithAnImageInputIsAUsageError() async throws {
+        let png = try makeBlankPNG(name: "blank.png")
+        let r = await run(["--pages", "1-2", png.path])
+        XCTAssertEqual(r.code, 2, r.err)
+        XCTAssertTrue(r.err.contains("--pages"), r.err)
+        XCTAssertTrue(r.err.contains(png.path), r.err)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path))
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)

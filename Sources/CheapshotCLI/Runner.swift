@@ -159,6 +159,11 @@ public enum CLI {
 
     static func runImages(_ opts: Options, paths: [String], redactor: Redactor?, io: CLIIO) -> Int32 {
         guard !paths.isEmpty else { io.err("cheapshot: no input images\n"); return 2 }
+        // Only the PDF branch reads --pages; on any other input it was accepted and ignored.
+        if opts.pages != nil, let f = paths.first(where: { ($0 as NSString).pathExtension.lowercased() != "pdf" }) {
+            io.err("cheapshot: --pages applies to PDF input only, not \(f)\ntry: cheapshot --help\n")
+            return 2
+        }
         var results: [[String: Any]] = []
         var pdfs = RunTotals(), images = RunTotals()
         var failed = 0
