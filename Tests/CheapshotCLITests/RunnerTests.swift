@@ -543,6 +543,19 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(cleanResults[0]["failed_frames"] as? Int, 0)
     }
 
+    /// The video ledger row counts the frames that were read, not the frames extracted: a frame
+    /// Vision threw on cost nothing and saved nothing, so it is not an input. Runner passes
+    /// frameCount deliberately; this pins it with the ledger on, which the stats test leaves off.
+    func testVideoLedgerRowCountsSuccessfulFramesOnly() async throws {
+        let r = try await runVideo(["--json"], failingCalls: [2])
+        XCTAssertEqual(r.code, 0, r.err)
+        let entries = try ledgerEntries()
+        XCTAssertEqual(entries.count, 1, "one video row")
+        XCTAssertEqual(entries[0]["mode"] as? String, "video")
+        XCTAssertEqual(entries[0]["inputs"] as? Int, 2, "two frames were read; the failed one is not an input")
+        XCTAssertEqual(entries[0]["image_tokens"] as? Int, 120)
+    }
+
     /// One place computes the saving for every stats line. Zero image tokens is the case a
     /// division would break on; the normal pair pins the floor and the truncated percent.
     func testSavingsHandlesZeroImageTokensAndANormalPair() {
