@@ -83,7 +83,7 @@ OCR text enters the agent's context as data. A screenshot of a web page containi
 npx cheapshot-mcp
 ```
 
-Stdio server for any MCP host. Tools `cheapshot_ocr`, `cheapshot_video`, `cheapshot_ledger`; resource `cheapshot://ledger`. It shells out to the same binary. The MCP server lands with Phase 3 Task 7; until then the hook is the integration.
+Stdio server for any MCP host. Tools `cheapshot_ocr`, `cheapshot_video`, `cheapshot_ledger`; resource `cheapshot://ledger`. It shells out to the same binary.
 
 ## Docs
 

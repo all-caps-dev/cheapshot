@@ -4,8 +4,7 @@ description: Install the plugin, what the Read hook does, the allow escape hatch
 ---
 
 The cheapshot plugin makes Claude Code read the words in a screenshot or PDF
-instead of the pixels. It is a hook and a skill in one install; the MCP server
-lands with Task 7.
+instead of the pixels. It is a hook, a skill, and an MCP server in one install.
 
 ## Install
 
