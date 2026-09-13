@@ -1,6 +1,12 @@
 import Foundation
 import CheapshotCore
 
+public struct OutputError: Error, CustomStringConvertible {
+    public let message: String
+    public init(message: String) { self.message = message }
+    public var description: String { message }
+}
+
 public enum Output {
     public static func usage() -> String {
         """
@@ -34,17 +40,21 @@ public enum Output {
         """
     }
 
-    /// Whether Foundation can serialize the object: containers of String, finite numbers, Bool and
-    /// null only. Split out so the guard below is testable without tripping it.
-    public static func isValid(_ object: Any) -> Bool { JSONSerialization.isValidJSONObject(object) }
+    /// The serializer behind `json`, swappable so a test can make it fail.
+    static var serialize: (Any) throws -> Data = { object in
+        guard JSONSerialization.isValidJSONObject(object) else {
+            throw OutputError(message: "--json payload is not a valid JSON object")
+        }
+        return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
 
     /// Every caller builds the object from ints, finite doubles and strings, so a failure here is
-    /// a programming error. It used to come back as `{}` with exit 0, which a caller could take
-    /// for a run with no results; a loud trap is better than a silent empty envelope.
-    public static func json(_ object: Any) -> String {
-        precondition(isValid(object), "cheapshot: --json payload is not a valid JSON object: \(object)")
-        guard let d = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-              let s = String(data: d, encoding: .utf8) else { preconditionFailure("cheapshot: --json serialization failed") }
+    /// a programming error, but it is still reported as one: it used to come back as `{}` with
+    /// exit 0, which a caller could take for a run with no results, and a precondition prints
+    /// nothing in a release build. Callers turn the throw into a stderr line and exit 1.
+    public static func json(_ object: Any) throws -> String {
+        let d = try serialize(object)
+        guard let s = String(data: d, encoding: .utf8) else { throw OutputError(message: "--json payload is not UTF-8") }
         return s + "\n"
     }
 }

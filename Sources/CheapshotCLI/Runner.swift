@@ -77,6 +77,13 @@ public enum CLI {
         }
     }
 
+    /// Writes the --json envelope, or the serialization failure to stderr. False means the run
+    /// must exit 1: a payload that cannot be emitted is a failed run, not an empty one.
+    static func emit(_ object: Any, _ io: CLIIO) -> Bool {
+        do { io.out(try Output.json(object)); return true }
+        catch { io.err("cheapshot: \(error)\n"); return false }
+    }
+
     static func payload(_ results: [[String: Any]], imageTokens: Int, textTokens: Int) -> [String: Any] {
         ["version": cheapshotVersion, "results": results, "image_tokens": imageTokens, "text_tokens": textTokens]
     }
@@ -116,7 +123,7 @@ public enum CLI {
             }
             let s = try l.summary()
             if json {
-                io.out(Output.json(["days": s.days, "runs": s.runs, "inputs": s.inputs, "image_tokens": s.imageTokens,
+                io.out(try Output.json(["days": s.days, "runs": s.runs, "inputs": s.inputs, "image_tokens": s.imageTokens,
                                     "text_tokens": s.textTokens, "saved": s.saved, "redactions": s.redactions,
                                     "percent": s.percent, "path": l.url.path]))
             } else {
@@ -134,7 +141,7 @@ public enum CLI {
             raw = io.readStdin()
         } else {
             guard let s = try? String(contentsOfFile: path, encoding: .utf8) else {
-                if opts.json { io.out(Output.json(payload([["file": path, "error": "cannot read"]], imageTokens: 0, textTokens: 0))) }
+                if opts.json { _ = emit(payload([["file": path, "error": "cannot read"]], imageTokens: 0, textTokens: 0), io) }
                 io.err("cheapshot: cannot read \(path)\n")
                 return 1
             }
@@ -144,8 +151,8 @@ public enum CLI {
         let (text, report) = apply(redactor, input)
         let tt = Tokens.text(text)
         if opts.json {
-            io.out(Output.json(payload([["file": path, "text": text, "redactions": report.counts,
-                                         "image_tokens": 0, "text_tokens": tt]], imageTokens: 0, textTokens: tt)))
+            guard emit(payload([["file": path, "text": text, "redactions": report.counts,
+                                 "image_tokens": 0, "text_tokens": tt]], imageTokens: 0, textTokens: tt), io) else { return 1 }
         } else {
             io.out(text + "\n")
         }
@@ -235,7 +242,7 @@ public enum CLI {
 
         let totalImage = pdfs.imageTokens + images.imageTokens
         let totalText = pdfs.textTokens + images.textTokens
-        if opts.json { io.out(Output.json(payload(results, imageTokens: totalImage, textTokens: totalText))) }
+        if opts.json, !emit(payload(results, imageTokens: totalImage, textTokens: totalText), io) { return 1 }
         let ok = paths.count - failed
         // One line per kind present, so a PDF run never reports itself as measured image savings.
         for (mode, t) in [("pdf", pdfs), ("image", images)] where t.inputs > 0 {
@@ -253,7 +260,7 @@ public enum CLI {
 
     static func runVideo(_ opts: Options, path: String, redactor: Redactor?, io: CLIIO) async -> Int32 {
         guard FileManager.default.fileExists(atPath: path) else {
-            if opts.json { io.out(Output.json(payload([["file": path, "error": "no such video"]], imageTokens: 0, textTokens: 0))) }
+            if opts.json { _ = emit(payload([["file": path, "error": "no such video"]], imageTokens: 0, textTokens: 0), io) }
             io.err("cheapshot: no such video \(path)\n")
             return 1
         }
@@ -262,12 +269,12 @@ public enum CLI {
         let t: VideoTranscript
         do { t = try await transcriber.transcribe(URL(fileURLWithPath: path), maxFrames: opts.maxFrames) }
         catch {
-            if opts.json { io.out(Output.json(payload([["file": path, "error": "\(error)"]], imageTokens: 0, textTokens: 0))) }
+            if opts.json { _ = emit(payload([["file": path, "error": "\(error)"]], imageTokens: 0, textTokens: 0), io) }
             io.err("cheapshot: \(error)\n")
             return 1
         }
         guard t.frameCount > 0 else {
-            if opts.json { io.out(Output.json(payload([["file": path, "error": "no frames extracted"]], imageTokens: 0, textTokens: 0))) }
+            if opts.json { _ = emit(payload([["file": path, "error": "no frames extracted"]], imageTokens: 0, textTokens: 0), io) }
             io.err("cheapshot: no frames extracted\n")
             return 1
         }
@@ -277,10 +284,10 @@ public enum CLI {
         let tt = Tokens.text(body)
         if opts.json {
             let segs = t.segments.map { ["time": $0.time, "stamp": VideoTranscriber.stamp($0.time), "text": $0.text] as [String: Any] }
-            io.out(Output.json(payload([["file": path, "text": body.trimmingCharacters(in: .whitespacesAndNewlines),
-                                         "segments": segs, "frames": t.frameCount, "redactions": t.redactions.counts,
-                                         "image_tokens": t.imageTokens, "text_tokens": tt]],
-                                       imageTokens: t.imageTokens, textTokens: tt)))
+            guard emit(payload([["file": path, "text": body.trimmingCharacters(in: .whitespacesAndNewlines),
+                                 "segments": segs, "frames": t.frameCount, "redactions": t.redactions.counts,
+                                 "image_tokens": t.imageTokens, "text_tokens": tt]],
+                               imageTokens: t.imageTokens, textTokens: tt), io) else { return 1 }
         } else {
             io.out(body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
         }

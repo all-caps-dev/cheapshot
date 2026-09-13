@@ -364,16 +364,31 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(entries[1]["image_tokens"] as? Int, Tokens.image(width: 1224, height: 1584))
     }
 
-    /// Output.json used to swallow a serialization failure and print `{}` with exit 0. The
-    /// runner's payload has to be a valid JSON object end to end (bbox ints, finite confidence),
-    /// and Output.json now refuses anything else loudly instead of emitting an empty object.
-    func testRunnerPayloadIsAValidJSONObjectAndOutputRefusesAnInvalidOne() throws {
+    /// Output.json used to swallow a serialization failure and print `{}` with exit 0, and a
+    /// precondition would die silently in a release build. A payload Foundation cannot serialize is
+    /// a runtime failure: a message on stderr and exit 1, at every --json call site.
+    func testUnserializableJSONPayloadIsAMessageOnStderrAndExit1() async throws {
         let line = RenderedLine(n: 1, text: "x", bbox: CGRect(x: 1.2, y: 2.4, width: 3, height: 4), confidence: 0.5, fenced: false)
         let payload = CLI.payload([["file": "a.png", "lines": CLI.lineJSON([line], redactor: nil)]], imageTokens: 1, textTokens: 1)
-        XCTAssertTrue(JSONSerialization.isValidJSONObject(payload))
-        XCTAssertTrue(Output.json(payload).contains("\"a.png\""))
-        XCTAssertFalse(Output.isValid(["nan": Double.nan]), "a non-finite number is not serializable and must not become {}")
-        XCTAssertFalse(Output.isValid(["date": Date()]))
+        XCTAssertTrue(try Output.json(payload).contains("\"a.png\""))
+        XCTAssertThrowsError(try Output.json(["nan": Double.nan]), "a non-finite number must not become {}")
+        XCTAssertThrowsError(try Output.json(["date": Date()]))
+
+        let saved = Output.serialize
+        defer { Output.serialize = saved }
+        Output.serialize = { _ in throw OutputError(message: "injected") }
+        let l = await run(["--ledger", "--json"])
+        XCTAssertEqual(l.code, 1, l.err)
+        XCTAssertEqual(l.out, "")
+        XCTAssertTrue(l.err.hasPrefix("cheapshot: "), l.err)
+        XCTAssertTrue(l.err.contains("injected"), l.err)
+        let t = await run(["--text", "-", "--json"], stdin: "hello")
+        XCTAssertEqual(t.code, 1, t.err)
+        XCTAssertTrue(t.err.contains("injected"), t.err)
+        let png = try makeBlankPNG(name: "blank.png")
+        let i = await run([png.path, "--json", "--no-ledger"])
+        XCTAssertEqual(i.code, 1, i.err)
+        XCTAssertTrue(i.err.contains("injected"), i.err)
     }
 
     /// --newest on a directory that cannot be read used to say "no input images" and exit 2, as
