@@ -14,4 +14,7 @@ grep -q 'create-pullrequest: false' $r || { echo "bump action must commit direct
 grep -q 'xcrun notarytool submit' $r || { echo "release.yml does not notarize"; exit 1; }
 grep -q 'softprops/action-gh-release@v2' $r || { echo "release action not pinned to v2"; exit 1; }
 grep -q 'homebrew-tap: all-caps-dev/homebrew-tap' $r || { echo "wrong tap"; exit 1; }
+grep -q 'ditto -c -k --norsrc' $r || { echo "zip must place the binary at the archive root"; exit 1; }
+grep -q 'cheapshot-.*-macos\.zip' $r || { echo "release asset name changed"; exit 1; }
+grep -q 'notarization not Accepted' $r || { echo "release.yml must assert the notarization status"; exit 1; }
 echo "ok: workflows parse and carry the required steps"

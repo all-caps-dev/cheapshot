@@ -36,14 +36,18 @@ jobs:
           ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER: ${{ secrets.ASC_ISSUER }}
+          TAG: ${{ github.ref_name }}
         run: |
           codesign --force --timestamp --options runtime --sign "Developer ID Application" cheapshot
           codesign --verify --verbose=2 cheapshot
-          ditto -c -k --keepParent cheapshot "cheapshot-${{ github.ref_name }}-macos.zip"
+          ditto -c -k --norsrc cheapshot "cheapshot-${TAG}-macos.zip"
           echo -n "$ASC_KEY_BASE64" | base64 --decode -o AuthKey.p8
-          xcrun notarytool submit "cheapshot-${{ github.ref_name }}-macos.zip" \
-            --key AuthKey.p8 --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" --wait
-          shasum -a 256 "cheapshot-${{ github.ref_name }}-macos.zip" | tee "cheapshot-${{ github.ref_name }}-macos.zip.sha256"
+          xcrun notarytool submit "cheapshot-${TAG}-macos.zip" \
+            --key AuthKey.p8 --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" \
+            --wait --timeout 30m --output-format json > notary.json
+          cat notary.json
+          grep -q '"status": *"Accepted"' notary.json || { echo "notarization not Accepted"; exit 1; }
+          shasum -a 256 "cheapshot-${TAG}-macos.zip" | tee "cheapshot-${TAG}-macos.zip.sha256"
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v2
@@ -52,6 +56,8 @@ jobs:
             cheapshot-${{ github.ref_name }}-macos.zip
             cheapshot-${{ github.ref_name }}-macos.zip.sha256
           generate_release_notes: true
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   tap:
     needs: release
