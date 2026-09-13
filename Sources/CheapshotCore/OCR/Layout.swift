@@ -297,8 +297,10 @@ public enum Layout {
             guard !voting.isEmpty else { continue }
             let cell = median(voting.map(\.1))
             // Only finite left edges set the block's left edge. `min()` keeps a leading NaN, and a
-            // NaN left edge would zero every indent in the run, not just the broken line's.
-            let minX = voting.map { s[$0.0].bbox.minX }.filter(\.isFinite).min() ?? 0
+            // NaN left edge would zero every indent in the run, not just the broken line's. No
+            // finite voter edge at all is no origin, and then nothing in the run is indented:
+            // a NaN origin makes every `cells` below non-finite.
+            let minX = voting.map { s[$0.0].bbox.minX }.filter(\.isFinite).min() ?? .nan
             for i in run {
                 // `Int(_:)` traps on a non-finite value, so a NaN origin on a line the run holds
                 // would crash rather than measure wrong. No usable origin means no indent.

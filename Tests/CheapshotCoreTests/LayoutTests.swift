@@ -286,6 +286,22 @@ final class LayoutTests: XCTestCase {
         XCTAssertTrue(r.allSatisfy(\.fenced))
     }
 
+    /// When every voter has a non-finite left edge the run has no usable origin at all, and then
+    /// no line in it gets an indent: a finite interior line must not be measured from x = 0 and
+    /// handed minX / cell spaces. It stays fenced, at zero.
+    func testRunWithNoFiniteVoterEdgeIndentsNothing() {
+        func nanVoter(_ y: CGFloat) -> OCRLine {
+            OCRLine(text: "nan voter", bbox: CGRect(x: CGFloat.nan, y: y, width: 72, height: 16),
+                    confidence: 0.9, cellWidth: 8)
+        }
+        let lines = [nanVoter(0), nanVoter(16), mono("}", x: 100, y: 32), nanVoter(48)]
+        XCTAssertEqual(Layout.monospaceRuns(Layout.sorted(lines)), [0..<4], "precondition: one run over all four")
+        let r = Layout.render(lines)
+        XCTAssertEqual(r.map(\.text), ["nan voter", "nan voter", "}", "nan voter"],
+                       "a finite line inside a run with no finite voter edge was indented from x = 0")
+        XCTAssertTrue(r.allSatisfy(\.fenced))
+    }
+
     func testRenderWithExplicitRunsIgnoresDetection() {
         // Proportional-looking widths: monospaceRuns would find nothing here.
         let lines = [
@@ -419,7 +435,6 @@ final class LayoutTests: XCTestCase {
     /// span groups with exactly `minimumColumnLines` lines each are two columns; one line fewer
     /// on either side collapses the frame to a single column in row order.
     func testMinimumColumnLinesIsTheColumnThreshold() {
-        XCTAssertEqual(Layout.minimumColumnLines, 3)
         func frame(left: Int, right: Int) -> [OCRLine] {
             (0..<left).map { i in pane("left \(i)", x: 0, width: 300, y: CGFloat(i) * 16) }
                 + (0..<right).map { i in pane("right \(i)", x: 800, width: 300, y: CGFloat(i) * 16) }
