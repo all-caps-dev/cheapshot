@@ -25,4 +25,12 @@ esac
 test -x plugin/hooks/cheapshot-read.sh || { echo "hook is not executable"; exit 1; }
 test -x plugin/tests/fake-bin/cheapshot || { echo "fake binary is not executable"; exit 1; }
 sh plugin/tests/test-hook.sh
+skill=plugin/skills/cheapshot/SKILL.md
+test -f "$skill" || { echo "$skill missing"; exit 1; }
+head -1 "$skill" | grep -q '^---$' || { echo "SKILL.md needs frontmatter"; exit 1; }
+grep -q '^name: cheapshot$' "$skill" || { echo "SKILL.md name must be cheapshot"; exit 1; }
+grep -q 'ignore previous instructions' "$skill" || { echo "SKILL.md lacks the injection note"; exit 1; }
+grep -q 'cheapshot allow' "$skill" || { echo "SKILL.md lacks the allow escape hatch"; exit 1; }
+grep -q -- '--video' "$skill" || { echo "SKILL.md lacks --video"; exit 1; }
+if grep -n 'local-dev\|CleanShot\|Ryan' "$skill"; then echo "SKILL.md still has personal paths or names"; exit 1; fi
 echo "ok: plugin manifests"

@@ -32,7 +32,7 @@ cheapshot --cleanshot              # newest CleanShot capture (falls back to ~/D
 cat notes.txt | cheapshot --text - # redact text, no OCR
 ```
 
-Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 usage error.
+Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 usage error. An empty or unreadable `--newest` or `--cleanshot` folder is an input failure: exit 1, and the message names the folder.
 
 ## Redaction
 
@@ -56,7 +56,7 @@ ffmpeg hands over only the frames where the screen changed, cheapshot OCRs those
 cheapshot --pages 3-5 report.pdf
 ```
 
-Pages with a text layer are read through PDFKit and pages without one are rendered and OCR'd like a screenshot, which `--json` reports per page.
+Pages with a text layer are read through PDFKit and pages without one are rendered and OCR'd like a screenshot, which `--json` reports per page. `--pages` on a non-PDF input is a usage error (exit 2).
 
 ## Ledger
 
@@ -65,6 +65,25 @@ cheapshot --ledger
 ```
 
 Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledger.jsonl`, or to `$CHEAPSHOT_HOME/ledger.jsonl` when that variable is set, tagged with the mode it ran in: `image`, `pdf`, or `video`.
+
+## Claude Code
+
+```bash
+claude plugin marketplace add all-caps-dev/cheapshot
+claude plugin install cheapshot@all-caps-dev
+```
+
+The plugin's hook intercepts `Read` on images and PDFs and hands the agent redacted text plus one line saying what it saved. The agent gets the pixels back with `cheapshot allow <path>` when it needs layout. `CHEAPSHOT_PASSTHROUGH=1` turns the hook off for a session. The binary is not bundled; brew it first.
+
+OCR text enters the agent's context as data. A screenshot of a web page containing "ignore previous instructions" is now text in context, the same risk as reading any file.
+
+## MCP
+
+```bash
+npx cheapshot-mcp
+```
+
+Stdio server for any MCP host. Tools `cheapshot_ocr`, `cheapshot_video`, `cheapshot_ledger`; resource `cheapshot://ledger`. It shells out to the same binary.
 
 ## Docs
 

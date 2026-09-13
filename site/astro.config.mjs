@@ -19,6 +19,7 @@ export default defineConfig({
         { label: 'Ledger', slug: 'ledger' },
         { label: 'Video', slug: 'video' },
         { label: 'PDF', slug: 'pdf' },
+        { label: 'Claude Code', slug: 'claude-code' },
         {
           label: 'Research',
           items: [
