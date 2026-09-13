@@ -487,6 +487,62 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(f.err.contains("cheapshot: 0 pdf(s)"), f.err)
     }
 
+    /// Three white frames without ffmpeg, so a video run is deterministic and needs no fixture.
+    struct ThreeBlankFrames: FrameSource {
+        func frames(of video: URL, maxFrames: Int) throws -> AsyncThrowingStream<VideoFrame, Error> {
+            AsyncThrowingStream { c in
+                let ctx = CGContext(data: nil, width: 300, height: 150, bitsPerComponent: 8, bytesPerRow: 0,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 150))
+                let img = ctx.makeImage()!
+                for t in [0.0, 2.0, 3.0] { c.yield(VideoFrame(time: t, image: img)) }
+                c.finish()
+            }
+        }
+    }
+
+    struct OCRFailed: Error {}
+
+    /// Drives runVideo through the transcriber seam: a stub frame source and a fake OCR that
+    /// answers with distinct text per call, throwing on the call numbers given.
+    func runVideo(_ args: [String], failingCalls: Set<Int>) async throws -> (code: Int32, out: String, err: String) {
+        final class Box { var out = "", err = "", calls = 0 }
+        let box = Box()
+        let video = tmp.appendingPathComponent("clip.mp4")
+        try Data().write(to: video)
+        let opts = try Options.parse(args + ["--video", video.path])
+        let io = CLIIO(out: { box.out += $0 }, err: { box.err += $0 }, readStdin: { "" },
+                       environment: ["CHEAPSHOT_HOME": tmp.path], home: tmp.path)
+        let ocr: VideoTranscriber.OCRFunction = { _, _ in
+            box.calls += 1
+            if failingCalls.contains(box.calls) { throw OCRFailed() }
+            return [RenderedLine(n: 1, text: "screen number \(box.calls)", bbox: CGRect(x: 0, y: 0, width: 100, height: 10), confidence: 1, fenced: false)]
+        }
+        let code = await CLI.runVideo(opts, path: video.path, redactor: nil, io: io,
+                                      transcriber: { o, r in VideoTranscriber(source: ThreeBlankFrames(), dedupe: o.dedupe, minConfidence: o.minConfidence, redactor: r, ocr: ocr) })
+        return (code, box.out, box.err)
+    }
+
+    /// A frame Vision threw on is out of frameCount and imageTokens, so a run that silently
+    /// dropped it under-reported what was skipped. --stats names the failed count when it is
+    /// nonzero and --json carries it as failed_frames; a clean run reads exactly as before.
+    func testVideoStatsAndJSONReportFailedFrames() async throws {
+        let r = try await runVideo(["--json", "--stats", "--no-ledger"], failingCalls: [2])
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertTrue(r.err.contains("cheapshot: 2 scene frames, 1 failed, 2 distinct screens  120 image tokens -> "), r.err)
+        let results = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(results[0]["frames"] as? Int, 2)
+        XCTAssertEqual(results[0]["failed_frames"] as? Int, 1)
+        XCTAssertEqual(results[0]["image_tokens"] as? Int, 120)
+
+        let clean = try await runVideo(["--json", "--stats", "--no-ledger"], failingCalls: [])
+        XCTAssertEqual(clean.code, 0, clean.err)
+        XCTAssertTrue(clean.err.contains("cheapshot: 3 scene frames, 3 distinct screens  180 image tokens -> "), clean.err)
+        XCTAssertFalse(clean.err.contains("failed"), clean.err)
+        let cleanResults = try XCTUnwrap(try json(clean.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(cleanResults[0]["failed_frames"] as? Int, 0)
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)

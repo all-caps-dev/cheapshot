@@ -271,14 +271,21 @@ public enum CLI {
 
     // MARK: - video
 
-    static func runVideo(_ opts: Options, path: String, redactor: Redactor?, io: CLIIO) async -> Int32 {
+    /// The ffmpeg-backed transcriber the CLI runs with. Tests pass their own to `runVideo` so a
+    /// video run needs neither ffmpeg nor a fixture clip.
+    static func ffmpegTranscriber(_ opts: Options, _ redactor: Redactor?) -> VideoTranscriber {
+        VideoTranscriber(source: FFmpegFrameSource(sceneThreshold: opts.scene), dedupe: opts.dedupe,
+                         minConfidence: opts.minConfidence, redactor: redactor)
+    }
+
+    static func runVideo(_ opts: Options, path: String, redactor: Redactor?, io: CLIIO,
+                         transcriber: (Options, Redactor?) -> VideoTranscriber = ffmpegTranscriber) async -> Int32 {
         guard FileManager.default.fileExists(atPath: path) else {
             if opts.json { _ = emit(payload([["file": path, "error": "no such video"]], imageTokens: 0, textTokens: 0), io) }
             io.err("cheapshot: no such video \(path)\n")
             return 1
         }
-        let source = FFmpegFrameSource(sceneThreshold: opts.scene)
-        let transcriber = VideoTranscriber(source: source, dedupe: opts.dedupe, minConfidence: opts.minConfidence, redactor: redactor)
+        let transcriber = transcriber(opts, redactor)
         let t: VideoTranscript
         do { t = try await transcriber.transcribe(URL(fileURLWithPath: path), maxFrames: opts.maxFrames) }
         catch {
@@ -298,7 +305,8 @@ public enum CLI {
         if opts.json {
             let segs = t.segments.map { ["time": $0.time, "stamp": VideoTranscriber.stamp($0.time), "text": $0.text] as [String: Any] }
             guard emit(payload([["file": path, "text": body.trimmingCharacters(in: .whitespacesAndNewlines),
-                                 "segments": segs, "frames": t.frameCount, "redactions": t.redactions.counts,
+                                 "segments": segs, "frames": t.frameCount, "failed_frames": t.failedFrames,
+                                 "redactions": t.redactions.counts,
                                  "image_tokens": t.imageTokens, "text_tokens": tt]],
                                imageTokens: t.imageTokens, textTokens: tt), io) else { return 1 }
         } else {
@@ -308,7 +316,10 @@ public enum CLI {
         if opts.stats {
             let saved = max(0, t.imageTokens - tt)
             let pct = t.imageTokens > 0 ? Int(Double(saved) / Double(t.imageTokens) * 100) : 0
-            io.err("cheapshot: \(t.frameCount) scene frames, \(t.segments.count) distinct screens  \(t.imageTokens) image tokens -> \(tt) text tokens  (saved \(saved), \(pct)%)\n")
+            // A failed frame was never read, so it is in neither count above; name it or the
+            // line under-reports what was skipped.
+            let failed = t.failedFrames > 0 ? ", \(t.failedFrames) failed" : ""
+            io.err("cheapshot: \(t.frameCount) scene frames\(failed), \(t.segments.count) distinct screens  \(t.imageTokens) image tokens -> \(tt) text tokens  (saved \(saved), \(pct)%)\n")
         }
         return 0
     }
