@@ -104,6 +104,16 @@ out=$(input /tmp/shot.png | run_hook 2>/dev/null)
 grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "unterminated entry consumed" || pass "unterminated entry consumed"
 grep -q '/tmp/other.png' "$TMPDIR/cheapshot-allow" && pass "other entry kept alongside it" || fail "other entry kept alongside it"
 
+# 6c. an entry standardised to /tmp/x matches a Read of /private/tmp/x (Task 3 strips /private)
+fresh
+now=$(date +%s)
+printf '%s\t/tmp/x.png\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+out=$(input /private/tmp/x.png | run_hook 2>/dev/null)
+[ -z "$out" ] && pass "/private prefix: allowed /tmp path passes through" || fail "/private prefix: allowed /tmp path passes through"
+grep -q '/tmp/x.png' "$TMPDIR/cheapshot-allow" && fail "/private prefix: entry consumed" || pass "/private prefix: entry consumed"
+dec=$(input /private/tmp/x.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+[ "$dec" = deny ] && pass "/private prefix: second Read denied again" || fail "/private prefix: second Read denied again"
+
 # 7. pdf with pages: passed as --pages, denied with text
 fresh
 dec=$(input /tmp/report.pdf 3-5 | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')

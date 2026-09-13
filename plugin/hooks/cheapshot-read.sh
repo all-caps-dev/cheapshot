@@ -34,16 +34,20 @@ if ! command -v cheapshot >/dev/null 2>&1; then
 fi
 
 # One-shot allowlist written by `cheapshot allow <path>`: "<expiry epoch>\t<path>" per line.
-# Expired lines are dropped; the first live match for this path is consumed.
+# Expired lines are dropped; the first live match for this path is consumed. `cheapshot allow`
+# standardises paths, which strips a leading /private, while Read may pass /private/tmp/...,
+# so an entry also matches the path with that prefix removed.
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
+  alt="$path"
+  case "$path" in /private/*) alt="${path#/private}" ;; esac
   now=$(date +%s)
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
   tab=$(printf '\t')
   while IFS="$tab" read -r exp p || [ -n "$exp" ]; do
     [ "$exp" -ge "$now" ] 2>/dev/null || continue
-    if [ "$hit" = 0 ] && [ "$p" = "$path" ]; then hit=1; continue; fi
+    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ]; }; then hit=1; continue; fi
     printf '%s\t%s\n' "$exp" "$p" >> "$keep"
   done < "$allow"
   mv "$keep" "$allow"
