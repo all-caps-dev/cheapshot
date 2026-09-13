@@ -125,7 +125,10 @@ public enum CLI {
                 }
                 let n = try l.migrate(fromTSVDirectory: dir)
                 io.out("cheapshot: imported \(n) ledger line(s) into \(l.url.path)\n")
-                if n == 0 { io.out("cheapshot: no TSV lines found in \(dir.path); nothing marked, run --migrate again after restoring them\n") }
+                if n == 0 {
+                    let why = FileManager.default.fileExists(atPath: dir.path) ? "no TSV lines found in" : "no TSV directory at"
+                    io.out("cheapshot: \(why) \(dir.path); nothing marked, run --migrate again after restoring them\n")
+                }
                 return 0
             }
             let s = try l.summary()
