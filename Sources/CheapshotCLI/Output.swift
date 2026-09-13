@@ -43,7 +43,8 @@ public enum Output {
     }
 
     /// The serializer behind `json`, swappable so a test can make it fail.
-    static var serialize: (Any) throws -> Data = { object in
+    // test seam; swapped and restored by RunnerTests
+    nonisolated(unsafe) static var serialize: (Any) throws -> Data = { object in
         guard JSONSerialization.isValidJSONObject(object) else {
             throw OutputError(message: "--json payload is not a valid JSON object")
         }
