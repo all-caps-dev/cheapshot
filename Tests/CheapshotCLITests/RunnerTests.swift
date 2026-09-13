@@ -358,6 +358,18 @@ final class RunnerTests: XCTestCase {
         XCTAssertFalse(Output.isValid(["date": Date()]))
     }
 
+    /// --newest on a directory that cannot be read used to say "no input images" and exit 2, as
+    /// if the arguments were wrong. The directory is the failing input: name it, say it could not
+    /// be read, exit 1.
+    func testNewestOnMissingDirectoryNamesItAndExit1() async {
+        let dir = tmp.appendingPathComponent("nope").path
+        let r = await run(["--newest", dir])
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(r.err.contains(dir), r.err)
+        XCTAssertTrue(r.err.contains("cannot read directory"), r.err)
+        XCTAssertFalse(r.err.contains("no input images"), r.err)
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)

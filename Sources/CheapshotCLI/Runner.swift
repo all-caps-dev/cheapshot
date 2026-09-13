@@ -20,9 +20,21 @@ public enum CLI {
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
         case .video(let path): return await runVideo(opts, path: path, redactor: redactor, io: io)
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)
-        case .newest(let dir, let n): return runImages(opts, paths: newest(in: dir, count: n), redactor: redactor, io: io)
-        case .cleanshot(let n): return runImages(opts, paths: newest(in: cleanshotDir(home: io.home), count: n), redactor: redactor, io: io)
+        case .newest(let dir, let n): return runNewest(opts, dir: dir, count: n, redactor: redactor, io: io)
+        case .cleanshot(let n): return runNewest(opts, dir: cleanshotDir(home: io.home), count: n, redactor: redactor, io: io)
         }
+    }
+
+    /// The directory is the input here, so an unreadable one is an input failure that names it,
+    /// not a usage error about missing images.
+    static func runNewest(_ opts: Options, dir: String, count: Int, redactor: Redactor?, io: CLIIO) -> Int32 {
+        let paths: [String]
+        do { paths = try newest(in: dir, count: count) }
+        catch {
+            io.err("cheapshot: cannot read directory \(dir): \(error.localizedDescription)\n")
+            return 1
+        }
+        return runImages(opts, paths: paths, redactor: redactor, io: io)
     }
 
     // MARK: - Setup
@@ -260,9 +272,9 @@ public enum CLI {
 
     // MARK: - input discovery
 
-    static func newest(in dir: String, count: Int) -> [String] {
+    static func newest(in dir: String, count: Int) throws -> [String] {
         let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+        let items = try fm.contentsOfDirectory(atPath: dir)
         let exts = ["png", "jpg", "jpeg", "webp", "gif", "pdf"]
         let candidates = items.filter { exts.contains(($0 as NSString).pathExtension.lowercased()) }
         let withDates: [(String, Date)] = candidates.compactMap {
