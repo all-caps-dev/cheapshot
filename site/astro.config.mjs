@@ -25,6 +25,7 @@ export default defineConfig({
             { label: 'Video frames', slug: 'research/video-frames' },
             { label: 'Structured output', slug: 'research/structured-output' },
             { label: 'PDF pipeline', slug: 'research/pdf-pipeline' },
+            { label: 'No LLM in the pipeline', slug: 'research/no-llm' },
           ],
         },
         { label: 'Credits', slug: 'credits' },

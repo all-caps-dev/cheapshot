@@ -45,7 +45,7 @@ file, `migrated-tsv.json`, next to the ledger so a later `--migrate` is a no-op.
 Only a real import writes the marker, so running `--migrate` before the old
 files exist does not lock out a later one.
 
-## PDF page numbers are estimates
+## PDF savings are estimates
 
 For a PDF, the ledger counts what an agent would have paid to read each page as
 an image, based on the rendered pixel size of the page. Nobody actually sent

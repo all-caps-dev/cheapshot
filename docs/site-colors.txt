@@ -5,3 +5,8 @@
 #   dark   --foreground oklch(98.5% 0 0) -> #fafafa   --background oklch(14.5% 0 0) -> #0a0a0a
 # measured: 2026-09-12
 # contrast-pairs: #0a0a0a/#ffffff #fafafa/#0a0a0a
+#
+# scripts/check-site.sh reads the pairs below straight out of the CSS the build just emitted and
+# runs the ratio on them, so the numbers above are documentation. This baseline is the byte-for-byte
+# record of what the theme emitted when they were measured; a mismatch means re-measure.
+# baseline-oklch: light=oklch(14.5% 0 0)/oklch(100% 0 0) dark=oklch(98.5% 0 0)/oklch(14.5% 0 0)

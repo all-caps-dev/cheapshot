@@ -26,13 +26,13 @@ Everything cheapshot stands on, with links. Add a line whenever a dependency, to
 - [withastro/action](https://github.com/withastro/action) builds and uploads the site.
 - [actions/deploy-pages](https://github.com/actions/deploy-pages) publishes it to GitHub Pages.
 - [actions/checkout](https://github.com/actions/checkout) in every workflow.
-- [softprops/action-gh-release](https://github.com/softprops/action-gh-release) creates the release the docs link to.
 
 ## Distribution
 
 - [GitHub Actions](https://github.com/features/actions) builds, tests, signs, and notarizes.
 - [GitHub Pages](https://pages.github.com/) hosts the docs site.
 - [GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github) carries the notarized zip.
+- [softprops/action-gh-release](https://github.com/softprops/action-gh-release) creates the release the docs link to.
 - [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) with `notarytool` and `stapler`.
 
 ## Prior art and neighbours
