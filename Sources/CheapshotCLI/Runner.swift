@@ -34,6 +34,7 @@ public enum CLI {
             io.err("cheapshot: cannot read directory \(dir): \(error.localizedDescription)\n")
             return 1
         }
+        guard !paths.isEmpty else { io.err("cheapshot: no input images in \(dir)\n"); return 1 }
         return runImages(opts, paths: paths, redactor: redactor, io: io)
     }
 

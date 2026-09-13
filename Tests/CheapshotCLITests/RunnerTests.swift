@@ -370,6 +370,16 @@ final class RunnerTests: XCTestCase {
         XCTAssertFalse(r.err.contains("no input images"), r.err)
     }
 
+    /// An empty --newest folder is a readable input with nothing in it, not a usage error: the
+    /// arguments were fine. Exit 1 like every other failed input, and name the folder.
+    func testNewestOnEmptyDirectoryNamesItAndExit1() async throws {
+        let dir = tmp.appendingPathComponent("empty")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let r = await run(["--newest", dir.path])
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(r.err.contains("no input images in \(dir.path)"), r.err)
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)
