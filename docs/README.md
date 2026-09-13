@@ -1,10 +1,6 @@
 # Licensing code assets
 
-- `licensing-animated.svg` — animated, error correction level H, 96px square
-  reserved in the centre for a logo. Drop artwork inside that box only.
-- `licensing.png` — static fallback.
-
-## Rules if you edit the SVG
+These assets were deleted when the project transitioned to MIT licensing.
 
 1. **Never use `animation-fill-mode: both`.** It makes every module adopt the
    keyframe's `from` state (`opacity: 0`) in any renderer that does not run

@@ -172,44 +172,4 @@ it saves. Vision OCR plus deterministic regex it is.
 
 ## License
 
-Business Source License 1.1. Use it, fork it, run it inside your company. You
-may not ship it to third parties as a hosted, embedded, or packaged commercial
-product or service without a commercial license.
-
-**Free in full, no agreement needed:** schools and universities, students,
-academic and non-commercial research, nonprofits, libraries, and anyone using it
-personally or to learn. Hosting included. If you think you might qualify, you
-do.
-
-Converts to **MIT on 2030-09-07**.
-
-
-## If you are not sure whether you owe anything
-
-You probably do not. The free grants are real and they are meant to be generous.
-Schools, students, researchers, nonprofits, libraries, and anyone using this
-personally are covered completely, hosting included. Running Cheapshot inside
-your own company is also free. If any of that is you, there is nothing to sign
-and nobody to email.
-
-One thing needs a license: selling it. That means offering Cheapshot, or
-something built on it, to other people as a product, as a hosted service, or as
-a part of something you charge for.
-
-If that is you, the fix is a short email and a fair number. Terms flex a lot
-depending on what you are building and who you are. Ask before you ship and it
-stays easy.
-
-If that is you and you do not ask, it becomes a different kind of conversation.
-The terms are written down, copyright is enforceable, and the author has counsel
-who handles this quickly and without drama. That path costs everyone more than
-the email would have, and it is genuinely the outcome nobody here wants.
-
-So use it freely if you are in the free group, and get in touch if you are not.
-Both of those are easy, and only one of them involves lawyers.
-
-### Commercial licensing
-
-<img src="docs/licensing-animated.svg" alt="Scan for commercial licensing" width="200">
-
-Scan it. That is the whole contact process.
+MIT. See [LICENSE](LICENSE). The Mac App Store app that will sit on this engine is a separate, private repo; the engine and the CLI stay MIT.
