@@ -11,6 +11,36 @@ public struct FFmpegFrameSource: FrameSource {
         public var description: String { message }
     }
 
+    /// Owns one extraction directory. The stream's cursor holds the only reference, so the
+    /// directory is removed when the stream is drained (the cursor drops it) or when a consumer
+    /// stops early and the stream is released (deinit). Sendable: the URL is immutable.
+    final class TempDir: Sendable {
+        let url: URL
+        init(base: URL) throws {
+            url = base.appendingPathComponent("cheapshot-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        deinit { try? FileManager.default.removeItem(at: url) }
+    }
+
+    /// The unfolding closure's only mutable state, behind a lock so the closure captures a
+    /// Sendable reference instead of mutating vars from concurrently-executing code.
+    final class Cursor: @unchecked Sendable {
+        private let lock = NSLock()
+        private var pending: ArraySlice<(TimeInterval, URL)>
+        private var dir: TempDir?
+        init(_ frames: [(TimeInterval, URL)], dir: TempDir) { pending = frames[...]; self.dir = dir }
+
+        func next() -> VideoFrame? {
+            lock.lock(); defer { lock.unlock() }
+            while let (t, url) = pending.popFirst() {
+                if let image = FFmpegFrameSource.loadJPEG(url) { return VideoFrame(time: t, image: image) }
+            }
+            dir = nil   // drained: delete now rather than when the stream is eventually released
+            return nil
+        }
+    }
+
     public let ffmpegPath: String?
     public let sceneThreshold: Double
     public let tempBase: URL
@@ -43,24 +73,13 @@ public struct FFmpegFrameSource: FrameSource {
             throw Failure(message: "ffmpeg not found on PATH, /opt/homebrew/bin, /usr/local/bin, ~/.local/bin, /usr/bin")
         }
         guard FileManager.default.fileExists(atPath: video.path) else { throw Failure(message: "no such video \(video.path)") }
-        let dir = tempBase.appendingPathComponent("cheapshot-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let cleanup = { try? FileManager.default.removeItem(at: dir) }
-
-        let extracted: [(TimeInterval, URL)]
-        do { extracted = try extract(ffmpeg: ff, video: video, into: dir, maxFrames: maxFrames) }
-        catch { cleanup(); throw error }
+        // On a throw below, `dir` is released on the way out and deinit removes the directory.
+        let dir = try TempDir(base: tempBase)
+        let extracted = try extract(ffmpeg: ff, video: video, into: dir.url, maxFrames: maxFrames)
 
         // Unfolding streams load one JPEG per pull, so a 200-frame 1440p recording is never all in memory.
-        var iterator = extracted.makeIterator()
-        var finished = false
-        return AsyncThrowingStream(unfolding: {
-            while let (t, url) = iterator.next() {
-                if let image = Self.loadJPEG(url) { return VideoFrame(time: t, image: image) }
-            }
-            if !finished { finished = true; cleanup() }
-            return nil
-        })
+        let cursor = Cursor(extracted, dir: dir)
+        return AsyncThrowingStream(unfolding: { cursor.next() })
     }
 
     func extract(ffmpeg: String, video: URL, into dir: URL, maxFrames: Int) throws -> [(TimeInterval, URL)] {

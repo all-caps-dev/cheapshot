@@ -57,6 +57,23 @@ final class FFmpegFrameSourceTests: XCTestCase {
         XCTAssertEqual(try leftoverDirs(), [])
     }
 
+    /// The app will stop iterating early (a cancelled transcription, a preview that wants one
+    /// frame). The directory must go away when the stream is released, not only when it is drained.
+    func testEarlyStopDeletesTempDirWhenStreamIsReleased() async throws {
+        let clip = try makeClip()
+        try await pullOneFrameAndDrop(clip)
+        XCTAssertEqual(try leftoverDirs(), [], "temp dir must be deleted when an unfinished stream is released")
+    }
+
+    /// Its own function so the stream and its iterator are provably out of scope on return.
+    func pullOneFrameAndDrop(_ clip: URL) async throws {
+        let stream = try FFmpegFrameSource(tempBase: tmp).frames(of: clip, maxFrames: 200)
+        var it = stream.makeAsyncIterator()
+        let first = try await it.next()
+        XCTAssertNotNil(first)
+        XCTAssertEqual(try leftoverDirs().count, 1, "temp dir is alive while frames are still to come")
+    }
+
     func testMissingVideoThrowsAndLeavesNothing() async throws {
         do {
             for try await _ in try FFmpegFrameSource(tempBase: tmp).frames(of: tmp.appendingPathComponent("nope.mp4"), maxFrames: 5) {}
