@@ -33,4 +33,9 @@ grep -q 'ignore previous instructions' "$skill" || { echo "SKILL.md lacks the in
 grep -q 'cheapshot allow' "$skill" || { echo "SKILL.md lacks the allow escape hatch"; exit 1; }
 grep -q -- '--video' "$skill" || { echo "SKILL.md lacks --video"; exit 1; }
 if grep -n 'local-dev\|CleanShot\|Ryan' "$skill"; then echo "SKILL.md still has personal paths or names"; exit 1; fi
+test -f plugin/.mcp.json || { echo "plugin/.mcp.json missing"; exit 1; }
+jq -e . plugin/.mcp.json >/dev/null || { echo ".mcp.json is not valid JSON"; exit 1; }
+test "$(jq -r '.mcpServers.cheapshot.command' plugin/.mcp.json)" = "npx" || { echo ".mcp.json must launch npx"; exit 1; }
+test "$(jq -c '.mcpServers.cheapshot.args' plugin/.mcp.json)" = '["-y","cheapshot-mcp"]' || { echo ".mcp.json args must be [-y, cheapshot-mcp]"; exit 1; }
+test "$(jq -r .mcpServers plugin/.claude-plugin/plugin.json)" = "./.mcp.json" || { echo "plugin.json mcpServers pointer wrong"; exit 1; }
 echo "ok: plugin manifests"

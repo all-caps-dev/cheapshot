@@ -20,6 +20,7 @@ export default defineConfig({
         { label: 'Video', slug: 'video' },
         { label: 'PDF', slug: 'pdf' },
         { label: 'Claude Code', slug: 'claude-code' },
+        { label: 'MCP', slug: 'mcp' },
         {
           label: 'Research',
           items: [
