@@ -6,7 +6,8 @@ extension Ledger {
         URL(fileURLWithPath: home).appendingPathComponent(".claude/cheapshot-ledger")
     }
 
-    var migrationMarker: URL { url.deletingLastPathComponent().appendingPathComponent("migrated-tsv.json") }
+    /// Written once a real import has happened; its presence is what makes a later migrate a no-op.
+    public var migrationMarker: URL { url.deletingLastPathComponent().appendingPathComponent("migrated-tsv.json") }
 
     /// Imports every `*.tsv` line (ISO time, mode, inputs, image tokens, text tokens, saved,
     /// redactions) once. Leaves the TSV files in place. Returns the number of lines imported;

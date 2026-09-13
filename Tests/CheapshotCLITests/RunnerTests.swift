@@ -162,7 +162,25 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(r.code, 0)
         XCTAssertTrue(r.out.contains("imported 1"), r.out)
         let again = await run(["--ledger", "--migrate"])
-        XCTAssertTrue(again.out.contains("imported 0"), again.out)
+        XCTAssertEqual(again.code, 0)
+        XCTAssertTrue(again.out.contains("already migrated"), again.out)
+        XCTAssertTrue(again.out.contains(tsv.path), again.out)
+    }
+
+    /// "imported 0" could not tell "already migrated" from "no TSV files there". Each case now
+    /// says which, and a zero import leaves no marker so a later run still imports.
+    func testLedgerMigrateWithNoTSVSaysSoAndLeavesNoMarker() async throws {
+        let r = await run(["--ledger", "--migrate"])
+        XCTAssertEqual(r.code, 0)
+        XCTAssertTrue(r.out.contains("imported 0"), r.out)
+        XCTAssertTrue(r.out.contains("no TSV"), r.out)
+        XCTAssertTrue(r.out.contains(tmp.appendingPathComponent(".claude/cheapshot-ledger").path), r.out)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("migrated-tsv.json").path))
+        let tsv = tmp.appendingPathComponent(".claude/cheapshot-ledger")
+        try FileManager.default.createDirectory(at: tsv, withIntermediateDirectories: true)
+        try "2026-09-08T01:05:35Z\timage\t1\t1550\t54\t1496\t10\n".write(to: tsv.appendingPathComponent("20260908.tsv"), atomically: true, encoding: .utf8)
+        let later = await run(["--ledger", "--migrate"])
+        XCTAssertTrue(later.out.contains("imported 1"), later.out)
     }
 
     /// A blank white PNG has no text. This asserts the JSON shape, not OCR content.

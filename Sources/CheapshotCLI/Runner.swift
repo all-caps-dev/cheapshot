@@ -102,8 +102,16 @@ public enum CLI {
         let l = ledger(io)
         do {
             if migrate {
-                let n = try l.migrate(fromTSVDirectory: Ledger.defaultTSVDirectory(home: io.home))
+                let dir = Ledger.defaultTSVDirectory(home: io.home)
+                // "imported 0" on its own could not tell an earlier migrate from an empty or
+                // missing TSV directory, and only the second is worth retrying after a restore.
+                guard !FileManager.default.fileExists(atPath: l.migrationMarker.path) else {
+                    io.out("cheapshot: ledger already migrated from \(dir.path) (marker \(l.migrationMarker.path))\n")
+                    return 0
+                }
+                let n = try l.migrate(fromTSVDirectory: dir)
                 io.out("cheapshot: imported \(n) ledger line(s) into \(l.url.path)\n")
+                if n == 0 { io.out("cheapshot: no TSV lines found in \(dir.path); nothing marked, run --migrate again after restoring them\n") }
                 return 0
             }
             let s = try l.summary()
