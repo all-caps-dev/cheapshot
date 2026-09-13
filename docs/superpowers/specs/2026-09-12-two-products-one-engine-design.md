@@ -243,7 +243,7 @@ Added 2026-09-12 at Ryan's request. Accessibility is a requirement in every phas
 2. Errors go to stderr as one plain sentence that names the file and the cause, and exit codes carry the outcome (0, 1, 2) so a script or a screen-reader user does not have to parse prose.
 3. `--help` is a short, left-aligned list with consistent two-column alignment, readable line by line. No tables that only make sense visually.
 4. Code fences and rebuilt indentation (Structured output) are plain characters, so they read correctly in a terminal screen reader and in an agent's context.
-5. README: every image carries alt text that says what the image is for. `docs/licensing-animated.svg` keeps `role="img"`, a `<title>`, and its `prefers-reduced-motion` branch so the animation stops for users who ask the OS to reduce motion. Any future badge or chart ships with a text equivalent next to it.
+5. README: every image carries alt text that says what the image is for. `docs/licensing-animated.svg` keeps `role="img"`, a `<title>`, and its `prefers-reduced-motion` branch so the animation stops for users who ask the OS to reduce motion. Any future badge or chart ships with a text equivalent next to it. (The SVG was deleted with the MIT relicense on 2026-09-12; the rule applies to any future badge or chart.)
 
 ### App (Phase 4)
 

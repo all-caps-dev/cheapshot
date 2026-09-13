@@ -44,7 +44,7 @@ jobs:
           echo -n "$ASC_KEY_BASE64" | base64 --decode -o AuthKey.p8
           xcrun notarytool submit "cheapshot-${TAG}-macos.zip" \
             --key AuthKey.p8 --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" \
-            --wait --timeout 30m --output-format json > notary.json
+            --wait --timeout 30m --output-format json > notary.json || true
           cat notary.json
           grep -qE '"status"[[:space:]]*:[[:space:]]*"Accepted"' notary.json || { echo "notarization not Accepted"; exit 1; }
           shasum -a 256 "cheapshot-${TAG}-macos.zip" | tee "cheapshot-${TAG}-macos.zip.sha256"

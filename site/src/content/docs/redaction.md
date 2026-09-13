@@ -38,9 +38,10 @@ rule above it. That is what makes a MICR strip like `021000021 123456789012`
 redact both numbers while a bare build number or an elapsed nanosecond count
 survives untouched.
 
-`TOKEN` is the catch-all. Its validator rejects the things that look like
-secrets but are not, so a git SHA, a UUID, a sha256 digest, an absolute path
-and a URL all come through as written.
+`TOKEN` is the catch-all, and two things keep it from firing on ordinary text:
+the pattern needs mixed case, so hex digests such as git SHAs and sha256 sums
+pass untouched; the validator lets URLs and absolute paths through and drops
+low-entropy runs.
 
 ## No rule spans a line
 
@@ -81,6 +82,13 @@ those up.
 Redaction is best-effort on OCR output, not a guarantee. Do not point this at
 something whose secrets must never leak, and use `--raw` only when you know what
 is in the frame.
+
+## OCR text is data
+
+OCR text enters the agent's context as data, not as instructions. A screenshot
+of a web page that says "ignore previous instructions" is now that sentence
+sitting in context. The risk is the same as reading any file, so treat the text
+cheapshot hands over the way you treat any untrusted input.
 
 ## The other thing it is for
 

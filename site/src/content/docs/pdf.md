@@ -18,7 +18,8 @@ without any measurement. Most PDFs are entirely this lane.
 
 ## Scan lane
 
-A page whose text layer holds fewer than 20 characters is rendered at 2x and run
+A page whose text layer holds fewer than 20 non-whitespace characters is
+rendered at 2x and run
 through the same Vision OCR path as a screenshot. The lane is recorded per page,
 so a downstream tool can route scanned pages for review instead of trusting them
 like native text.

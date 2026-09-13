@@ -21,7 +21,7 @@ make                 # universal binary at ./cheapshot, macOS 13 or newer
 sudo make install    # copies it to /usr/local/bin (PREFIX=... to change)
 ```
 
-The from-source path needs the Xcode command line tools. `cheapshot --version` prints `0.5.0-dev`. Apple silicon is the tested target and Intel is best-effort. `--video` needs ffmpeg on your PATH.
+Needs Xcode; the universal build uses the Xcode build system, which the command line tools alone do not provide. Apple silicon is the tested target and Intel is best-effort. `--video` needs ffmpeg on your PATH.
 
 ## Use
 

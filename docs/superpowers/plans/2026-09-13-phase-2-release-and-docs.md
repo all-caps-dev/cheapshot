@@ -839,7 +839,7 @@ Everything below is a hand step for Ryan unless marked AGENT. Do them in order. 
 `git push origin main`. Verify: https://github.com/all-caps-dev/cheapshot/actions shows the CI workflow green.
 
 ## 2. Apple Developer Program for the LLC (RYAN, up to a week of waiting)
-1. D-U-N-S lookup or request for `ALL CAPS RESEARCH & DESIGN LLC`, 418 Broadway Ste N, Albany NY 12207: https://developer.apple.com/enroll/duns-lookup/
+1. D-U-N-S lookup or request for `ALL CAPS RESEARCH & DESIGN LLC` at the LLC's registered address from the Articles of Organization: https://developer.apple.com/enroll/duns-lookup/
 2. Enroll as an organization with the LLC Apple Account: https://developer.apple.com/programs/enroll/ ($99/yr). Legal name must match the Articles exactly.
 3. Verify: https://developer.apple.com/account shows the team with a Team ID.
 

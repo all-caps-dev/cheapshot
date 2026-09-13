@@ -20,6 +20,7 @@ make            # builds ./cheapshot and checks it is universal with a macOS 13 
 sudo make install   # copies to /usr/local/bin
 ```
 
-Needs the Xcode command line tools.
+Needs Xcode; the universal build uses the Xcode build system, which the command
+line tools alone do not provide.
 
 `make test` runs the suite. `--video` needs `ffmpeg` on the PATH (`brew install ffmpeg`); everything else is Apple frameworks only.

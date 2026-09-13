@@ -33,7 +33,7 @@ Everything cheapshot stands on, with links. Add a line whenever a dependency, to
 - [GitHub Pages](https://pages.github.com/) hosts the docs site.
 - [GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github) carries the notarized zip.
 - [softprops/action-gh-release](https://github.com/softprops/action-gh-release) creates the release the docs link to.
-- [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) with `notarytool` and `stapler`.
+- [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) with `notarytool`.
 
 ## Prior art and neighbours
 
