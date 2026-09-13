@@ -33,6 +33,15 @@ final class RedactorTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("icon@1.5x.png and ryan@example.com").text, "icon@1.5x.png and [EMAIL]")
     }
 
+    // The scale-suffix exclusion is anchored to image extensions: a domain that merely starts
+    // with digits and an x, such as 2.5x.io, is still an address and must be redacted.
+    func testEmailScaleSuffixExclusionIsAnchoredToImageExtensions() {
+        XCTAssertEqual(Redactor().redact("me@2.5x.io").text, "[EMAIL]")
+        XCTAssertEqual(Redactor().redact("me@2x.io").text, "[EMAIL]")
+        XCTAssertEqual(Redactor().redact("icon@2.5x.png").text, "icon@2.5x.png")
+        XCTAssertEqual(Redactor().redact("icon@2x.png").text, "icon@2x.png")
+    }
+
     // Card 1862921219007841881: Vision reads dots as spaces or middle dots on tailnet addresses.
     func testIPv4WithSpacesOrMiddleDotsIsRedacted() {
         let (text, report) = Redactor().redact("peer 100 102 55 50 and 100·64·0·1 and 192.168.1.10")
