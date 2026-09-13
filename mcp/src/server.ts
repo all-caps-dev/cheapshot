@@ -42,22 +42,33 @@ async function runTool(args: string[]): Promise<ToolResult> {
   if (run.code === 2 || payload === undefined) {
     return errorResult(run.stderr.trim() || `cheapshot exited ${run.code} with no JSON`);
   }
-  const text = textOf(payload);
-  const stats = run.stderr.trim();
   return {
-    content: [{ type: "text", text: stats ? `${text}\n\n${stats}` : text }],
+    content: [{ type: "text", text: textOf(payload) }],
     structuredContent: payload,
     isError: run.code !== 0 ? true : undefined,
   };
 }
 
-/** Page count of a PDF, from a one page, no ledger probe. Undefined when the probe fails. */
-async function pageCount(pdf: string): Promise<number | undefined> {
-  const run = await runCheapshot(["--json", "--no-ledger", "--pages", "1-1", pdf]);
+type Probed = { file: string; pages?: number };
+
+/** A one page, no ledger probe of the given inputs (explicit paths or a --newest selection). Returns
+ *  each result's file and, for a PDF, its page count. Undefined when the probe printed no JSON. */
+async function probe(selector: string[]): Promise<Probed[] | undefined> {
+  const run = await runCheapshot(["--json", "--no-ledger", "--pages", "1-1", ...selector]);
   const payload = parsePayload(run.stdout);
-  const results = (payload?.results as Array<Record<string, unknown>> | undefined) ?? [];
-  const source = results[0]?.source as { pages?: number } | undefined;
-  return typeof source?.pages === "number" ? source.pages : undefined;
+  if (payload === undefined) return undefined;
+  const results = (payload.results as Array<Record<string, unknown>> | undefined) ?? [];
+  return results
+    .filter((r) => typeof r.file === "string")
+    .map((r) => {
+      const source = r.source as { pages?: number } | undefined;
+      return { file: r.file as string, pages: typeof source?.pages === "number" ? source.pages : undefined };
+    });
+}
+
+function overCap(p: Probed): string | undefined {
+  if (p.pages === undefined || p.pages <= PAGE_CAP) return undefined;
+  return `${p.file} has ${p.pages} pages. Pass pages (for example "1-5") to read a range; cheapshot_ocr does not dump more than ${PAGE_CAP} pages at once.`;
 }
 
 export function createServer(): McpServer {
@@ -85,16 +96,25 @@ export function createServer(): McpServer {
     async (input: OcrInput): Promise<ToolResult> => {
       let args: string[];
       try { args = ocrArgs(input); } catch (e) { return errorResult(e instanceof Error ? e.message : String(e)); }
-      if (input.pages === undefined) {
-        for (const p of input.paths ?? []) {
-          if (!p.toLowerCase().endsWith(".pdf")) continue;
-          let n: number | undefined;
-          try { n = await pageCount(p); } catch (e) { return errorResult(e instanceof Error ? e.message : String(e)); }
-          if (n !== undefined && n > PAGE_CAP) {
-            return errorResult(`${p} has ${n} pages. Pass pages (for example "1-5") to read a range; cheapshot_ocr does not dump more than ${PAGE_CAP} pages at once.`);
+      if (input.pages !== undefined) return runTool(args);
+      try {
+        if (input.newest !== undefined && !(input.paths && input.paths.length > 0)) {
+          // A --newest selection is resolved to explicit paths first, so a newest PDF over the cap is
+          // refused instead of dumped, and the real run reads exactly the files the probe saw.
+          const selector = ["--newest", input.newest.dir, ...(input.newest.count !== undefined ? [String(input.newest.count)] : [])];
+          const found = await probe(selector);
+          if (found === undefined) return errorResult(`cheapshot printed no JSON while listing the newest files in ${input.newest.dir}`);
+          if (found.length === 0) return errorResult(`no image or PDF files found in ${input.newest.dir}`);
+          for (const p of found) { const msg = overCap(p); if (msg !== undefined) return errorResult(msg); }
+          args = ocrArgs({ ...input, newest: undefined, paths: found.map((p) => p.file) });
+        } else {
+          for (const path of input.paths ?? []) {
+            if (!path.toLowerCase().endsWith(".pdf")) continue;
+            const found = await probe([path]);
+            for (const p of found ?? []) { const msg = overCap(p); if (msg !== undefined) return errorResult(msg); }
           }
         }
-      }
+      } catch (e) { return errorResult(e instanceof Error ? e.message : String(e)); }
       return runTool(args);
     },
   );
@@ -147,7 +167,8 @@ export function createServer(): McpServer {
       let text: string;
       try {
         const run = await runCheapshot(ledgerArgs({}));
-        text = run.code === 0 ? run.stdout.trim() : JSON.stringify({ error: run.stderr.trim() || `cheapshot exited ${run.code}` });
+        if (run.code !== 0) text = JSON.stringify({ error: run.stderr.trim() || `cheapshot exited ${run.code}` });
+        else text = parsePayload(run.stdout) === undefined ? JSON.stringify({ error: "cheapshot printed no JSON" }) : run.stdout.trim();
       } catch (e) {
         text = JSON.stringify({ error: e instanceof Error ? e.message : String(e) });
       }

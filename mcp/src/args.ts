@@ -4,7 +4,7 @@ export const PAGE_CAP = 20;
 
 export interface OcrInput {
   paths?: string[];
-  newest?: { dir?: string; count?: number };
+  newest?: { dir: string; count?: number };
   raw?: boolean;
   min_confidence?: number;
   pages?: string;
@@ -34,23 +34,22 @@ export function parsePages(s: string): { lo: number; hi: number } {
 export function ocrArgs(input: OcrInput): string[] {
   const hasPaths = Array.isArray(input.paths) && input.paths.length > 0;
   if (!hasPaths && !input.newest) throw new Error("cheapshot_ocr needs paths or newest");
-  const args = ["--json", "--stats"];
+  const args = ["--json"];
   if (input.raw) args.push("--raw");
   if (input.min_confidence !== undefined) args.push("--min-conf", String(input.min_confidence));
   if (input.pages !== undefined) { parsePages(input.pages); args.push("--pages", input.pages); }
   if (hasPaths) {
     args.push(...(input.paths as string[]));
   } else {
-    args.push("--newest");
-    const n = input.newest as { dir?: string; count?: number };
-    if (n.dir !== undefined) args.push(n.dir);
+    const n = input.newest as { dir: string; count?: number };
+    args.push("--newest", n.dir);
     if (n.count !== undefined) args.push(String(n.count));
   }
   return args;
 }
 
 export function videoArgs(input: VideoInput): string[] {
-  const args = ["--json", "--stats"];
+  const args = ["--json"];
   if (input.raw) args.push("--raw");
   if (input.scene !== undefined) args.push("--scene", String(input.scene));
   if (input.max_frames !== undefined) args.push("--max-frames", String(input.max_frames));

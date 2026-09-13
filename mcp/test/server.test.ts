@@ -1,6 +1,8 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -122,4 +124,81 @@ test("cheapshot_ocr newest without dir is an error result, never bare --newest",
   const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { newest: { count: 2 } } })) as ToolResult;
   assert.equal(r.isError, true);
   assert.match(r.content[0].text ?? "", /dir/);
+});
+
+test("cheapshot_ocr newest: a newest pdf over the cap is refused", async () => {
+  process.env.FAKE_PAGES = "42";
+  try {
+    const c = await connected();
+    const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { newest: { dir: "/tmp/inbox" } } })) as ToolResult;
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text ?? "", /\/tmp\/report\.pdf has 42 pages/);
+  } finally {
+    delete process.env.FAKE_PAGES;
+  }
+});
+
+test("cheapshot_ocr newest: the real run gets the probed paths, not --newest", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_PAGES = "3";
+  process.env.FAKE_LOG = log;
+  try {
+    const c = await connected();
+    const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { newest: { dir: "/tmp/inbox", count: 2 } } })) as ToolResult;
+    assert.equal(r.isError ?? false, false);
+    const sc = r.structuredContent as { results: Array<{ file: string; source: { pages: number } }> };
+    assert.equal(sc.results[0].source.pages, 3);
+    const calls = fs.readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(calls.length, 2);
+    assert.match(calls[0], /--no-ledger --pages 1-1 --newest \/tmp\/inbox 2$/);
+    assert.equal(calls[1], "--json /tmp/report.pdf");
+  } finally {
+    delete process.env.FAKE_PAGES;
+    delete process.env.FAKE_LOG;
+  }
+});
+
+test("cheapshot_ocr partial failure: isError, the error entry, and the file: error line", async () => {
+  process.env.FAKE_PARTIAL = "1";
+  try {
+    const c = await connected();
+    const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/shot.png", "/tmp/missing.png"] } })) as ToolResult;
+    assert.equal(r.isError, true);
+    const sc = r.structuredContent as { results: Array<{ file: string; error?: string }> };
+    assert.equal(sc.results[1].error, "no such file");
+    assert.match(r.content[0].text ?? "", /hello world/);
+    assert.match(r.content[0].text ?? "", /\/tmp\/missing\.png: no such file/);
+  } finally {
+    delete process.env.FAKE_PARTIAL;
+  }
+});
+
+test("cheapshot_ocr: a usage error (exit 2) is an error result with the stderr text", async () => {
+  process.env.FAKE_EXIT = "2";
+  try {
+    const c = await connected();
+    const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/shot.png"] } })) as ToolResult;
+    assert.equal(r.isError, true);
+    assert.equal(r.content[0].text, "cheapshot: fake failure");
+  } finally {
+    delete process.env.FAKE_EXIT;
+  }
+});
+
+test("cheapshot_ocr text is the payload text alone, no stats line", async () => {
+  const c = await connected();
+  const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/shot.png"] } })) as ToolResult;
+  assert.equal(r.content[0].text, "hello world\nkey [AWS_KEY]");
+});
+
+test("cheapshot://ledger resource reports non-JSON stdout as an error object", async () => {
+  process.env.FAKE_RAW = "not json";
+  try {
+    const c = await connected();
+    const r = await c.readResource({ uri: "cheapshot://ledger" });
+    const item = r.contents[0] as { text?: string };
+    assert.equal(JSON.parse(item.text ?? "{}").error, "cheapshot printed no JSON");
+  } finally {
+    delete process.env.FAKE_RAW;
+  }
 });

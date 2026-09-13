@@ -3,18 +3,17 @@ import assert from "node:assert/strict";
 import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP } from "../src/args.js";
 
 test("ocr: paths with defaults", () => {
-  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] }), ["--json", "--stats", "/tmp/a.png", "/tmp/b.jpg"]);
+  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] }), ["--json", "/tmp/a.png", "/tmp/b.jpg"]);
 });
 
 test("ocr: raw, min_confidence, pages", () => {
   assert.deepEqual(ocrArgs({ paths: ["/tmp/r.pdf"], raw: true, min_confidence: 0.5, pages: "3-5" }),
-    ["--json", "--stats", "--raw", "--min-conf", "0.5", "--pages", "3-5", "/tmp/r.pdf"]);
+    ["--json", "--raw", "--min-conf", "0.5", "--pages", "3-5", "/tmp/r.pdf"]);
 });
 
 test("ocr: newest with dir and count", () => {
   assert.deepEqual(ocrArgs({ newest: { dir: "/Users/me/Desktop", count: 2 } }),
-    ["--json", "--stats", "--newest", "/Users/me/Desktop", "2"]);
-  assert.deepEqual(ocrArgs({ newest: {} }), ["--json", "--stats", "--newest"]);
+    ["--json", "--newest", "/Users/me/Desktop", "2"]);
 });
 
 test("ocr: neither paths nor newest is an error", () => {
@@ -28,9 +27,9 @@ test("ocr: pages must look like N or N-M", () => {
 });
 
 test("video: defaults and every flag", () => {
-  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }), ["--json", "--stats", "--video", "/tmp/s.mp4"]);
+  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }), ["--json", "--video", "/tmp/s.mp4"]);
   assert.deepEqual(videoArgs({ path: "/tmp/s.mp4", scene: 0.3, max_frames: 50, dedupe: 0.8, raw: true }),
-    ["--json", "--stats", "--raw", "--scene", "0.3", "--max-frames", "50", "--dedupe", "0.8", "--video", "/tmp/s.mp4"]);
+    ["--json", "--raw", "--scene", "0.3", "--max-frames", "50", "--dedupe", "0.8", "--video", "/tmp/s.mp4"]);
 });
 
 test("ledger: with and without days", () => {
