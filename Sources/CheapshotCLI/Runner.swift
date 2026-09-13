@@ -242,7 +242,10 @@ public enum CLI {
             record(LedgerEntry(mode: mode, inputs: t.inputs, imageTokens: t.imageTokens,
                                textTokens: t.textTokens, redactions: t.redactions), opts, io)
         }
-        if opts.stats { io.err(statsLine(inputs: ok, noun: "image(s)", imageTokens: totalImage, textTokens: totalText)) }
+        if opts.stats {
+            let noun = pdfs.inputs > 0 ? (images.inputs > 0 ? "input(s)" : "pdf(s)") : "image(s)"
+            io.err(statsLine(inputs: ok, noun: noun, imageTokens: totalImage, textTokens: totalText))
+        }
         return failed > 0 ? 1 : 0
     }
 

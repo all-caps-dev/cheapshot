@@ -420,6 +420,34 @@ final class RunnerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path))
     }
 
+    /// No builtin rule spans a newline, so the earlier lineJSON tests passed against plain per-line
+    /// redaction too. A lookbehind that crosses the line break without consuming it is the case
+    /// only the join-and-split path gets right: per-line redaction cannot see the previous line.
+    func testLineJSONJoinPathRedactsAContextSensitiveRuleThatPerLineCannot() throws {
+        let rule = Rule(name: "bearer", pattern: #"(?<=Authorization: Bearer\n)\S+"#)
+        let redactor = Redactor(rules: [rule])
+        XCTAssertEqual(redactor.redact("Authorization: Bearer\nabc123").text, "Authorization: Bearer\n[bearer]")
+        XCTAssertEqual(redactor.redact("abc123").text, "abc123", "per-line redaction leaves the token in the clear")
+        let lines = [RenderedLine(n: 1, text: "Authorization: Bearer", bbox: CGRect(x: 0, y: 0, width: 50, height: 16), confidence: 1, fenced: false),
+                     RenderedLine(n: 2, text: "abc123", bbox: CGRect(x: 0, y: 16, width: 50, height: 16), confidence: 1, fenced: false)]
+        let out = CLI.lineJSON(lines, redactor: redactor)
+        XCTAssertEqual(out.map { $0["n"] as? Int }, [1, 2])
+        XCTAssertEqual(out.map { $0["text"] as? String }, ["Authorization: Bearer", "[bearer]"])
+    }
+
+    /// --stats said "image(s)" for a PDF-only run. The noun follows what was actually read.
+    func testStatsNounFollowsTheInputKind() async throws {
+        let pdf = try makeTextPDF(name: "doc.pdf")
+        let p = await run([pdf.path, "--stats", "--no-ledger"])
+        XCTAssertEqual(p.code, 0, p.err)
+        XCTAssertTrue(p.err.contains("cheapshot: 1 pdf(s)"), p.err)
+        let png = try makeBlankPNG(name: "blank.png")
+        let i = await run([png.path, "--stats", "--no-ledger"])
+        XCTAssertTrue(i.err.contains("cheapshot: 1 image(s)"), i.err)
+        let m = await run([pdf.path, png.path, "--stats", "--no-ledger"])
+        XCTAssertTrue(m.err.contains("cheapshot: 2 input(s)"), m.err)
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)
