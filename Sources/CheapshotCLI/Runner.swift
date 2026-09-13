@@ -95,9 +95,16 @@ public enum CLI {
         ["version": cheapshotVersion, "results": results, "image_tokens": imageTokens, "text_tokens": textTokens]
     }
 
-    static func statsLine(inputs: Int, noun: String, imageTokens: Int, textTokens: Int) -> String {
+    /// Tokens not spent by reading text instead of the image, floored at zero, and that as a
+    /// truncated percent of the image cost. Zero image tokens is zero saved, not a division.
+    static func savings(imageTokens: Int, textTokens: Int) -> (saved: Int, pct: Int) {
         let saved = max(0, imageTokens - textTokens)
         let pct = imageTokens > 0 ? Int(Double(saved) / Double(imageTokens) * 100) : 0
+        return (saved, pct)
+    }
+
+    static func statsLine(inputs: Int, noun: String, imageTokens: Int, textTokens: Int) -> String {
+        let (saved, pct) = savings(imageTokens: imageTokens, textTokens: textTokens)
         return "cheapshot: \(inputs) \(noun)  \(imageTokens) image tokens -> \(textTokens) text tokens  (saved \(saved), \(pct)%)\n"
     }
 
@@ -314,8 +321,7 @@ public enum CLI {
         }
         record(LedgerEntry(mode: "video", inputs: t.frameCount, imageTokens: t.imageTokens, textTokens: tt, redactions: t.redactions.total), opts, io)
         if opts.stats {
-            let saved = max(0, t.imageTokens - tt)
-            let pct = t.imageTokens > 0 ? Int(Double(saved) / Double(t.imageTokens) * 100) : 0
+            let (saved, pct) = savings(imageTokens: t.imageTokens, textTokens: tt)
             // A failed frame was never read, so it is in neither count above; name it or the
             // line under-reports what was skipped.
             let failed = t.failedFrames > 0 ? ", \(t.failedFrames) failed" : ""

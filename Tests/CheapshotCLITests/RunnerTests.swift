@@ -543,6 +543,20 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(cleanResults[0]["failed_frames"] as? Int, 0)
     }
 
+    /// One place computes the saving for every stats line. Zero image tokens is the case a
+    /// division would break on; the normal pair pins the floor and the truncated percent.
+    func testSavingsHandlesZeroImageTokensAndANormalPair() {
+        let zero = CLI.savings(imageTokens: 0, textTokens: 40)
+        XCTAssertEqual(zero.saved, 0)
+        XCTAssertEqual(zero.pct, 0)
+        let normal = CLI.savings(imageTokens: 1550, textTokens: 54)
+        XCTAssertEqual(normal.saved, 1496)
+        XCTAssertEqual(normal.pct, 96)   // 1496/1550 = 0.965..., truncated
+        let negative = CLI.savings(imageTokens: 10, textTokens: 30)
+        XCTAssertEqual(negative.saved, 0, "text costing more than the image is not a negative saving")
+        XCTAssertEqual(negative.pct, 0)
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)
