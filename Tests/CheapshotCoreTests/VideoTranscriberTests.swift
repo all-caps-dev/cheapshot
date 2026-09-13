@@ -60,6 +60,16 @@ final class VideoTranscriberTests: XCTestCase {
         }
     }
 
+    func testRedactionsCountOnlyKeptFrames() async throws {
+        // Three frames of the same screen: one segment survives dedupe, so the report must say one
+        // email was redacted, not three. The ledger and the stats line both read this total.
+        let ocr: VideoTranscriber.OCRFunction = { _, _ in [Self.line("mail me at ryan@example.com today")] }
+        let t = try await VideoTranscriber(source: Blank(), ocr: ocr).transcribe(URL(fileURLWithPath: "/x.mp4"), maxFrames: 10)
+        XCTAssertEqual(t.segments.count, 1)
+        XCTAssertEqual(t.segments.first?.text, "mail me at [EMAIL] today")
+        XCTAssertEqual(t.redactions.counts, ["EMAIL": 1])
+    }
+
     func testSimilarityAndStamp() {
         XCTAssertEqual(VideoTranscriber.similarity("a b c", "a b c"), 1)
         XCTAssertEqual(VideoTranscriber.similarity("a b c d", "a b"), 0.5)

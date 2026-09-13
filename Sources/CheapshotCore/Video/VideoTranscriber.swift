@@ -50,16 +50,16 @@ public struct VideoTranscriber {
             do { rendered = try ocr(frame.image, minConfidence) }
             catch { failedFrames += 1; lastError = error; continue }
             var text = Layout.text(rendered)
-            if let r = redactor {
-                let (t, rep) = r.redact(text)
-                text = t
-                for (k, v) in rep.counts { report.counts[k, default: 0] += v }
-            }
+            var frameReport = RedactionReport()
+            if let r = redactor { (text, frameReport) = r.redact(text) }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { continue }
             if Self.similarity(trimmed, lastText) >= dedupe { continue }
             segments.append(VideoSegment(time: frame.time, text: trimmed))
             lastText = trimmed
+            // Counted only for kept frames: the ledger total should describe the transcript the
+            // user got, not every duplicate screen that was OCR'd and dropped.
+            for (k, v) in frameReport.counts { report.counts[k, default: 0] += v }
         }
         if frameCount > 0 && failedFrames == frameCount {
             throw Failure(message: "OCR failed on all \(frameCount) frame(s); last error: \(lastError.map { "\($0)" } ?? "unknown")")
