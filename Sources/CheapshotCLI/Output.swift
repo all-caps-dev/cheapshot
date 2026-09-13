@@ -34,9 +34,17 @@ public enum Output {
         """
     }
 
+    /// Whether Foundation can serialize the object: containers of String, finite numbers, Bool and
+    /// null only. Split out so the guard below is testable without tripping it.
+    public static func isValid(_ object: Any) -> Bool { JSONSerialization.isValidJSONObject(object) }
+
+    /// Every caller builds the object from ints, finite doubles and strings, so a failure here is
+    /// a programming error. It used to come back as `{}` with exit 0, which a caller could take
+    /// for a run with no results; a loud trap is better than a silent empty envelope.
     public static func json(_ object: Any) -> String {
+        precondition(isValid(object), "cheapshot: --json payload is not a valid JSON object: \(object)")
         guard let d = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-              let s = String(data: d, encoding: .utf8) else { return "{}" }
+              let s = String(data: d, encoding: .utf8) else { preconditionFailure("cheapshot: --json serialization failed") }
         return s + "\n"
     }
 }
