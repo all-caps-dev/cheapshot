@@ -24,4 +24,40 @@ final class OCRGeometryTests: XCTestCase {
         let r = OCR.pixels(CGRect(x: 0, y: 0.75, width: 0.5, height: 0.25), width: 800, height: 400)
         XCTAssertEqual(r, CGRect(x: 0, y: 0, width: 400, height: 100))
     }
+
+    // MARK: - Word-cell statistics (the pure half of OCR.wordCells)
+
+    /// Five monospace words at 8 px per character, one of them wide, so the median is unmoved and
+    /// the coefficient of variation is the population standard deviation over the mean.
+    func testCellStatisticsMedianAndVariation() {
+        let words: [(width: CGFloat, count: Int)] = [(32, 4), (40, 5), (24, 3), (48, 6), (80, 8)]
+        let stats = OCR.cellStatistics(words: words, lineWidth: 400)
+        XCTAssertEqual(stats?.width, 8, "the cell is the median per-word cell, not the mean")
+        // Cells are 8, 8, 8, 8, 10: mean 8.4, population sd 0.8, cv 0.8 / 8.4.
+        XCTAssertEqual(stats?.variation ?? -1, 0.8 / 8.4, accuracy: 1e-9)
+    }
+
+    func testCellStatisticsPerfectlyFixedWidthHasZeroVariation() {
+        let words: [(width: CGFloat, count: Int)] = [(24, 3), (40, 5), (56, 7)]
+        let stats = OCR.cellStatistics(words: words, lineWidth: 200)
+        XCTAssertEqual(stats?.width, 8)
+        XCTAssertEqual(stats?.variation, 0)
+    }
+
+    /// Words under three characters, a box wider than 90% of the line, and a non-positive or
+    /// non-finite width all drop out before the statistics; fewer than three survivors is nil.
+    func testCellStatisticsFilters() {
+        XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5)], lineWidth: 200), "two words are no evidence")
+        XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (16, 2), (8, 1)], lineWidth: 200),
+                     "short words must not count toward the three-word minimum")
+        XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (190, 10)], lineWidth: 200),
+                     "a box wider than 90% of the line is Vision handing back the line box")
+        XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (0, 4)], lineWidth: 200), "a zero-width word is not a cell")
+        XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (.nan, 4)], lineWidth: 200), "a NaN width is not a cell")
+        XCTAssertNil(OCR.cellStatistics(words: [(24, 3), (40, 5), (.infinity, 4)], lineWidth: 200), "an infinite width is not a cell")
+        XCTAssertNil(OCR.cellStatistics(words: [], lineWidth: 200))
+        // Exactly 90% of the line still counts; the filtered set of three is enough.
+        let edge = OCR.cellStatistics(words: [(24, 3), (40, 5), (180, 10), (16, 2)], lineWidth: 200)
+        XCTAssertEqual(edge?.width, 8)
+    }
 }

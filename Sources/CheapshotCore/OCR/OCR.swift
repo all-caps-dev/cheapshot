@@ -76,28 +76,40 @@ public enum OCR {
     /// disagree. `boundingBox(for:)` resolves at word granularity, which is the only estimate
     /// that separates a fixed-width font from prose: the whole-line width over the string length
     /// is skewed by inserted spaces, corrected tokens and ink-fit boxes, and lands in the same
-    /// range for both. Words under 3 characters are too short for the division to mean anything,
-    /// and a box wider than 90% of the line is Vision handing back the line box for a range it
-    /// could not resolve. Fewer than three usable words is no evidence at all.
+    /// range for both. This half only walks the string and asks Vision for each word's box; the
+    /// thresholds and the statistics live in `cellStatistics`, which has no Vision in it.
     static func wordCells(_ top: VNRecognizedText, lineWidth: CGFloat, roi: CGRect?,
                           width: Int, height: Int) -> (width: CGFloat, variation: CGFloat)? {
         let s = top.string
-        var cells: [CGFloat] = []
+        var words: [(width: CGFloat, count: Int)] = []
         var i = s.startIndex
         while i < s.endIndex {
             guard !s[i].isWhitespace else { i = s.index(after: i); continue }
             var j = i
             while j < s.endIndex, !s[j].isWhitespace { j = s.index(after: j) }
             defer { i = j }
-            let n = s.distance(from: i, to: j)
-            guard n >= 3, let word = try? top.boundingBox(for: i..<j) else { continue }
+            guard let word = try? top.boundingBox(for: i..<j) else { continue }
             var box = word.boundingBox
             if let roi = roi {
                 box = CGRect(x: roi.minX + box.minX * roi.width, y: roi.minY + box.minY * roi.height,
                              width: box.width * roi.width, height: box.height * roi.height)
             }
-            let w = box.width * CGFloat(width)
-            guard w.isFinite, w > 0, w <= 0.9 * lineWidth else { continue }
+            words.append((box.width * CGFloat(width), s.distance(from: i, to: j)))
+        }
+        return cellStatistics(words: words, lineWidth: lineWidth)
+    }
+
+    /// The pure half of `wordCells`: each word's box width in pixels and its character count,
+    /// into the line's median per-word cell width and the coefficient of variation of those cells.
+    /// Words under 3 characters are too short for the division to mean anything, and a box wider
+    /// than 90% of the line is Vision handing back the line box for a range it could not resolve;
+    /// a non-positive or non-finite width is no box at all. Fewer than three usable words is no
+    /// evidence at all.
+    static func cellStatistics(words: [(width: CGFloat, count: Int)], lineWidth: CGFloat)
+        -> (width: CGFloat, variation: CGFloat)? {
+        var cells: [CGFloat] = []
+        for (w, n) in words {
+            guard n >= 3, w.isFinite, w > 0, w <= 0.9 * lineWidth else { continue }
             cells.append(w / CGFloat(n))
         }
         guard cells.count >= 3 else { return nil }
