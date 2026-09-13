@@ -18,17 +18,17 @@ Measured on a 13 minute, 2.9 GB screen recording at 2560x1440: 12 scene frames,
 
 ## Watch it run
 
-![Terminal recording of cheapshot --video on a 40 second screen capture of a Tailscale policy note. The transcript scrolls with every IP address replaced by an IPV4 token and the owner's email by an EMAIL token, then the stats line reports 5 scene frames, 9,220 image tokens to 6,152 text tokens, 33% saved.](/cheapshot/tailnet-demo.gif)
+![Terminal recording of cheapshot --video on a 40 second screen capture of a Tailscale policy note. The transcript scrolls with every IP address replaced by an IPV4 token and the owner's email by an EMAIL token, then the stats line reports 5 scene frames, 9,220 image tokens to 6,151 text tokens, 33% saved.](/cheapshot/tailnet-demo.gif)
 
 A 40 second CleanShot capture at 2560x1440 of an editor showing a tailnet
 policy note: a 49 node inventory with addresses, the owner's email, and the
 tailnet name. Cheapshot kept 5 scene frames and printed this ledger line:
 
 ```
-cheapshot: 5 scene frames, 5 distinct screens  9220 image tokens -> 6152 text tokens  (saved 3068, 33%)
+cheapshot: 5 scene frames, 5 distinct screens  9220 image tokens -> 6151 text tokens  (saved 3069, 33%)
 ```
 
-With `--json`, `redactions` for the run reads `{"EMAIL": 4, "IPV4": 10}`.
+With `--json`, `redactions` for the run reads `{"EMAIL": 4, "IPV4": 11}`.
 
 Two honest notes. A screen full of dense text saves less than the 95% above,
 because the words are the payload; 33% is what a wall of prose gets. And the
