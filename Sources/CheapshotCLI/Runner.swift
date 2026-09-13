@@ -13,7 +13,8 @@ public enum CLI {
         switch opts.command {
         case .help:    io.out(Output.usage()); return 0
         case .version: io.out(cheapshotVersion + "\n"); return 0
-        case .ledger(let json, let migrate): return runLedger(json: json, migrate: migrate, io: io)
+        case .ledger(let json, let migrate, let days): return runLedger(json: json, migrate: migrate, days: days, io: io)
+        case .allow(let path): return runAllow(path: path, io: io)
         default: break
         }
 
@@ -22,7 +23,7 @@ public enum CLI {
         catch { io.err("cheapshot: \(error)\n"); return 2 }
 
         switch opts.command {
-        case .help, .version, .ledger: preconditionFailure("handled above")
+        case .help, .version, .ledger, .allow: preconditionFailure("handled above")
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
         case .video(let path): return await runVideo(opts, path: path, redactor: redactor, io: io)
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)
@@ -119,7 +120,7 @@ public enum CLI {
         do { try ledger(io).append(entry) } catch { io.err("cheapshot: ledger not written: \(error)\n") }
     }
 
-    static func runLedger(json: Bool, migrate: Bool, io: CLIIO) -> Int32 {
+    static func runLedger(json: Bool, migrate: Bool, days: Int?, io: CLIIO) -> Int32 {
         let l = ledger(io)
         do {
             if migrate {
@@ -138,16 +139,46 @@ public enum CLI {
                 }
                 return 0
             }
-            let s = try l.summary()
+            let s = try l.summary(days: days)
             if json {
-                io.out(try Output.json(["days": s.days, "runs": s.runs, "inputs": s.inputs, "image_tokens": s.imageTokens,
-                                    "text_tokens": s.textTokens, "saved": s.saved, "redactions": s.redactions,
-                                    "percent": s.percent, "path": l.url.path]))
+                var o: [String: Any] = ["days": s.days, "runs": s.runs, "inputs": s.inputs, "image_tokens": s.imageTokens,
+                                        "text_tokens": s.textTokens, "saved": s.saved, "redactions": s.redactions,
+                                        "percent": s.percent, "path": l.url.path]
+                if let days = days { o["window_days"] = days }
+                io.out(try Output.json(o))
             } else {
                 io.out(l.summaryText(s))
             }
             return 0
         } catch { io.err("cheapshot: \(error)\n"); return 1 }
+    }
+
+    // MARK: - allow
+
+    /// Appends "<expiry>\t<path>" to $TMPDIR/cheapshot-allow. The Claude Code hook consumes the
+    /// entry on the next Read of that path and lets the pixels through once. Five minutes is long
+    /// enough for "run allow, then Read again" and short enough that a forgotten entry does nothing.
+    static let allowSeconds = 300
+
+    /// Same resolution as the hook's `${TMPDIR:-/tmp}`: an unset or empty TMPDIR means /tmp.
+    static func allowFile(_ io: CLIIO) -> URL {
+        let tmp = io.environment["TMPDIR"].flatMap { $0.isEmpty ? nil : $0 } ?? "/tmp"
+        return URL(fileURLWithPath: tmp).appendingPathComponent("cheapshot-allow")
+    }
+
+    static func runAllow(path: String, io: CLIIO) -> Int32 {
+        let cwd = FileManager.default.currentDirectoryPath
+        let absolute = ((path.hasPrefix("/") ? path : cwd + "/" + path) as NSString).standardizingPath
+        let expiry = Int(Date().timeIntervalSince1970) + allowSeconds
+        let line = Data("\(expiry)\t\(absolute)\n".utf8)
+        let url = allowFile(io)
+        let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard fd >= 0 else { io.err("cheapshot: cannot open \(url.path): \(String(cString: strerror(errno)))\n"); return 1 }
+        defer { close(fd) }
+        let written = line.withUnsafeBytes { write(fd, $0.baseAddress, line.count) }
+        guard written == line.count else { io.err("cheapshot: short write to \(url.path)\n"); return 1 }
+        io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
+        return 0
     }
 
     // MARK: - --text

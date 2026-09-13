@@ -18,7 +18,8 @@ public enum Output {
           cheapshot --cleanshot [n]
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
-          cheapshot --ledger [--json] [--migrate]
+          cheapshot --ledger [--json] [--migrate] [--days <n>]
+          cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes)
 
         OPTIONS
           --raw             do not redact (redaction is ON by default)
@@ -31,6 +32,7 @@ public enum Output {
           --max-frames <n>  video frame cap, default 200
           --dedupe <f>      drop a screen this similar to the last, default 0.90
           --ledger          print cumulative savings across every run
+          --days <n>        with --ledger: only the last n days
           --no-ledger       do not record this run
           --version
 

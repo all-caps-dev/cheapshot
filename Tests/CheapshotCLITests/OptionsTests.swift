@@ -67,10 +67,21 @@ final class OptionsTests: XCTestCase {
     }
 
     func testLedgerForms() throws {
-        XCTAssertEqual(try Options.parse(["--ledger"]).command, .ledger(json: false, migrate: false))
-        XCTAssertEqual(try Options.parse(["--ledger", "--json"]).command, .ledger(json: true, migrate: false))
-        XCTAssertEqual(try Options.parse(["--ledger", "--migrate"]).command, .ledger(json: false, migrate: true))
+        XCTAssertEqual(try Options.parse(["--ledger"]).command, .ledger(json: false, migrate: false, days: nil))
+        XCTAssertEqual(try Options.parse(["--ledger", "--json"]).command, .ledger(json: true, migrate: false, days: nil))
+        XCTAssertEqual(try Options.parse(["--ledger", "--migrate"]).command, .ledger(json: false, migrate: true, days: nil))
+        XCTAssertEqual(try Options.parse(["--ledger", "--json", "--days", "7"]).command, .ledger(json: true, migrate: false, days: 7))
         XCTAssertThrowsError(try Options.parse(["--migrate"]))
+        XCTAssertThrowsError(try Options.parse(["--days", "7"]))          // needs --ledger
+        XCTAssertThrowsError(try Options.parse(["--ledger", "--days", "0"]))
+    }
+
+    func testAllowForms() throws {
+        XCTAssertEqual(try Options.parse(["allow", "/tmp/shot.png"]).command, .allow(path: "/tmp/shot.png"))
+        XCTAssertThrowsError(try Options.parse(["allow"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "allow needs a path"))
+        }
+        XCTAssertThrowsError(try Options.parse(["allow", "a.png", "b.png"]))
     }
 
     func testNumericBoundsAreValidated() {

@@ -8,7 +8,8 @@ public struct UsageError: Error, Equatable {
 public struct Options: Equatable {
     public enum Command: Equatable {
         case help, version
-        case ledger(json: Bool, migrate: Bool)
+        case ledger(json: Bool, migrate: Bool, days: Int?)
+        case allow(path: String)         // one-shot hook escape hatch, see plugin/hooks/cheapshot-read.sh
         case text(path: String)          // "-" means stdin
         case video(path: String)
         case files([String])
@@ -45,6 +46,11 @@ public struct Options: Equatable {
     public static func parse(_ args: [String]) throws -> Options {
         if args.isEmpty || args.contains("-h") || args.contains("--help") { return Options(command: .help) }
         if args.contains("--version") { return Options(command: .version) }
+        if args.first == "allow" {
+            guard args.count >= 2 else { throw UsageError(message: "allow needs a path") }
+            guard args.count == 2 else { throw UsageError(message: "allow takes exactly one path") }
+            return Options(command: .allow(path: args[1]))
+        }
 
         var o = Options(command: .files([]))
         var positional: [String] = []
@@ -53,6 +59,7 @@ public struct Options: Equatable {
         var text: String? = nil
         var video: String? = nil
         var ledger = false, migrate = false
+        var days: Int? = nil
         var i = 0
 
         func value(_ flag: String) throws -> String {
@@ -93,6 +100,7 @@ public struct Options: Equatable {
             case "--no-ledger": o.noLedger = true
             case "--ledger":    ledger = true
             case "--migrate":   migrate = true
+            case "--days":      days = try positiveInt(a)
             case "--min-conf":  o.minConfidence = Float(try unitNumber(a))
             case "--scene":     o.scene = try unitNumber(a)
             case "--max-frames": o.maxFrames = try positiveInt(a)
@@ -121,8 +129,9 @@ public struct Options: Equatable {
             i += 1
         }
 
-        if ledger { o.command = .ledger(json: o.json, migrate: migrate); return o }
+        if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days); return o }
         if migrate { throw UsageError(message: "--migrate needs --ledger") }
+        if days != nil { throw UsageError(message: "--days needs --ledger") }
         if let t = text { o.command = .text(path: t); return o }
         if let v = video { o.command = .video(path: v); return o }
         if let n = newest { o.command = .newest(dir: n.dir, count: n.count); return o }

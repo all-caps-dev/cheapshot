@@ -18,7 +18,11 @@ cat notes.txt | cheapshot --text - # redact text with no OCR at all
 
 cheapshot --video screen.mp4       # screen recording to a timestamped transcript
 cheapshot --ledger                 # cumulative savings across every run
+cheapshot --ledger --days 7        # savings for the last week
 ```
+
+`cheapshot allow <path>` lets the next Read of that image or PDF through the
+[Claude Code](/cheapshot/claude-code/) plugin's hook for five minutes.
 
 Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 usage error.
 
@@ -37,7 +41,7 @@ Every run starts by naming what to read. Pass one or more files directly
 `cheapshot --cleanshot [n]` takes the newest `n` CleanShot captures. Two modes
 skip image OCR entirely: `cheapshot --video <file.mp4>` walks a screen
 recording, and `cheapshot --text <file|->` redacts text that is already text
-(`-` reads stdin). `cheapshot --ledger [--json] [--migrate]` reports instead of
+(`-` reads stdin). `cheapshot --ledger [--json] [--migrate] [--days <n>]` reports instead of
 reading anything.
 
 ## Redaction
