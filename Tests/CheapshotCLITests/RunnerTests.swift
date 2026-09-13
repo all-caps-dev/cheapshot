@@ -394,13 +394,22 @@ final class RunnerTests: XCTestCase {
     /// --newest on a directory that cannot be read used to say "no input images" and exit 2, as
     /// if the arguments were wrong. The directory is the failing input: name it, say it could not
     /// be read, exit 1.
-    func testNewestOnMissingDirectoryNamesItAndExit1() async {
+    func testNewestOnMissingDirectoryNamesItAndExit1() async throws {
         let dir = tmp.appendingPathComponent("nope").path
         let r = await run(["--newest", dir])
         XCTAssertEqual(r.code, 1, r.err)
         XCTAssertTrue(r.err.contains(dir), r.err)
         XCTAssertTrue(r.err.contains("cannot read directory"), r.err)
         XCTAssertFalse(r.err.contains("no input images"), r.err)
+        XCTAssertEqual(r.out, "", "no --json, no envelope")
+        // With --json the envelope carries the failure, as it does for a missing file.
+        let j = await run(["--json", "--newest", dir])
+        XCTAssertEqual(j.code, 1, j.err)
+        let results = try XCTUnwrap(try json(j.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0]["file"] as? String, dir)
+        XCTAssertTrue((try XCTUnwrap(results[0]["error"] as? String)).hasPrefix("cannot read directory"), "\(results[0])")
+        XCTAssertTrue(j.err.contains("cannot read directory"), j.err)
     }
 
     /// An empty --newest folder is a readable input with nothing in it, not a usage error: the
@@ -410,7 +419,15 @@ final class RunnerTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let r = await run(["--newest", dir.path])
         XCTAssertEqual(r.code, 1, r.err)
-        XCTAssertTrue(r.err.contains("no input images in \(dir.path)"), r.err)
+        XCTAssertTrue(r.err.contains("no images or PDFs in \(dir.path)"), r.err)
+        XCTAssertEqual(r.out, "", "no --json, no envelope")
+        let j = await run(["--json", "--newest", dir.path])
+        XCTAssertEqual(j.code, 1, j.err)
+        let results = try XCTUnwrap(try json(j.out)["results"] as? [[String: Any]])
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results[0]["file"] as? String, dir.path)
+        XCTAssertEqual(results[0]["error"] as? String, "no images or PDFs in \(dir.path)")
+        XCTAssertTrue(j.err.contains("no images or PDFs in \(dir.path)"), j.err)
     }
 
     /// --rules was loaded before the command was dispatched, so --ledger and --version failed on

@@ -37,10 +37,17 @@ public enum CLI {
         let paths: [String]
         do { paths = try newest(in: dir, count: count) }
         catch {
+            let message = "cannot read directory: \(error.localizedDescription)"
+            if opts.json { _ = emit(payload([["file": dir, "error": message]], imageTokens: 0, textTokens: 0), io) }
             io.err("cheapshot: cannot read directory \(dir): \(error.localizedDescription)\n")
             return 1
         }
-        guard !paths.isEmpty else { io.err("cheapshot: no input images in \(dir)\n"); return 1 }
+        guard !paths.isEmpty else {
+            let message = "no images or PDFs in \(dir)"
+            if opts.json { _ = emit(payload([["file": dir, "error": message]], imageTokens: 0, textTokens: 0), io) }
+            io.err("cheapshot: \(message)\n")
+            return 1
+        }
         return runImages(opts, paths: paths, redactor: redactor, io: io)
     }
 
@@ -173,7 +180,6 @@ public enum CLI {
     }
 
     static func runImages(_ opts: Options, paths: [String], redactor: Redactor?, io: CLIIO) -> Int32 {
-        guard !paths.isEmpty else { io.err("cheapshot: no input images\n"); return 2 }
         // Only the PDF branch reads --pages; on any other input it was accepted and ignored.
         if opts.pages != nil, let f = paths.first(where: { ($0 as NSString).pathExtension.lowercased() != "pdf" }) {
             io.err("cheapshot: --pages applies to PDF input only, not \(f)\ntry: cheapshot --help\n")
