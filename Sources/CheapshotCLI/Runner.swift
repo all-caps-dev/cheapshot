@@ -9,14 +9,20 @@ public enum CLI {
         catch let e as UsageError { io.err("cheapshot: \(e.message)\ntry: cheapshot --help\n"); return 2 }
         catch { io.err("cheapshot: \(error)\n"); return 2 }
 
+        // Help, version and the ledger never redact, so a bad --rules file must not stop them.
+        switch opts.command {
+        case .help:    io.out(Output.usage()); return 0
+        case .version: io.out(cheapshotVersion + "\n"); return 0
+        case .ledger(let json, let migrate): return runLedger(json: json, migrate: migrate, io: io)
+        default: break
+        }
+
         let redactor: Redactor?
         do { redactor = try makeRedactor(opts) }
         catch { io.err("cheapshot: \(error)\n"); return 2 }
 
         switch opts.command {
-        case .help:    io.out(Output.usage()); return 0
-        case .version: io.out(cheapshotVersion + "\n"); return 0
-        case .ledger(let json, let migrate): return runLedger(json: json, migrate: migrate, io: io)
+        case .help, .version, .ledger: preconditionFailure("handled above")
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
         case .video(let path): return await runVideo(opts, path: path, redactor: redactor, io: io)
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)

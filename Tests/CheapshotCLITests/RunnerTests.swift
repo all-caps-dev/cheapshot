@@ -380,6 +380,17 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(r.err.contains("no input images in \(dir.path)"), r.err)
     }
 
+    /// --rules was loaded before the command was dispatched, so --ledger and --version failed on
+    /// a bad rules file they never use. Those commands run without touching the redactor.
+    func testLedgerAndVersionIgnoreABadRulesFile() async throws {
+        let l = await run(["--ledger", "--json", "--rules", "/nonexistent.json"])
+        XCTAssertEqual(l.code, 0, l.err)
+        XCTAssertEqual(try json(l.out)["runs"] as? Int, 0)
+        let v = await run(["--version", "--rules", "/nonexistent.json"])
+        XCTAssertEqual(v.code, 0, v.err)
+        XCTAssertEqual(v.out, cheapshotVersionForTests + "\n")
+    }
+
     func testHelpAndVersion() async {
         let h = await run([])
         XCTAssertEqual(h.code, 0)
