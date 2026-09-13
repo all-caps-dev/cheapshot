@@ -16,7 +16,7 @@ case "$ext" in png|jpg|jpeg|webp|gif|pdf) ;; *) exit 0 ;; esac
 [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ] && exit 0
 
 tmp="${TMPDIR:-/tmp}"
-sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"')
+sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"' | tr -c 'A-Za-z0-9._-\n' '_')
 
 # A hint that lets the Read proceed: one line on stderr, the same text as systemMessage on stdout.
 hint() {
@@ -41,7 +41,7 @@ if [ -f "$allow" ]; then
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
   tab=$(printf '\t')
-  while IFS="$tab" read -r exp p; do
+  while IFS="$tab" read -r exp p || [ -n "$exp" ]; do
     [ "$exp" -ge "$now" ] 2>/dev/null || continue
     if [ "$hit" = 0 ] && [ "$p" = "$path" ]; then hit=1; continue; fi
     printf '%s\t%s\n' "$exp" "$p" >> "$keep"
@@ -72,7 +72,17 @@ if [ "$code" != 0 ]; then
   exit 0
 fi
 
+printf '%s' "$out" | jq -e '.results | type == "array"' >/dev/null 2>&1 || {
+  echo "cheapshot: unreadable output for $path, reading it as pixels instead." >&2
+  exit 0
+}
+
 text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")')
+if [ -z "$text" ]; then
+  # Nothing recognised: there are no tokens to save, the pixels are the content.
+  echo "cheapshot: no text in $path, reading it as pixels." >&2
+  exit 0
+fi
 it=$(printf '%s' "$out" | jq -r '.image_tokens // 0')
 tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, run: cheapshot allow $path, then Read again."

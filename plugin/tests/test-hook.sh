@@ -5,12 +5,14 @@ here=$(cd "$(dirname "$0")" && pwd)
 hook="$here/../hooks/cheapshot-read.sh"
 fake="$here/fake-bin"
 fails=0
+ROOT=$(mktemp -d)
+trap 'rm -rf "$ROOT"' EXIT
 pass() { echo "ok  $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
 
 fresh() {
   # New TMPDIR per case so the allowlist and the session marker never leak between cases.
-  T=$(mktemp -d)
+  T=$(mktemp -d "$ROOT/case.XXXXXX")
   export TMPDIR="$T"
   export FAKE_LOG="$T/argv.log"
   : > "$FAKE_LOG"
@@ -25,7 +27,7 @@ input() {
 }
 run_hook() { PATH="$fake:$PATH" sh "$hook"; }
 # A PATH that has jq but no cheapshot, whatever the machine has installed.
-nobin=$(mktemp -d); ln -s "$(command -v jq)" "$nobin/jq"
+nobin=$(mktemp -d "$ROOT/nobin.XXXXXX"); ln -s "$(command -v jq)" "$nobin/jq"
 NOBIN_PATH="$nobin:/usr/bin:/bin"
 
 # 1. a source file is not ours
@@ -35,7 +37,7 @@ out=$(input /tmp/main.swift | run_hook 2>/dev/null); code=$?
 
 # 2. a png is denied with the text and the savings line, on stdout and stderr
 fresh
-err=$(mktemp)
+err=$(mktemp "$ROOT/err.XXXXXX")
 out=$(input /tmp/shot.png | run_hook 2>"$err"); code=$?
 dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')
 reason=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')
@@ -63,7 +65,7 @@ out=$(input /tmp/shot.png | CHEAPSHOT_PASSTHROUGH=1 run_hook 2>/dev/null); code=
 
 # 5. binary missing: pass through (no decision), one hint per session on stdout (systemMessage) and stderr
 fresh
-err=$(mktemp)
+err=$(mktemp "$ROOT/err.XXXXXX")
 out=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>"$err"); code=$?
 dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')
 [ "$code" = 0 ] && [ -z "$dec" ] && pass "missing binary passes through" || fail "missing binary passes through (code=$code out=$out)"
@@ -71,10 +73,10 @@ grep -q 'brew install all-caps-dev/tap/cheapshot' "$err" && pass "missing binary
 # Ruling 2: the hint is also a systemMessage on stdout, exit 0, no decision.
 msg=$(printf '%s' "$out" | jq -r '.systemMessage // empty')
 case "$msg" in *"brew install all-caps-dev/tap/cheapshot"*) pass "missing binary emits systemMessage";; *) fail "missing binary emits systemMessage: $out";; esac
-err2=$(mktemp)
+err2=$(mktemp "$ROOT/err.XXXXXX")
 out2=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>"$err2")
 [ ! -s "$err2" ] && [ -z "$out2" ] && pass "hint printed once per session" || fail "hint printed once per session"
-err3=$(mktemp)
+err3=$(mktemp "$ROOT/err.XXXXXX")
 out3=$(input /tmp/shot.png "" s2 | PATH="$NOBIN_PATH" sh "$hook" 2>"$err3")
 [ -s "$err3" ] && [ -n "$out3" ] && pass "new session gets the hint again" || fail "new session gets the hint again"
 
@@ -93,6 +95,15 @@ dec=$(input /tmp/shot.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.pe
 [ "$dec" = deny ] && pass "expired entry is ignored" || fail "expired entry is ignored"
 grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "expired entry dropped from the file" || pass "expired entry dropped from the file"
 
+# 6b. allowlist last line without a trailing newline is honoured
+fresh
+now=$(date +%s)
+printf '%s\t/tmp/other.png\n%s\t/tmp/shot.png' "$((now + 200))" "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+out=$(input /tmp/shot.png | run_hook 2>/dev/null)
+[ -z "$out" ] && pass "allow entry without trailing newline passes through" || fail "allow entry without trailing newline passes through"
+grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "unterminated entry consumed" || pass "unterminated entry consumed"
+grep -q '/tmp/other.png' "$TMPDIR/cheapshot-allow" && pass "other entry kept alongside it" || fail "other entry kept alongside it"
+
 # 7. pdf with pages: passed as --pages, denied with text
 fresh
 dec=$(input /tmp/report.pdf 3-5 | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
@@ -105,7 +116,7 @@ dec=$(input /tmp/report.pdf | FAKE_PAGES=5 run_hook 2>/dev/null | jq -r '.hookSp
 [ "$dec" = deny ] && pass "5 page pdf is denied" || fail "5 page pdf is denied"
 grep -q -- '--json --no-ledger --pages 1-1 /tmp/report.pdf' "$FAKE_LOG" && pass "page count probed with --pages 1-1" || fail "page count probed: $(cat "$FAKE_LOG")"
 fresh
-err=$(mktemp)
+err=$(mktemp "$ROOT/err.XXXXXX")
 out=$(input /tmp/report.pdf | FAKE_PAGES=42 run_hook 2>"$err")
 dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')
 [ -z "$dec" ] && pass "42 page pdf passes through" || fail "42 page pdf passes through: $out"
@@ -117,15 +128,37 @@ case "$msg" in *"42"*"--pages 1-5 /tmp/report.pdf"*) pass "big pdf systemMessage
 
 # 9. binary failure passes through with a stderr line
 fresh
-err=$(mktemp)
+err=$(mktemp "$ROOT/err.XXXXXX")
 out=$(input /tmp/shot.png | FAKE_EXIT=1 run_hook 2>"$err"); code=$?
 [ "$code" = 0 ] && [ -z "$out" ] && pass "binary failure passes through" || fail "binary failure passes through"
 grep -q 'cheapshot' "$err" && pass "failure reported on stderr" || fail "failure reported on stderr"
+
+# 9b. binary exits 0 with output that is not the JSON shape: pass through with a stderr line
+fresh
+err=$(mktemp "$ROOT/err.XXXXXX")
+out=$(input /tmp/shot.png | FAKE_RAW='not json' run_hook 2>"$err"); code=$?
+[ "$code" = 0 ] && [ -z "$out" ] && pass "non-JSON output passes through" || fail "non-JSON output passes through (code=$code out=$out)"
+grep -q 'unreadable output' "$err" && pass "non-JSON output reported on stderr" || fail "non-JSON output reported on stderr: $(cat "$err")"
+fresh
+out=$(input /tmp/shot.png | FAKE_RAW='' run_hook 2>/dev/null); code=$?
+[ "$code" = 0 ] && [ -z "$out" ] && pass "empty output passes through" || fail "empty output passes through (code=$code out=$out)"
+
+# 9c. binary exits 0 with no recognised text: pass through, the pixels are the content
+fresh
+err=$(mktemp "$ROOT/err.XXXXXX")
+out=$(input /tmp/shot.png | FAKE_EMPTY_TEXT=1 run_hook 2>"$err"); code=$?
+[ "$code" = 0 ] && [ -z "$out" ] && pass "empty text passes through" || fail "empty text passes through (code=$code out=$out)"
+grep -qF 'cheapshot: no text in /tmp/shot.png, reading it as pixels.' "$err" && pass "empty text reported on stderr" || fail "empty text reported on stderr: $(cat "$err")"
 
 # 10. no file_path at all
 fresh
 out=$(printf '{"session_id":"s1","tool_name":"Read","tool_input":{}}' | run_hook 2>/dev/null); code=$?
 [ "$code" = 0 ] && [ -z "$out" ] && pass "missing file_path passes through" || fail "missing file_path passes through"
+
+# 10b. session id with path characters is sanitised into the marker name
+fresh
+out=$(input /tmp/shot.png "" '../../evil id' | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null)
+[ -n "$out" ] && [ -e "$TMPDIR/cheapshot-missing-.._.._evil_id" ] && pass "marker name sanitised" || fail "marker name sanitised: $(ls "$TMPDIR")"
 
 # 11. Ruling 3: the hook runs as an executable (no leading sh) from a plugin root that has a space,
 # invoked the way hooks.json may spell it: "${CLAUDE_PLUGIN_ROOT}"/hooks/cheapshot-read.sh and unquoted.
