@@ -2,6 +2,8 @@
 
 Give your coding agent the words on your screen, not the pixels: on-device OCR that redacts secrets first and shows you the tokens it saved.
 
+Full writeup: [Everything to Save, Nothing to Trust](https://ilano.fyi/writing/nothing-to-trust/).
+
 ## Why
 
 An image costs roughly `(width x height) / 750` tokens and it stays in the conversation, riding along on every later turn. The words are usually all the agent needed. Screenshots are also full of things you do not want in an agent's context, so cheapshot redacts by default.
