@@ -7,6 +7,5 @@
   "repository": "https://github.com/all-caps-dev/cheapshot",
   "license": "MIT",
   "keywords": ["ocr", "screenshot", "redaction", "tokens", "pdf"],
-  "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json"
 }
