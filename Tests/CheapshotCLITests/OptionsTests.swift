@@ -150,4 +150,59 @@ final class OptionsTests: XCTestCase {
         XCTAssertFalse(try Options.parse(["doc.pdf"]).forceOCR)
         XCTAssertTrue(try Options.parse(["--force-ocr", "doc.pdf"]).forceOCR)
     }
+
+    func testFramesAtParsesSecondsAndClockForms() throws {
+        let o = try Options.parse(["--video", "v.mp4", "--frames-at", "90,2:00,1:02:03,7.5"])
+        XCTAssertEqual(o.command, .video(path: "v.mp4"))
+        XCTAssertEqual(o.frameTimes, [7.5, 90, 120, 3723])
+    }
+
+    func testFramesAtNeedsVideoAndRejectsJunk() throws {
+        XCTAssertThrowsError(try Options.parse(["--frames-at", "10", "shot.png"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "--frames-at needs --video"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--video", "v.mp4", "--frames-at", "1:2:3:4"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "--frames-at: not a timestamp: 1:2:3:4"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--video", "v.mp4", "--frames-at", "-4"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "--frames-at: not a timestamp: -4"))
+        }
+    }
+
+    func testParseTimestampForms() throws {
+        XCTAssertEqual(try Options.parseTimestamp("0"), 0)
+        XCTAssertEqual(try Options.parseTimestamp("13:20"), 800)
+        XCTAssertEqual(try Options.parseTimestamp("00:13:20"), 800)
+        XCTAssertThrowsError(try Options.parseTimestamp("1:60"))
+        XCTAssertThrowsError(try Options.parseTimestamp(""))
+    }
+
+    /// yt-cc writes chapters as [{"t": seconds, "title": ...}] plus duration_string "MM:SS".
+    /// One frame per chapter, taken at the chapter's midpoint, where the result is on screen
+    /// rather than the title card.
+    func testChaptersYieldsMidpoints() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("chap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = dir.appendingPathComponent("meta.json")
+        try #"{"duration_string":"2:00","chapters":[{"t":0,"title":"Intro"},{"t":40,"title":"Body"}]}"#
+            .write(to: meta, atomically: true, encoding: .utf8)
+
+        let o = try Options.parse(["--video", "v.mp4", "--chapters", meta.path])
+        XCTAssertEqual(o.frameTimes, [20, 80])
+    }
+
+    func testChaptersRejectsFileWithoutChapters() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("chap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let meta = dir.appendingPathComponent("meta.json")
+        try #"{"title":"no chapters here"}"#.write(to: meta, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try Options.parse(["--video", "v.mp4", "--chapters", meta.path])) { e in
+            XCTAssertEqual(e as? UsageError,
+                           UsageError(message: "--chapters: no chapters in \(meta.path)"))
+        }
+    }
 }

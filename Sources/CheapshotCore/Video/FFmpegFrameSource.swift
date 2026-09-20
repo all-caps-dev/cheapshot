@@ -44,10 +44,16 @@ public struct FFmpegFrameSource: FrameSource {
     public let ffmpegPath: String?
     public let sceneThreshold: Double
     public let tempBase: URL
+    /// When set, ffmpeg seeks to these seconds instead of running scene detection. One frame per
+    /// timestamp, reported at the time that was asked for rather than the container's pts.
+    public let times: [TimeInterval]?
 
     public init(ffmpegPath: String? = nil, sceneThreshold: Double = 0.25,
+                times: [TimeInterval]? = nil,
                 tempBase: URL = URL(fileURLWithPath: NSTemporaryDirectory())) {
-        self.ffmpegPath = ffmpegPath; self.sceneThreshold = sceneThreshold; self.tempBase = tempBase
+        self.ffmpegPath = ffmpegPath; self.sceneThreshold = sceneThreshold
+        self.times = times.map { Array(Set($0)).sorted() }
+        self.tempBase = tempBase
     }
 
     /// The user's PATH first; then the usual install locations.
@@ -75,7 +81,8 @@ public struct FFmpegFrameSource: FrameSource {
         guard FileManager.default.fileExists(atPath: video.path) else { throw Failure(message: "no such video \(video.path)") }
         // On a throw below, `dir` is released on the way out and deinit removes the directory.
         let dir = try TempDir(base: tempBase)
-        let extracted = try extract(ffmpeg: ff, video: video, into: dir.url, maxFrames: maxFrames)
+        let extracted = try times.map { try seek(ffmpeg: ff, video: video, into: dir.url, times: $0) }
+            ?? extract(ffmpeg: ff, video: video, into: dir.url, maxFrames: maxFrames)
 
         // Unfolding streams load one JPEG per pull, so a 200-frame 1440p recording is never all in memory.
         let cursor = Cursor(extracted, dir: dir)
@@ -121,6 +128,28 @@ public struct FFmpegFrameSource: FrameSource {
             FileHandle.standardError.write(Data("cheapshot: ffmpeg printed \(times.count) timestamps for \(files.count) frames; later frames use their index as seconds\n".utf8))
         }
         return files.enumerated().map { i, f in (i < times.count ? times[i] : TimeInterval(i), dir.appendingPathComponent(f)) }
+    }
+
+    /// One ffmpeg run per requested second: `-ss` before `-i` is an input seek, which jumps
+    /// straight to the nearest keyframe instead of decoding the whole file for each frame. A
+    /// timestamp past the end writes nothing and is dropped, so one bad entry cannot fail a batch.
+    func seek(ffmpeg: String, video: URL, into dir: URL, times: [TimeInterval]) throws -> [(TimeInterval, URL)] {
+        var out: [(TimeInterval, URL)] = []
+        for (i, t) in times.enumerated() {
+            let file = dir.appendingPathComponent(String(format: "s_%05d.jpg", i))
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: ffmpeg)
+            p.arguments = ["-hide_banner", "-nostdin", "-loglevel", "error",
+                           "-ss", String(format: "%.3f", t), "-i", video.path,
+                           "-an", "-sn", "-frames:v", "1", "-q:v", "2", file.path]
+            p.standardOutput = FileHandle.nullDevice
+            let err = Pipe(); p.standardError = err
+            do { try p.run() } catch { throw Failure(message: "could not launch \(ffmpeg): \(error.localizedDescription)") }
+            _ = err.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            if p.terminationStatus == 0, FileManager.default.fileExists(atPath: file.path) { out.append((t, file)) }
+        }
+        return out
     }
 
     /// One pipe's bytes, written from the reader queue and read after the group completes.

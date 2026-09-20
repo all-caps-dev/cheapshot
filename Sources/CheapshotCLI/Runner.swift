@@ -323,7 +323,8 @@ public enum CLI {
     /// The ffmpeg-backed transcriber the CLI runs with. Tests pass their own to `runVideo` so a
     /// video run needs neither ffmpeg nor a fixture clip.
     static func ffmpegTranscriber(_ opts: Options, _ redactor: Redactor?) -> VideoTranscriber {
-        VideoTranscriber(source: FFmpegFrameSource(sceneThreshold: opts.scene), dedupe: opts.dedupe,
+        VideoTranscriber(source: FFmpegFrameSource(sceneThreshold: opts.scene, times: opts.frameTimes),
+                         dedupe: opts.dedupe,
                          minConfidence: opts.minConfidence, redactor: redactor)
     }
 

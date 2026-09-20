@@ -30,6 +30,11 @@ public enum Output {
           --pages <N|N-M>   PDF page range, default all
           --force-ocr       OCR every PDF page, even one whose text layer checks out
           --scene <f>       video scene-change threshold, default 0.25
+          --frames-at <list>  with --video: read these times instead of scene detection
+                              (SS, MM:SS or HH:MM:SS, comma separated)
+          --chapters <meta.json>  with --video: one frame per chapter, at its midpoint
+                              (reads yt-cc's meta.json). Scene detection fires on cuts, so
+                              it walks past a summary screen that is scrolled, not cut.
           --max-frames <n>  video frame cap, default 200
           --dedupe <f>      drop a screen this similar to the last, default 0.90
           --ledger          print cumulative savings across every run
