@@ -67,16 +67,19 @@ final class OptionsTests: XCTestCase {
     }
 
     func testLedgerForms() throws {
-        XCTAssertEqual(try Options.parse(["--ledger"]).command, .ledger(json: false, migrate: false, days: nil, byMode: false))
-        XCTAssertEqual(try Options.parse(["--ledger", "--json"]).command, .ledger(json: true, migrate: false, days: nil, byMode: false))
-        XCTAssertEqual(try Options.parse(["--ledger", "--migrate"]).command, .ledger(json: false, migrate: true, days: nil, byMode: false))
-        XCTAssertEqual(try Options.parse(["--ledger", "--json", "--days", "7"]).command, .ledger(json: true, migrate: false, days: 7, byMode: false))
-        XCTAssertEqual(try Options.parse(["--ledger", "--by-mode"]).command, .ledger(json: false, migrate: false, days: nil, byMode: true))
+        XCTAssertEqual(try Options.parse(["--ledger"]).command, .ledger(json: false, migrate: false, days: nil, byMode: false, bySession: false))
+        XCTAssertEqual(try Options.parse(["--ledger", "--json"]).command, .ledger(json: true, migrate: false, days: nil, byMode: false, bySession: false))
+        XCTAssertEqual(try Options.parse(["--ledger", "--migrate"]).command, .ledger(json: false, migrate: true, days: nil, byMode: false, bySession: false))
+        XCTAssertEqual(try Options.parse(["--ledger", "--json", "--days", "7"]).command, .ledger(json: true, migrate: false, days: 7, byMode: false, bySession: false))
+        XCTAssertEqual(try Options.parse(["--ledger", "--by-mode"]).command, .ledger(json: false, migrate: false, days: nil, byMode: true, bySession: false))
+        XCTAssertEqual(try Options.parse(["--ledger", "--by-session"]).command, .ledger(json: false, migrate: false, days: nil, byMode: false, bySession: true))
+        XCTAssertEqual(try Options.parse(["--ledger", "--by-mode", "--by-session"]).command, .ledger(json: false, migrate: false, days: nil, byMode: true, bySession: true))
         XCTAssertEqual(try Options.parse(["--ledger", "--json", "--by-mode", "--days", "7"]).command,
-                       .ledger(json: true, migrate: false, days: 7, byMode: true))
+                       .ledger(json: true, migrate: false, days: 7, byMode: true, bySession: false))
         XCTAssertThrowsError(try Options.parse(["--migrate"]))
         XCTAssertThrowsError(try Options.parse(["--days", "7"]))          // needs --ledger
         XCTAssertThrowsError(try Options.parse(["--by-mode"]))            // needs --ledger
+        XCTAssertThrowsError(try Options.parse(["--by-session"]))         // needs --ledger
         XCTAssertThrowsError(try Options.parse(["--by-mode", "a.png"]))   // and never applies to a run
         XCTAssertThrowsError(try Options.parse(["--ledger", "--days", "0"]))
     }

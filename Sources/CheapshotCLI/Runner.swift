@@ -13,8 +13,8 @@ public enum CLI {
         switch opts.command {
         case .help:    io.out(Output.usage()); return 0
         case .version: io.out(cheapshotVersion + "\n"); return 0
-        case .ledger(let json, let migrate, let days, let byMode):
-            return runLedger(json: json, migrate: migrate, days: days, byMode: byMode, io: io)
+        case .ledger(let json, let migrate, let days, let byMode, let bySession):
+            return runLedger(json: json, migrate: migrate, days: days, byMode: byMode, bySession: bySession, io: io)
         case .allow(let path): return runAllow(path: path, io: io)
         default: break
         }
@@ -121,7 +121,7 @@ public enum CLI {
         do { try ledger(io).append(entry) } catch { io.err("cheapshot: ledger not written: \(error)\n") }
     }
 
-    static func runLedger(json: Bool, migrate: Bool, days: Int?, byMode: Bool = false, io: CLIIO) -> Int32 {
+    static func runLedger(json: Bool, migrate: Bool, days: Int?, byMode: Bool = false, bySession: Bool = false, io: CLIIO) -> Int32 {
         let l = ledger(io)
         do {
             if migrate {
@@ -153,9 +153,19 @@ public enum CLI {
                          "percent": m.percent]
                     }
                 }
+                if bySession {
+                    // A nil session stays nil in JSON rather than becoming the "(untagged)" label,
+                    // so a consumer tests for null instead of string-matching a display string.
+                    o["sessions"] = try l.summaryBySession(days: days).map { m -> [String: Any] in
+                        ["session": m.session as Any, "runs": m.runs, "inputs": m.inputs,
+                         "image_tokens": m.imageTokens, "text_tokens": m.textTokens, "saved": m.saved,
+                         "redactions": m.redactions, "percent": m.percent]
+                    }
+                }
                 io.out(try Output.json(o))
-            } else if byMode {
-                io.out(l.summaryTextByMode(s, try l.summaryByMode(days: days)))
+            } else if byMode || bySession {
+                if byMode { io.out(l.summaryTextByMode(s, try l.summaryByMode(days: days))) }
+                if bySession { io.out(l.summaryTextBySession(s, try l.summaryBySession(days: days))) }
             } else {
                 io.out(l.summaryText(s))
             }
@@ -304,7 +314,7 @@ public enum CLI {
         // One line per kind present, so a PDF run never reports itself as measured image savings.
         for (mode, t) in [("pdf", pdfs), ("image", images)] where t.inputs > 0 {
             record(LedgerEntry(mode: mode, inputs: t.inputs, imageTokens: t.imageTokens,
-                               textTokens: t.textTokens, redactions: t.redactions), opts, io)
+                               textTokens: t.textTokens, redactions: t.redactions, session: opts.session), opts, io)
         }
         if opts.stats {
             // From the inputs asked for, not the ones that succeeded, so a PDF run that fails
@@ -360,7 +370,7 @@ public enum CLI {
         } else {
             io.out(body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
         }
-        record(LedgerEntry(mode: "video", inputs: t.frameCount, imageTokens: t.imageTokens, textTokens: tt, redactions: t.redactions.total), opts, io)
+        record(LedgerEntry(mode: "video", inputs: t.frameCount, imageTokens: t.imageTokens, textTokens: tt, redactions: t.redactions.total, session: opts.session), opts, io)
         if opts.stats {
             let (saved, pct) = savings(imageTokens: t.imageTokens, textTokens: tt)
             // A failed frame was never read, so it is in neither count above; name it or the

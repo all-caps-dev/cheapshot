@@ -65,9 +65,12 @@ Pages with a text layer are read through PDFKit and pages without one are render
 ```bash
 cheapshot --ledger              # cumulative savings across every run
 cheapshot --ledger --by-mode    # the same window split into video / image / pdf
+cheapshot --ledger --by-session # split by the --session id each run was tagged with
 ```
 
 Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledger.jsonl`, or to `$CHEAPSHOT_HOME/ledger.jsonl` when that variable is set, tagged with the mode it ran in: `image`, `pdf`, or `video`.
+
+`--session <id>` tags a run with an opaque caller id, written verbatim to the line. cheapshot never interprets it: the same binary serves Claude Code, Cursor, Codex CLI and a bare shell, so it stays harness-neutral and lets whoever *does* know resolve the id later. The Claude Code plugin passes its session id automatically.
 
 `--by-mode` matters before you turn the total into money. Screenshots are close to real avoided spend, because you would have pasted them into a model. Video frames usually are not: nobody was ever going to upload a recording frame by frame, so that share of the total is a capability rather than a bill you dodged. It combines with `--json` (adds a `modes` array) and `--days`.
 
