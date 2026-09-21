@@ -10,6 +10,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'cheapshot',
+      customCss: ['./src/styles/custom.css'],
       // Ours must be listed here, not left to the theme: a user override wins over the plugin's.
       components: {
         MarkdownContent: './src/components/MarkdownContent.astro',
