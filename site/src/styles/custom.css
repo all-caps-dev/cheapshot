@@ -1,0 +1,31 @@
+/* Splash hero: left aligned, and the full width of its ContainerSection.
+ *
+ * The theme's default hero centres everything (.hero align-items:center, .hero-info
+ * text-align:center) and caps the tagline at 56rem inside a 1024px container, so the hero text
+ * sat narrower than, and centred against, the markdown block below it. These rules line the two
+ * up on the same left edge and the same measure.
+ *
+ * Scoped to .container-section so it only reaches a hero, and specificity is one class higher
+ * than the theme's scoped rules so it wins regardless of stylesheet order. No !important. */
+.container-section .hero {
+    align-items: stretch;
+}
+
+.container-section .hero .hero-info {
+    text-align: left;
+    align-items: flex-start;
+}
+
+.container-section .hero .hero-title-container,
+.container-section .hero .hero-content-container {
+    align-items: flex-start;
+}
+
+.container-section .hero .hero-content-container .tagline {
+    /* The container already bounds the measure; 56rem only made it disagree with the prose. */
+    max-width: none;
+}
+
+.container-section .hero .hero-content-container .actions {
+    justify-content: flex-start;
+}

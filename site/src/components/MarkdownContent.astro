@@ -1,0 +1,36 @@
+---
+import '@astrojs/starlight/style/markdown.css';
+import { ContainerSection } from 'lucode-starlight/components';
+
+// The theme's own MarkdownContent gives .markdown-wrapper a colour and nothing else, so on a
+// splash page the prose ran edge to edge while every sibling block sat inside a ContainerSection.
+// Reuse ContainerSection itself rather than copying its padding and max-width: the wrapper then
+// IS a .container-section, so it picks up the responsive padding, --section-max-width, the
+// data-width variants, and the sibling rules (:last-of-type padding, + margin-top) for free, and
+// stays correct when the theme changes them.
+//
+// Splash only. A doc page already sits in the docs column, and wrapping it again would narrow it.
+const {
+    entry: {
+        data: { template },
+    },
+} = Astro.locals.starlightRoute;
+
+const Wrapper = template === 'splash' ? ContainerSection : Fragment;
+---
+
+<Wrapper>
+    <div class="markdown-wrapper">
+        <div class="sl-markdown-content">
+            <slot />
+        </div>
+    </div>
+</Wrapper>
+
+<style>
+    .markdown-wrapper {
+        --foreground: var(--markdown-foreground, var(--foreground));
+
+        color: var(--foreground);
+    }
+</style>

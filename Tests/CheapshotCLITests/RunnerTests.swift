@@ -629,6 +629,58 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(r.out.contains("82900"), r.out)
     }
 
+    /// --by-session must group on the recorded id, keep untagged runs as JSON null rather than a
+    /// display string, and reconcile with the flat totals in the same payload.
+    func testLedgerBySessionJSON() async throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "video", inputs: 70, imageTokens: 90_000, textTokens: 8_000, redactions: 9, session: "sess-a"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 2, session: "sess-a"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 300, textTokens: 100, redactions: 0))
+
+        let r = await run(["--ledger", "--json", "--by-session"])
+        XCTAssertEqual(r.code, 0)
+        let o = try json(r.out)
+        let rows = try XCTUnwrap(o["sessions"] as? [[String: Any]])
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0]["session"] as? String, "sess-a")
+        XCTAssertEqual(rows[0]["runs"] as? Int, 2)
+        XCTAssertTrue(rows[1]["session"] is NSNull, "an untagged group is null, not a label")
+        XCTAssertEqual(rows.reduce(0) { $0 + ($1["saved"] as? Int ?? 0) }, o["saved"] as? Int)
+
+        // Both splits can be asked for at once and stay independent.
+        let both = await run(["--ledger", "--json", "--by-mode", "--by-session"])
+        let bo = try json(both.out)
+        XCTAssertNotNil(bo["modes"]); XCTAssertNotNil(bo["sessions"])
+
+        // Absent without the flag, so an existing parser sees no change.
+        let flat = await run(["--ledger", "--json"])
+        XCTAssertNil(try json(flat.out)["sessions"])
+    }
+
+    /// The whole point of the flag: a run tagged with --session carries the id onto its ledger
+    /// line, and an untagged run writes no session key at all.
+    func testSessionFlagIsRecordedOnTheLedgerLine() async throws {
+        let png = try makeBlankPNG(name: "shot.png")
+        _ = await run([png.path, "--session", "abc-123"])
+        _ = await run([png.path])
+        let entries = try ledgerEntries()
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries[0]["session"] as? String, "abc-123")
+        XCTAssertNil(entries[1]["session"])
+    }
+
+    func testLedgerBySessionTextTable() async throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "video", inputs: 70, imageTokens: 90_000, textTokens: 8_000, redactions: 9, session: "sess-a"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 300, textTokens: 100, redactions: 0))
+        let r = await run(["--ledger", "--by-session"])
+        XCTAssertEqual(r.code, 0)
+        XCTAssertTrue(r.out.contains("by session"), r.out)
+        XCTAssertTrue(r.out.contains("sess-a"), r.out)
+        XCTAssertTrue(r.out.contains("(untagged)"), r.out)
+        XCTAssertTrue(r.out.contains("TOTAL"), r.out)
+    }
+
     func testLedgerDaysWindow() async throws {
         let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
         try ledger.append(LedgerEntry(ts: "2020-01-01T00:00:00Z", mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 0))

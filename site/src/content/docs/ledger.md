@@ -67,6 +67,53 @@ always reconcile with the flat totals in the same payload.
 
 `--by-mode` without `--ledger` is a usage error (exit 2).
 
+## Splitting the total by session, and by model
+
+A ledger line records who asked for the run, when the caller says so:
+
+```bash
+cheapshot --session "$MY_SESSION_ID" shot.png
+cheapshot --ledger --by-session
+```
+
+`--session` takes an opaque string. cheapshot never interprets it, never sanitises it, and
+writes it verbatim as a `session` key. Without the flag the key is absent, so every line
+written before this existed stays byte-identical and still decodes.
+
+```
+cheapshot ledger  (10 days, by session)
+  session                                runs   inputs          saved     %  redactions
+  578404de-9ecb-4e6d-8642-4718c9690212     42      812       1,204,556    91         37
+  (untagged)                              870      884       1,320,890    87        323
+  TOTAL                                   912    1,696       2,525,446    88        360
+```
+
+Runs with no id group under `(untagged)` rather than being dropped or folded into an arbitrary
+caller. In JSON that group's `session` is `null`, not the display string.
+
+### Why not a model name
+
+cheapshot does not know what a model is, and should not: the same binary serves Claude Code,
+Cursor, Codex CLI and a bare shell. A session id is neutral, so the harness that *does* know
+can resolve it afterwards.
+
+The Claude Code plugin passes its session id automatically, so nothing is needed from you. To
+turn that into a per-model split, `commandcode/ledger/ledger.py --by-model` reads the session
+id off each line, finds that session's transcript, and attributes the run to the model that
+was actually answering:
+
+```
+=== CHEAPSHOT SAVINGS BY MODEL (attributed through the session id) ===
+model                          runs   inputs          saved   at list in
+claude-fable-5-1                342   26,111     45,417,501      $454.18
+claude-opus-5                 1,095    9,036     15,243,338       $76.22
+no-session                      495   33,070     56,565,660          n/a
+```
+
+The join is the session id, never the timestamp. A clock-only join tops out near 70% on a real
+ledger and can attribute a run to a session that merely overlapped it. A run that cannot be
+resolved is reported as `no-session` or `session-not-found`, never guessed.
+
 ## Migrating from 0.4.x
 
 Version 0.4.x wrote daily TSV files under `~/.claude/cheapshot-ledger/`. One

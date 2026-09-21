@@ -18,7 +18,7 @@ public enum Output {
           cheapshot --cleanshot [n]
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
-          cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
+          cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode] [--by-session]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes)
 
         OPTIONS
@@ -35,6 +35,10 @@ public enum Output {
           --days <n>        with --ledger: only the last n days
           --by-mode         with --ledger: split the totals by video / image / pdf, because a
                             video frame is not a screenshot you would have uploaded anyway
+          --by-session      with --ledger: split the totals by the --session id on each line;
+                            runs with no id group under (untagged)
+          --session <id>    tag this run's ledger line with an opaque caller id, so a later
+                            tool can attribute the saving to whoever asked for it
           --no-ledger       do not record this run
           --version
 

@@ -2,7 +2,7 @@
 
 Give your coding agent the words on your screen, not the pixels: on-device OCR that redacts secrets first and shows you the tokens it saved.
 
-Full writeup: [Everything to Save, Nothing to Trust](https://ilano.fyi/writing/nothing-to-trust/).
+Full writeup: [Everything to Save, Nothing to Trust](https://ilano.fyi/writing/cheapshot-nothing-to-trust-macos-on-device-redaction/).
 
 ## Why
 
@@ -65,11 +65,12 @@ Pages with a text layer are read through PDFKit and pages without one are render
 ```bash
 cheapshot --ledger              # cumulative savings across every run
 cheapshot --ledger --by-mode    # the same window split into video / image / pdf
+cheapshot --ledger --by-session # split by the --session id each run was tagged with
 ```
 
-Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledger.jsonl`, or to `$CHEAPSHOT_HOME/ledger.jsonl` when that variable is set, tagged with the mode it ran in: `image`, `pdf`, or `video`.
+Every run appends one JSON line to `~/Library/Application Support/cheapshot/ledger.jsonl`, or to `$CHEAPSHOT_HOME/ledger.jsonl` when that variable is set, tagged with the mode it ran in: `image`, `pdf`, or `video`. `--session <id>` adds an opaque caller id, written verbatim; cheapshot never interprets it, so the harness that knows what a model is can resolve it later. The Claude Code plugin passes its session id automatically.
 
-`--by-mode` matters before you turn the total into money. Screenshots are close to real avoided spend, because you would have pasted them into a model. Video frames usually are not: nobody was ever going to upload a recording frame by frame, so that share of the total is a capability rather than a bill you dodged. It combines with `--json` (adds a `modes` array) and `--days`.
+Split before you turn a total into money. Screenshots are close to real avoided spend, because you would have pasted them into a model. Video frames are not: nobody was uploading a recording frame by frame, so that share is a capability, not a bill you dodged. Both splits combine with `--json` and `--days`.
 
 ## Claude Code
 

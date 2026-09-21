@@ -8,7 +8,7 @@ public struct UsageError: Error, Equatable {
 public struct Options: Equatable {
     public enum Command: Equatable {
         case help, version
-        case ledger(json: Bool, migrate: Bool, days: Int?, byMode: Bool)
+        case ledger(json: Bool, migrate: Bool, days: Int?, byMode: Bool, bySession: Bool)
         case allow(path: String)         // one-shot hook escape hatch, see plugin/hooks/cheapshot-read.sh
         case text(path: String)          // "-" means stdin
         case video(path: String)
@@ -22,6 +22,8 @@ public struct Options: Equatable {
     public var minConfidence: Float = 0.3
     public var scene = 0.25, maxFrames = 200, dedupe = 0.90
     public var rulesPath: String? = nil
+    /// Opaque caller id recorded on the ledger line. Never interpreted here.
+    public var session: String? = nil
     public var pages: ClosedRange<Int>? = nil
 
     public init(command: Command) { self.command = command }
@@ -59,7 +61,7 @@ public struct Options: Equatable {
         var cleanshot: Int? = nil
         var text: String? = nil
         var video: String? = nil
-        var ledger = false, migrate = false, byMode = false
+        var ledger = false, migrate = false, byMode = false, bySession = false
         var days: Int? = nil
         var i = 0
 
@@ -102,12 +104,14 @@ public struct Options: Equatable {
             case "--ledger":    ledger = true
             case "--migrate":   migrate = true
             case "--by-mode":   byMode = true
+            case "--by-session": bySession = true
             case "--days":      days = try positiveInt(a)
             case "--min-conf":  o.minConfidence = Float(try unitNumber(a))
             case "--scene":     o.scene = try unitNumber(a)
             case "--max-frames": o.maxFrames = try positiveInt(a)
             case "--dedupe":    o.dedupe = try unitNumber(a)
             case "--rules":     o.rulesPath = try value(a)
+            case "--session":   o.session = try value(a)
             case "--pages":     o.pages = try parsePages(try value(a))
             case "--text":      text = try value(a)
             case "--video":     video = try value(a)
@@ -131,10 +135,11 @@ public struct Options: Equatable {
             i += 1
         }
 
-        if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days, byMode: byMode); return o }
+        if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days, byMode: byMode, bySession: bySession); return o }
         if migrate { throw UsageError(message: "--migrate needs --ledger") }
         if days != nil { throw UsageError(message: "--days needs --ledger") }
         if byMode { throw UsageError(message: "--by-mode needs --ledger") }
+        if bySession { throw UsageError(message: "--by-session needs --ledger") }
         if let t = text { o.command = .text(path: t); return o }
         if let v = video { o.command = .video(path: v); return o }
         if let n = newest { o.command = .newest(dir: n.dir, count: n.count); return o }
