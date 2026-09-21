@@ -13,7 +13,8 @@ public enum CLI {
         switch opts.command {
         case .help:    io.out(Output.usage()); return 0
         case .version: io.out(cheapshotVersion + "\n"); return 0
-        case .ledger(let json, let migrate, let days): return runLedger(json: json, migrate: migrate, days: days, io: io)
+        case .ledger(let json, let migrate, let days, let byMode):
+            return runLedger(json: json, migrate: migrate, days: days, byMode: byMode, io: io)
         case .allow(let path): return runAllow(path: path, io: io)
         default: break
         }
@@ -120,7 +121,7 @@ public enum CLI {
         do { try ledger(io).append(entry) } catch { io.err("cheapshot: ledger not written: \(error)\n") }
     }
 
-    static func runLedger(json: Bool, migrate: Bool, days: Int?, io: CLIIO) -> Int32 {
+    static func runLedger(json: Bool, migrate: Bool, days: Int?, byMode: Bool = false, io: CLIIO) -> Int32 {
         let l = ledger(io)
         do {
             if migrate {
@@ -145,7 +146,16 @@ public enum CLI {
                                         "text_tokens": s.textTokens, "saved": s.saved, "redactions": s.redactions,
                                         "percent": s.percent, "path": l.url.path]
                 if let days = days { o["window_days"] = days }
+                if byMode {
+                    o["modes"] = try l.summaryByMode(days: days).map { m in
+                        ["mode": m.mode, "runs": m.runs, "inputs": m.inputs, "image_tokens": m.imageTokens,
+                         "text_tokens": m.textTokens, "saved": m.saved, "redactions": m.redactions,
+                         "percent": m.percent]
+                    }
+                }
                 io.out(try Output.json(o))
+            } else if byMode {
+                io.out(l.summaryTextByMode(s, try l.summaryByMode(days: days)))
             } else {
                 io.out(l.summaryText(s))
             }

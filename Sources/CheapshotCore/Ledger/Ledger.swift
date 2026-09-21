@@ -46,6 +46,22 @@ public struct LedgerSummary: Codable, Equatable {
     }
 }
 
+/// One row of `--ledger --by-mode`. Same counters as the whole-ledger summary, scoped to the
+/// runs of one mode, because the modes are not comparable: a video row counts frames the agent
+/// would never have uploaded, an image row counts screenshots it genuinely would have.
+public struct LedgerModeSummary: Codable, Equatable {
+    public var mode: String, runs: Int, inputs: Int, imageTokens: Int, textTokens: Int, saved: Int, redactions: Int, percent: Int
+    enum CodingKeys: String, CodingKey {
+        case mode, runs, inputs, saved, redactions, percent
+        case imageTokens = "image_tokens"
+        case textTokens = "text_tokens"
+    }
+    public init(mode: String, runs: Int, inputs: Int, imageTokens: Int, textTokens: Int, saved: Int, redactions: Int, percent: Int) {
+        self.mode = mode; self.runs = runs; self.inputs = inputs; self.imageTokens = imageTokens
+        self.textTokens = textTokens; self.saved = saved; self.redactions = redactions; self.percent = percent
+    }
+}
+
 public struct LedgerError: Error, CustomStringConvertible {
     public let message: String
     public var description: String { message }
@@ -90,12 +106,16 @@ public struct Ledger {
         return body.split(separator: "\n").compactMap { try? decoder.decode(LedgerEntry.self, from: Data($0.utf8)) }
     }
 
+    /// Every entry, or only those inside the last `days` days.
+    func entries(days: Int?) throws -> [LedgerEntry] {
+        let all = try entries()
+        guard let days = days else { return all }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        return all.filter { ($0.date ?? .distantPast) >= cutoff }
+    }
+
     public func summary(days: Int? = nil) throws -> LedgerSummary {
-        var all = try entries()
-        if let days = days {
-            let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
-            all = all.filter { ($0.date ?? .distantPast) >= cutoff }
-        }
+        let all = try entries(days: days)
         let dayCount = Set(all.map { String($0.ts.prefix(10)) }).count
         let img = all.reduce(0) { $0 + $1.imageTokens }
         let txt = all.reduce(0) { $0 + $1.textTokens }
@@ -105,6 +125,46 @@ public struct Ledger {
                              imageTokens: img, textTokens: txt, saved: saved,
                              redactions: all.reduce(0) { $0 + $1.redactions },
                              percent: img > 0 ? Int(Double(saved) / Double(img) * 100) : 0)
+    }
+
+    /// The same window split by mode, biggest saving first. Ties break on the mode name so the
+    /// order is stable across runs.
+    public func summaryByMode(days: Int? = nil) throws -> [LedgerModeSummary] {
+        var byMode: [String: [LedgerEntry]] = [:]
+        for e in try entries(days: days) { byMode[e.mode, default: []].append(e) }
+        return byMode.map { mode, rows in
+            let img = rows.reduce(0) { $0 + $1.imageTokens }
+            let saved = rows.reduce(0) { $0 + $1.saved }
+            return LedgerModeSummary(mode: mode, runs: rows.count,
+                                     inputs: rows.reduce(0) { $0 + $1.inputs },
+                                     imageTokens: img,
+                                     textTokens: rows.reduce(0) { $0 + $1.textTokens },
+                                     saved: saved,
+                                     redactions: rows.reduce(0) { $0 + $1.redactions },
+                                     percent: img > 0 ? Int(Double(saved) / Double(img) * 100) : 0)
+        }.sorted { $0.saved != $1.saved ? $0.saved > $1.saved : $0.mode < $1.mode }
+    }
+
+    static func pad(_ s: String, _ width: Int, right: Bool = true) -> String {
+        s.count >= width ? s : (right ? String(repeating: " ", count: width - s.count) + s
+                                      : s + String(repeating: " ", count: width - s.count))
+    }
+
+    public func summaryTextByMode(_ s: LedgerSummary, _ modes: [LedgerModeSummary]) -> String {
+        let widths = [8, 7, 9, 14, 13, 14, 5, 11]
+        func row(_ cells: [String]) -> String {
+            "  " + zip(cells, widths).enumerated()
+                .map { i, cw in Ledger.pad(cw.0, cw.1, right: i > 0) }.joined(separator: " ")
+        }
+        var out = "cheapshot ledger  (\(s.days) day\(s.days == 1 ? "" : "s"), by mode)\n"
+        out += row(["mode", "runs", "inputs", "image tokens", "text tokens", "saved", "%", "redactions"]) + "\n"
+        for m in modes {
+            out += row([m.mode, "\(m.runs)", "\(m.inputs)", "\(m.imageTokens)",
+                        "\(m.textTokens)", "\(m.saved)", "\(m.percent)", "\(m.redactions)"]) + "\n"
+        }
+        out += row(["TOTAL", "\(s.runs)", "\(s.inputs)", "\(s.imageTokens)",
+                    "\(s.textTokens)", "\(s.saved)", "\(s.percent)", "\(s.redactions)"]) + "\n\n"
+        return out
     }
 
     public func summaryText(_ s: LedgerSummary) -> String {

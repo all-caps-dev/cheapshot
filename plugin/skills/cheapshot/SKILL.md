@@ -32,6 +32,7 @@ cheapshot --video screen.mp4        # timestamped transcript of a screen recordi
 cheapshot --text notes.txt          # redact text with no OCR ("-" reads stdin)
 cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
+cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
 cheapshot allow /abs/path/shot.png  # let the next Read of that path see the pixels
 ```
 

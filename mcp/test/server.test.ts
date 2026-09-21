@@ -110,6 +110,38 @@ test("cheapshot_ledger returns the summary", async () => {
   assert.equal(sc.window_days, 7);
 });
 
+test("cheapshot_ledger by_mode adds the split to the text and the payload", async () => {
+  const c = await connected();
+  const r = (await c.callTool({ name: "cheapshot_ledger", arguments: { days: 7, by_mode: true } })) as ToolResult;
+  assert.equal(r.isError ?? false, false);
+  const text = r.content[0].text ?? "";
+  assert.match(text, /saved 41200 tokens \(85%\)/);
+  assert.match(text, /\n {2}video: 36000 tokens \(90%\) over 4 runs and 20 inputs/);
+  assert.match(text, /\n {2}image: 5200 tokens \(65%\) over 27 runs and 11 inputs/);
+  const sc = r.structuredContent as { saved: number; modes: Array<{ mode: string; saved: number }> };
+  assert.equal(sc.modes.length, 2);
+  assert.equal(sc.modes.reduce((a, m) => a + m.saved, 0), sc.saved);
+});
+
+test("cheapshot_ledger without by_mode is one line and carries no modes", async () => {
+  const c = await connected();
+  const r = (await c.callTool({ name: "cheapshot_ledger", arguments: {} })) as ToolResult;
+  assert.equal((r.content[0].text ?? "").includes("\n"), false);
+  assert.equal((r.structuredContent as Record<string, unknown>).modes, undefined);
+});
+
+test("cheapshot_ledger by_mode reaches the binary as --by-mode", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_LOG = log;
+  try {
+    const c = await connected();
+    await c.callTool({ name: "cheapshot_ledger", arguments: { by_mode: true } });
+    assert.match(fs.readFileSync(log, "utf8").trim(), /^--ledger --json --by-mode$/);
+  } finally {
+    delete process.env.FAKE_LOG;
+  }
+});
+
 test("cheapshot://ledger resource is the summary as JSON", async () => {
   const c = await connected();
   const r = await c.readResource({ uri: "cheapshot://ledger" });
