@@ -2,7 +2,7 @@
 
 Give your coding agent the words on your screen, not the pixels: on-device OCR that redacts secrets first and shows you the tokens it saved.
 
-Full writeup: [Everything to Save, Nothing to Trust](https://ilano.fyi/writing/nothing-to-trust/).
+Full writeup: [Everything to Save, Nothing to Trust](https://ilano.fyi/writing/cheapshot-nothing-to-trust-macos-on-device-redaction/).
 
 ## Why
 
