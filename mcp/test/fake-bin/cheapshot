@@ -43,9 +43,18 @@ case " $* " in
   *" allow "*)
     echo "cheapshot: allowed $2 for 5 minutes"; exit 0 ;;
   *" --ledger "*)
-    cat <<'JSON'
+    case " $* " in
+      *" --by-mode "*)
+        cat <<'JSON'
+{"days":3,"image_tokens":48000,"inputs":31,"modes":[{"image_tokens":40000,"inputs":20,"mode":"video","percent":90,"redactions":8,"runs":4,"saved":36000,"text_tokens":4000},{"image_tokens":8000,"inputs":11,"mode":"image","percent":65,"redactions":4,"runs":27,"saved":5200,"text_tokens":2800}],"path":"/tmp/ledger.jsonl","percent":85,"redactions":12,"runs":31,"saved":41200,"text_tokens":6800,"window_days":7}
+JSON
+        ;;
+      *)
+        cat <<'JSON'
 {"days":3,"image_tokens":48000,"inputs":31,"path":"/tmp/ledger.jsonl","percent":85,"redactions":12,"runs":31,"saved":41200,"text_tokens":6800,"window_days":7}
 JSON
+        ;;
+    esac
     exit 0 ;;
   *" --video "*)
     cat <<'JSON'

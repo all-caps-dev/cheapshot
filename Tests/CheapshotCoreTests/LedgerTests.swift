@@ -55,6 +55,52 @@ final class LedgerTests: XCTestCase {
         XCTAssertEqual(week.runs, 1); XCTAssertEqual(week.imageTokens, 2000)
     }
 
+    func testSummaryByModeSplitsAndSortsBySaved() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 2))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 500, textTokens: 100, redactions: 1))
+        try ledger.append(LedgerEntry(mode: "video", inputs: 70, imageTokens: 90_000, textTokens: 8_000, redactions: 9))
+        try ledger.append(LedgerEntry(mode: "pdf", inputs: 3, imageTokens: 300, textTokens: 200, redactions: 0))
+        let modes = try ledger.summaryByMode()
+        XCTAssertEqual(modes.map(\.mode), ["video", "image", "pdf"], "biggest saving first")
+        XCTAssertEqual(modes[0].runs, 1); XCTAssertEqual(modes[0].inputs, 70)
+        XCTAssertEqual(modes[0].saved, 82_000); XCTAssertEqual(modes[0].percent, 91)
+        XCTAssertEqual(modes[1].runs, 2); XCTAssertEqual(modes[1].imageTokens, 1500)
+        XCTAssertEqual(modes[1].saved, 1300); XCTAssertEqual(modes[1].redactions, 3)
+        XCTAssertEqual(modes[2].mode, "pdf"); XCTAssertEqual(modes[2].saved, 100)
+        // The split must reconcile with the whole-ledger totals, or the table lies.
+        let all = try ledger.summary()
+        XCTAssertEqual(modes.reduce(0) { $0 + $1.saved }, all.saved)
+        XCTAssertEqual(modes.reduce(0) { $0 + $1.runs }, all.runs)
+        XCTAssertEqual(modes.reduce(0) { $0 + $1.inputs }, all.inputs)
+    }
+
+    func testSummaryByModeHonoursDayWindow() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(ts: "2020-01-01T00:00:00Z", mode: "pdf", inputs: 1, imageTokens: 900, textTokens: 100, redactions: 0))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 400, textTokens: 100, redactions: 0))
+        XCTAssertEqual(try ledger.summaryByMode().map(\.mode), ["pdf", "image"])
+        XCTAssertEqual(try ledger.summaryByMode(days: 7).map(\.mode), ["image"])
+    }
+
+    func testSummaryByModeOfMissingFileIsEmpty() throws {
+        XCTAssertEqual(try Ledger(at: tmp.appendingPathComponent("nope.jsonl")).summaryByMode(), [])
+    }
+
+    func testSummaryTextByModeAlignsAndTotals() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(ts: "2026-09-20T01:00:00Z", mode: "video", inputs: 70, imageTokens: 90_000, textTokens: 8_000, redactions: 9))
+        try ledger.append(LedgerEntry(ts: "2026-09-20T02:00:00Z", mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 2))
+        let text = ledger.summaryTextByMode(try ledger.summary(), try ledger.summaryByMode())
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        XCTAssertEqual(lines[0], "cheapshot ledger  (1 day, by mode)")
+        XCTAssertTrue(lines[1].contains("mode") && lines[1].hasSuffix("redactions"), lines[1])
+        XCTAssertTrue(lines[2].contains("video"), lines[2])
+        XCTAssertTrue(lines[4].contains("TOTAL") && lines[4].contains("82900"), lines[4])
+        // Every row is the same width, or the columns do not line up in a terminal.
+        XCTAssertEqual(Set(lines[1...4].map(\.count)).count, 1, "ragged columns: \(lines[1...4].map(\.count))")
+    }
+
     func testSummaryOfMissingFileIsZero() throws {
         let s = try Ledger(at: tmp.appendingPathComponent("nope.jsonl")).summary()
         XCTAssertEqual(s.runs, 0); XCTAssertEqual(s.percent, 0)

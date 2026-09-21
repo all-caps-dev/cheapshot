@@ -590,6 +590,45 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(lines[1].hasSuffix("\t" + FileManager.default.currentDirectoryPath + "/rel.png"))
     }
 
+    /// The by-mode split must reconcile with the flat totals in the same payload, and must obey
+    /// the same day window. A row that does not add up is worse than no row.
+    func testLedgerByModeJSONSplitsAndReconciles() async throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(ts: "2020-01-01T00:00:00Z", mode: "pdf", inputs: 1, imageTokens: 900, textTokens: 100, redactions: 0))
+        try ledger.append(LedgerEntry(mode: "video", inputs: 70, imageTokens: 90_000, textTokens: 8_000, redactions: 9))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 2))
+
+        let r = await run(["--ledger", "--json", "--by-mode"])
+        XCTAssertEqual(r.code, 0)
+        let o = try json(r.out)
+        let modes = try XCTUnwrap(o["modes"] as? [[String: Any]])
+        XCTAssertEqual(modes.map { $0["mode"] as? String }, ["video", "image", "pdf"])
+        XCTAssertEqual(modes.reduce(0) { $0 + ($1["saved"] as? Int ?? 0) }, o["saved"] as? Int)
+        XCTAssertEqual(modes.reduce(0) { $0 + ($1["runs"] as? Int ?? 0) }, o["runs"] as? Int)
+        XCTAssertEqual(modes[0]["inputs"] as? Int, 70)
+        XCTAssertEqual(modes[0]["percent"] as? Int, 91)
+
+        let windowed = await run(["--ledger", "--json", "--by-mode", "--days", "7"])
+        let wm = try XCTUnwrap(try json(windowed.out)["modes"] as? [[String: Any]])
+        XCTAssertEqual(wm.map { $0["mode"] as? String }, ["video", "image"], "the 2020 pdf row is outside the window")
+
+        // Without the flag the key is absent, so an existing parser sees no change.
+        let flat = await run(["--ledger", "--json"])
+        XCTAssertNil(try json(flat.out)["modes"])
+    }
+
+    func testLedgerByModeTextTable() async throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "video", inputs: 70, imageTokens: 90_000, textTokens: 8_000, redactions: 9))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 2))
+        let r = await run(["--ledger", "--by-mode"])
+        XCTAssertEqual(r.code, 0)
+        XCTAssertTrue(r.out.contains("by mode"), r.out)
+        XCTAssertTrue(r.out.contains("video"), r.out)
+        XCTAssertTrue(r.out.contains("TOTAL"), r.out)
+        XCTAssertTrue(r.out.contains("82900"), r.out)
+    }
+
     func testLedgerDaysWindow() async throws {
         let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
         try ledger.append(LedgerEntry(ts: "2020-01-01T00:00:00Z", mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 0))

@@ -141,9 +141,14 @@ export function createServer(): McpServer {
     "cheapshot_ledger",
     {
       title: "Tokens saved so far",
-      description: "Cumulative savings from the cheapshot ledger: runs, inputs, image tokens, text tokens, saved, redactions, percent.",
+      description:
+        "Cumulative savings from the cheapshot ledger: runs, inputs, image tokens, text tokens, saved, redactions, percent. " +
+        "Pass by_mode to split the same window into video, image and pdf. Do that before quoting the total as money: " +
+        "a screenshot is spend that would really have been paid, a video frame is one of thousands nobody was going to " +
+        "upload individually, and in a typical ledger the video share is most of the total.",
       inputSchema: {
         days: z.number().int().min(1).optional().describe("Only the last n days; default all time"),
+        by_mode: z.boolean().optional().describe("Also split the totals by mode (video, image, pdf), biggest saving first"),
       },
     },
     async (input: LedgerInput): Promise<ToolResult> => {
@@ -154,7 +159,16 @@ export function createServer(): McpServer {
       if (run.code !== 0 || payload === undefined) return errorResult(run.stderr.trim() || `cheapshot exited ${run.code}`);
       const s = payload as { saved?: number; percent?: number; runs?: number; inputs?: number; days?: number; window_days?: number };
       const window = s.window_days !== undefined ? `last ${s.window_days} days` : "all time";
-      const text = `cheapshot saved ${s.saved ?? 0} tokens (${s.percent ?? 0}%) over ${s.runs ?? 0} runs and ${s.inputs ?? 0} inputs, ${window}.`;
+      let text = `cheapshot saved ${s.saved ?? 0} tokens (${s.percent ?? 0}%) over ${s.runs ?? 0} runs and ${s.inputs ?? 0} inputs, ${window}.`;
+      // An older binary ignores --by-mode and prints no `modes`, so the split is reported only
+      // when it is really there rather than asserted from the flag.
+      const modes = payload.modes as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(modes) && modes.length > 0) {
+        text += modes
+          .map((m) => `\n  ${String(m.mode ?? "?")}: ${Number(m.saved ?? 0)} tokens (${Number(m.percent ?? 0)}%) over ` +
+                      `${Number(m.runs ?? 0)} runs and ${Number(m.inputs ?? 0)} inputs`)
+          .join("");
+      }
       return { content: [{ type: "text", text }], structuredContent: payload };
     },
   );

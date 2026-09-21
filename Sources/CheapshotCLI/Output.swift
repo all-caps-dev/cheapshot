@@ -18,7 +18,7 @@ public enum Output {
           cheapshot --cleanshot [n]
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
-          cheapshot --ledger [--json] [--migrate] [--days <n>]
+          cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes)
 
         OPTIONS
@@ -33,6 +33,8 @@ public enum Output {
           --dedupe <f>      drop a screen this similar to the last, default 0.90
           --ledger          print cumulative savings across every run
           --days <n>        with --ledger: only the last n days
+          --by-mode         with --ledger: split the totals by video / image / pdf, because a
+                            video frame is not a screenshot you would have uploaded anyway
           --no-ledger       do not record this run
           --version
 

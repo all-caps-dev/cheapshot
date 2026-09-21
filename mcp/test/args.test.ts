@@ -37,6 +37,12 @@ test("ledger: with and without days", () => {
   assert.deepEqual(ledgerArgs({ days: 7 }), ["--ledger", "--json", "--days", "7"]);
 });
 
+test("ledger: by_mode adds the flag, and only when true", () => {
+  assert.deepEqual(ledgerArgs({ by_mode: true }), ["--ledger", "--json", "--by-mode"]);
+  assert.deepEqual(ledgerArgs({ by_mode: false }), ["--ledger", "--json"]);
+  assert.deepEqual(ledgerArgs({ days: 7, by_mode: true }), ["--ledger", "--json", "--days", "7", "--by-mode"]);
+});
+
 test("page cap is 20", () => {
   assert.equal(PAGE_CAP, 20);
 });

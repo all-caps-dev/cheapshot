@@ -12,7 +12,11 @@ test "$(jq -r '.plugins[0].name' .claude-plugin/marketplace.json)" = "cheapshot"
 test "$(jq -r '.plugins[0].source' .claude-plugin/marketplace.json)" = "./plugin" || { echo "marketplace source must be ./plugin"; exit 1; }
 test "$(jq -r .name plugin/.claude-plugin/plugin.json)" = "cheapshot" || { echo "plugin name must be cheapshot"; exit 1; }
 jq -e '.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")' plugin/.claude-plugin/plugin.json >/dev/null || { echo "plugin.json needs a semver version"; exit 1; }
-test "$(jq -r .hooks plugin/.claude-plugin/plugin.json)" = "./hooks/hooks.json" || { echo "plugin.json hooks pointer wrong"; exit 1; }
+# The manifest must NOT point at hooks/hooks.json. Claude Code loads that path from the plugin
+# root on its own, and naming it again is a duplicate that makes the whole plugin fail to load
+# ("Duplicate hooks file detected"), so the Read interceptor runs for nobody. manifest.hooks is
+# for ADDITIONAL hook files only. Dropped in 6b0a289; this check guards the regression.
+test "$(jq -r 'has("hooks")' plugin/.claude-plugin/plugin.json)" = "false" || { echo "plugin.json must not set hooks: hooks/hooks.json is auto-loaded and naming it again breaks plugin loading"; exit 1; }
 test "$(jq -r '.hooks.PreToolUse[0].matcher' plugin/hooks/hooks.json)" = "Read" || { echo "hook matcher must be Read"; exit 1; }
 jq -e '.owner.name | type == "string" and length > 0' .claude-plugin/marketplace.json >/dev/null || { echo "marketplace.json needs a non-empty owner.name"; exit 1; }
 jq -e '.hooks.PreToolUse[0].hooks[0].type == "command"' plugin/hooks/hooks.json >/dev/null || { echo "hook type must be command"; exit 1; }

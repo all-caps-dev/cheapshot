@@ -18,7 +18,7 @@ export interface VideoInput {
   raw?: boolean;
 }
 
-export interface LedgerInput { days?: number; }
+export interface LedgerInput { days?: number; by_mode?: boolean; }
 
 const PAGES = /^(\d+)(?:-(\d+))?$/;
 
@@ -61,5 +61,6 @@ export function videoArgs(input: VideoInput): string[] {
 export function ledgerArgs(input: LedgerInput): string[] {
   const args = ["--ledger", "--json"];
   if (input.days !== undefined) args.push("--days", String(input.days));
+  if (input.by_mode) args.push("--by-mode");
   return args;
 }

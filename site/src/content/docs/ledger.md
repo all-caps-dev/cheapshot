@@ -35,6 +35,38 @@ cheapshot --no-ledger shot.png   # read this one without recording it
 `"window_days": 7` to the JSON. The Claude Code [status line segment](/cheapshot/claude-code/#status-line)
 uses exactly that call.
 
+## Splitting the total by mode
+
+One number for the whole ledger hides which kind of input earned it, and the kinds
+are not comparable. `--by-mode` splits the same window, biggest saving first:
+
+```bash
+cheapshot --ledger --by-mode
+```
+
+```
+cheapshot ledger  (10 days, by mode)
+  mode        runs    inputs   image tokens   text tokens          saved     %  redactions
+  video        939     68275      125892675       8203393      117689282    93        2923
+  image       1082      1096        1769456        249533        1541275    87         323
+  pdf           18        18          96626         42203          54423    56           3
+  TOTAL       2039     69389      127758757       8495129      119284980    93        3249
+```
+
+Read that table before quoting the total as money saved. A screenshot row is close
+to real avoided spend, because you would have pasted that image into a model. A
+video row usually is not: the 68,275 frames above were never going to be uploaded
+one by one at any price, so that saving is a capability you gained, not a bill you
+dodged. The two live in one file and should not be added together in a sentence
+about cost.
+
+`--by-mode` combines with `--json` and `--days`. In JSON it adds a `modes` array
+alongside the flat totals, one object per mode with the same keys plus `mode`. The
+key is absent without the flag, so an existing parser sees no change. The rows
+always reconcile with the flat totals in the same payload.
+
+`--by-mode` without `--ledger` is a usage error (exit 2).
+
 ## Migrating from 0.4.x
 
 Version 0.4.x wrote daily TSV files under `~/.claude/cheapshot-ledger/`. One

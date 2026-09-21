@@ -37,9 +37,28 @@ Claude Code users who installed the [plugin](/cheapshot/claude-code/) already ha
 |---|---|---|
 | `cheapshot_ocr` | One of `paths` (string[], absolute) or `newest` ({`dir` required; `count` integer >= 1, default 1}); optional `raw` (boolean), `min_confidence` (0 to 1, default 0.3), `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox`, PDF `source` and `pages`) |
 | `cheapshot_video` | `path` (required); optional `scene` (0 to 1, default 0.25), `max_frames` (integer >= 1, default 200), `dedupe` (0 to 1, default 0.90), `raw` (boolean) | Timestamped transcript; `structuredContent` is the `--json` payload with `segments[]` |
-| `cheapshot_ledger` | `days` (integer >= 1, optional; default all time) | The ledger summary as text and as `structuredContent` |
+| `cheapshot_ledger` | `days` (integer >= 1, optional; default all time), `by_mode` (boolean, optional) | The ledger summary as text and as `structuredContent`. With `by_mode`, one extra text line per mode and a `modes` array in the payload |
 
 Resource `cheapshot://ledger` returns the all time summary as JSON.
+
+### Splitting the ledger by mode
+
+`cheapshot_ledger` with `by_mode: true` runs [`--by-mode`](/cheapshot/ledger/#splitting-the-total-by-mode)
+and reports the same window split into video, image and pdf, biggest saving first:
+
+```
+cheapshot saved 119284980 tokens (93%) over 2039 runs and 69389 inputs, all time.
+  video: 117689282 tokens (93%) over 939 runs and 68275 inputs
+  image: 1541275 tokens (87%) over 1082 runs and 1096 inputs
+  pdf: 54423 tokens (56%) over 18 runs and 18 inputs
+```
+
+An agent should ask for the split before it turns the total into a dollar figure.
+A screenshot row is close to spend that would really have been paid; a video row
+is frames nobody was going to upload one at a time, and it is usually most of the
+total. `structuredContent` gains a `modes` array beside the existing keys. The key
+is absent without the flag, and absent if an older binary ignored it, so the text
+reports a split only when there is really one.
 
 `structuredContent` is exactly what `cheapshot --json` prints, so a host can
 quote line 42 of a screenshot by its `lines[].n` or cite a PDF page by
