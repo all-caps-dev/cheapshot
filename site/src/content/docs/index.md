@@ -1,9 +1,9 @@
 ---
-title: On-device OCR and secret redaction for coding agents
-description: Read screenshots, screen recordings and PDFs on your own Mac. cheapshot gives a coding agent the words instead of the pixels, redacts secrets before they reach the model, and counts the image tokens it saved.
+title: Apple Vision OCR and secret redaction for coding agents
+description: Read screenshots, screen recordings and PDFs on your own Mac with Apple's Vision framework. cheapshot gives a coding agent the words instead of the pixels, redacts secrets before they reach the model, and counts the image tokens it saved.
 template: splash
 hero:
-  title: 'cheapshot: OCR, redaction, and token savings on any Mac running macOS 13 or later'
+  title: 'cheapshot: Apple Vision OCR, redaction, and token savings on any Mac running macOS 13 or later'
   tagline: Give your coding agent the words on your screen, not the pixels. On-device OCR that redacts secrets first and shows you the tokens it saved.
   actions:
     - text: Install
