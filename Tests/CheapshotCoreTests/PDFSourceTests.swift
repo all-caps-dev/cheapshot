@@ -41,6 +41,100 @@ final class PDFSourceTests: XCTestCase {
         return url
     }
 
+    /// A page whose visible words are pixels (an image, so no text layer of their own) with an
+    /// invisible text layer on top, the way an OCR'd scan is built. `layer` is what PDFKit reads
+    /// back; `visible` is what a person, and Vision, sees. Making them disagree is the bug.
+    func makeScanWithLayerPDF(visible: [String], layer: [String], name: String = "scan.pdf") throws -> URL {
+        let url = tmp.appendingPathComponent(name)
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &box, nil))
+        ctx.beginPDFPage(nil)
+        // The visible words, drawn into a 2x bitmap and placed as an image.
+        let bmp = try XCTUnwrap(CGContext(data: nil, width: 1224, height: 1584, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        bmp.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); bmp.fill(CGRect(x: 0, y: 0, width: 1224, height: 1584))
+        let font = CTFontCreateWithName("Helvetica" as CFString, 28, nil)
+        var y: CGFloat = 1440
+        for l in visible {
+            let attr = NSAttributedString(string: l, attributes: [kCTFontAttributeName as NSAttributedString.Key: font])
+            bmp.textPosition = CGPoint(x: 144, y: y)
+            CTLineDraw(CTLineCreateWithAttributedString(attr), bmp)
+            y -= 48
+        }
+        ctx.draw(try XCTUnwrap(bmp.makeImage()), in: box)
+        // The text layer, invisible, at the same positions in points.
+        ctx.setTextDrawingMode(.invisible)
+        let small = CTFontCreateWithName("Helvetica" as CFString, 14, nil)
+        y = 720
+        for l in layer {
+            let attr = NSAttributedString(string: l, attributes: [kCTFontAttributeName as NSAttributedString.Key: small])
+            ctx.textPosition = CGPoint(x: 72, y: y)
+            CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+            y -= 24
+        }
+        ctx.endPDFPage()
+        ctx.closePDF()
+        return url
+    }
+
+    static let prose = ["Quarterly revenue grew twelve percent this year",
+                        "Operating costs fell by three percent overall",
+                        "The board approved the budget for next spring"]
+
+    /// Reported 2026-09-29 on real papers: the layer was `! " % &` and the old 20-character test
+    /// took it as text, so the garbage came out instead of the words on the page.
+    func testGarbledTextLayerFallsBackToOCR() throws {
+        let garbage = ["! \" % & ' ! \" % & ' ! \" %", "\" % ! & ' \" % ! & ' \" %", "% & ! \" ' % & ! \" ' %"]
+        let url = try makeScanWithLayerPDF(visible: Self.prose, layer: garbage)
+        let page = try XCTUnwrap(PDFDocument(url: url)?.page(at: 0))
+        XCTAssertGreaterThanOrEqual((page.string ?? "").filter { !$0.isWhitespace }.count, PDFSource.scanLaneThreshold,
+                                    "the fixture must pass the old character-count test, or it does not reproduce the bug")
+        let p = try PDFSource.pages(of: url, range: nil, minConfidence: 0.3).pages[0]
+        XCTAssertEqual(p.lane, .scan)
+        let text = Layout.text(p.lines)
+        XCTAssertTrue(text.contains("revenue grew twelve"), text)
+        XCTAssertFalse(text.contains("! \" %"), text)
+    }
+
+    /// The other report: a layer that reads as words but silently leaves out a line.
+    func testTextLayerThatDropsALineFallsBackToOCR() throws {
+        let url = try makeScanWithLayerPDF(visible: Self.prose, layer: [Self.prose[0], Self.prose[2]])
+        let p = try PDFSource.pages(of: url, range: nil, minConfidence: 0.3).pages[0]
+        XCTAssertEqual(p.lane, .scan)
+        XCTAssertTrue(Layout.text(p.lines).contains("costs fell by three"), Layout.text(p.lines))
+    }
+
+    /// A layer that says what the page shows stays on the text lane, exact and unfenced.
+    func testFaithfulTextLayerStaysOnTheTextLane() throws {
+        let url = try makeScanWithLayerPDF(visible: Self.prose, layer: Self.prose)
+        let p = try PDFSource.pages(of: url, range: nil, minConfidence: 0.3).pages[0]
+        XCTAssertEqual(p.lane, .text)
+        XCTAssertEqual(p.lines.map(\.text), Self.prose)
+    }
+
+    func testForceOCRSkipsAGoodTextLayer() throws {
+        let url = try makePDF([.text(Self.prose, font: "Helvetica")])
+        XCTAssertEqual(try PDFSource.pages(of: url, range: nil, minConfidence: 0.3).pages[0].lane, .text)
+        let p = try PDFSource.pages(of: url, range: nil, minConfidence: 0.3, forceOCR: true).pages[0]
+        XCTAssertEqual(p.lane, .scan)
+        XCTAssertTrue(Layout.text(p.lines).contains("Operating costs fell"), Layout.text(p.lines))
+    }
+
+    /// The comparison itself, without Vision: which OCR lines the layer does not account for.
+    func testLayerMissesCountsOnlyLinesTheLayerLacks() {
+        let layer = Self.prose.joined(separator: "\n")
+        XCTAssertEqual(PDFSource.layerMisses(layer: layer, ocrLines: Self.prose), 0)
+        // OCR noise on one word of a line is not a missing line.
+        XCTAssertEqual(PDFSource.layerMisses(layer: layer, ocrLines: ["Quarterly revenue grew twelve percenl this year"]), 0)
+        XCTAssertEqual(PDFSource.layerMisses(layer: layer, ocrLines: ["Staff numbers stayed flat across every region"]), 1)
+        XCTAssertEqual(PDFSource.layerMisses(layer: "! \" % & ' ! \" % &", ocrLines: Self.prose), 3)
+        // Too few words to judge: headings, code, page numbers never count against the layer.
+        XCTAssertEqual(PDFSource.layerMisses(layer: layer, ocrLines: ["Table 3", "def main():", "264"]), 0)
+        // A ligature in the layer and the plain letters in OCR are the same word.
+        XCTAssertEqual(PDFSource.layerMisses(layer: "the ﬁnal ﬁgures were ﬁled on time", ocrLines: ["the final figures were filed on time"]), 0)
+    }
+
     func testTextLaneReadsLinesWithBoxesAndMonospaceFence() throws {
         let url = try makePDF([.text(["def main():", "return 1", "print(main())"], font: "Menlo")])
         let doc = try PDFSource.pages(of: url, range: nil, minConfidence: 0.3)

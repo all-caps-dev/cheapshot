@@ -6,23 +6,32 @@ description: The text lane and the scan lane, page ranges, the JSON additions, a
 ```bash
 cheapshot report.pdf
 cheapshot --pages 3-5 report.pdf
+cheapshot --force-ocr report.pdf   # ignore the text layer, OCR every page
 ```
 
 Every page takes one of two lanes, chosen per page.
 
 ## Text lane
 
-A page that already has a text layer is read through PDFKit. That is free, and
-the fonts come with the text, so fixed-pitch runs are detected and fenced
-without any measurement. Most PDFs are entirely this lane.
+A page whose text layer checks out is read through PDFKit. The text is exact,
+and the fonts come with it, so fixed-pitch runs are detected and fenced without
+any measurement. Most born-digital PDFs are entirely this lane.
+
+To check the layer, every page is rendered at 2x and read with Vision first. An
+OCR line of four or more words counts as missing when more than half of its
+word pairs appear nowhere in the layer. One missing line is enough to reject
+the layer. This catches both failures seen on real papers: a layer of symbols
+such as `! " % &` in place of words, and a layer that reads fine but silently
+leaves lines out. It costs one OCR pass per page, about a quarter of a second
+on Apple silicon.
 
 ## Scan lane
 
-A page whose text layer holds fewer than 20 non-whitespace characters is
-rendered at 2x and run
-through the same Vision OCR path as a screenshot. The lane is recorded per page,
-so a downstream tool can route scanned pages for review instead of trusting them
-like native text.
+A page takes the scan lane when its text layer holds fewer than 20
+non-whitespace characters, when the check above rejects the layer, or when
+`--force-ocr` is given. It gets the Vision OCR the check already ran, the same
+path as a screenshot. The lane is recorded per page, so a downstream tool can
+route scanned pages for review instead of trusting them like native text.
 
 ## Page ranges
 
