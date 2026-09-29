@@ -28,6 +28,7 @@ public enum Output {
           --min-conf <f>    confidence floor, default 0.3
           --rules <file>    extra redaction rules, JSON [{name, pattern, caseInsensitive}]
           --pages <N|N-M>   PDF page range, default all
+          --force-ocr       OCR every PDF page, even one whose text layer checks out
           --scene <f>       video scene-change threshold, default 0.25
           --max-frames <n>  video frame cap, default 200
           --dedupe <f>      drop a screen this similar to the last, default 0.90

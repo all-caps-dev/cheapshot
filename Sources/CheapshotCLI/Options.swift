@@ -19,6 +19,8 @@ public struct Options: Equatable {
 
     public var command: Command
     public var redact = true, json = false, stats = false, noLedger = false
+    /// Every PDF page goes to the scan lane, even when its text layer checks out.
+    public var forceOCR = false
     public var minConfidence: Float = 0.3
     public var scene = 0.25, maxFrames = 200, dedupe = 0.90
     public var rulesPath: String? = nil
@@ -99,6 +101,7 @@ public struct Options: Equatable {
             case "--json":      o.json = true
             case "--stats":     o.stats = true
             case "--no-ledger": o.noLedger = true
+            case "--force-ocr": o.forceOCR = true
             case "--ledger":    ledger = true
             case "--migrate":   migrate = true
             case "--by-mode":   byMode = true

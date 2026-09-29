@@ -145,4 +145,9 @@ final class OptionsTests: XCTestCase {
         XCTAssertThrowsError(try Options.parsePages("0-1"))
         XCTAssertThrowsError(try Options.parsePages("x"))
     }
+
+    func testForceOCR() throws {
+        XCTAssertFalse(try Options.parse(["doc.pdf"]).forceOCR)
+        XCTAssertTrue(try Options.parse(["--force-ocr", "doc.pdf"]).forceOCR)
+    }
 }

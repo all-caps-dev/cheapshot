@@ -249,7 +249,8 @@ public enum CLI {
             }
             if (f as NSString).pathExtension.lowercased() == "pdf" {
                 let doc: PDFDocumentResult
-                do { doc = try PDFSource.pages(of: URL(fileURLWithPath: f), range: opts.pages, minConfidence: opts.minConfidence) }
+                do { doc = try PDFSource.pages(of: URL(fileURLWithPath: f), range: opts.pages, minConfidence: opts.minConfidence,
+                                                 forceOCR: opts.forceOCR) }
                 catch {
                     failed += 1
                     results.append(["file": f, "error": "\(error)"])

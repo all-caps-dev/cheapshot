@@ -58,7 +58,7 @@ ffmpeg hands over only the frames where the screen changed, cheapshot OCRs those
 cheapshot --pages 3-5 report.pdf
 ```
 
-Pages with a text layer are read through PDFKit and pages without one are rendered and OCR'd like a screenshot, which `--json` reports per page. `--pages` on a non-PDF input is a usage error (exit 2).
+Every page is rendered and OCR'd; a page keeps its PDFKit text layer only when that layer accounts for every line the OCR reads, so a garbled or gappy layer is replaced by the OCR, and `--json` reports the lane per page. `--force-ocr` skips the layer entirely. `--pages` on a non-PDF input is a usage error (exit 2).
 
 ## Ledger
 

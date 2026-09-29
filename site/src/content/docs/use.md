@@ -65,6 +65,10 @@ is `0.3`. Lines below it are dropped.
 `--pages <N|N-M>` limits a PDF to one page or a range. The default is all
 pages.
 
+`--force-ocr` OCRs every PDF page and ignores its text layer. Without it, a
+page keeps its text layer only when the layer agrees with an OCR of the page.
+See [PDF](/cheapshot/pdf/).
+
 ## Video
 
 `--scene <f>` is the scene-change threshold that decides when a new frame is

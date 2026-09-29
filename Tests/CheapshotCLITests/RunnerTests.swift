@@ -316,6 +316,54 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual((results[0]["image_tokens"] as? Int), 2 * Tokens.image(width: 1224, height: 1584))
     }
 
+    /// A page whose words are an image under an invisible garbage text layer, as in the papers
+    /// reported 2026-09-29. It must take the scan lane, and redaction must still run on it.
+    func makeGarbledLayerPDF(visible: String, name: String) throws -> URL {
+        let url = tmp.appendingPathComponent(name)
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &box, nil))
+        ctx.beginPDFPage(nil)
+        let bmp = try XCTUnwrap(CGContext(data: nil, width: 1224, height: 1584, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        bmp.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); bmp.fill(CGRect(x: 0, y: 0, width: 1224, height: 1584))
+        let big = CTFontCreateWithName("Helvetica" as CFString, 28, nil)
+        bmp.textPosition = CGPoint(x: 144, y: 1440)
+        CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: visible,
+            attributes: [kCTFontAttributeName as NSAttributedString.Key: big])), bmp)
+        ctx.draw(try XCTUnwrap(bmp.makeImage()), in: box)
+        ctx.setTextDrawingMode(.invisible)
+        let small = CTFontCreateWithName("Helvetica" as CFString, 14, nil)
+        ctx.textPosition = CGPoint(x: 72, y: 720)
+        CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: "! \" % & ' ! \" % & ' ! \" % &",
+            attributes: [kCTFontAttributeName as NSAttributedString.Key: small])), ctx)
+        ctx.endPDFPage()
+        ctx.closePDF()
+        return url
+    }
+
+    func testGarbledLayerPDFIsOCRdAndStillRedacted() async throws {
+        let pdf = try makeGarbledLayerPDF(visible: "please debit acct 12345678 on the first of the month", name: "garbled.pdf")
+        let r = await run([pdf.path, "--json"])
+        XCTAssertEqual(r.code, 0, r.err)
+        let result = try XCTUnwrap((try json(r.out)["results"] as? [[String: Any]])?.first)
+        let pages = try XCTUnwrap(result["pages"] as? [[String: Any]])
+        XCTAssertEqual(pages.map { $0["lane"] as? String }, ["scan"])
+        let text = try XCTUnwrap(result["text"] as? String)
+        XCTAssertTrue(text.contains("debit acct [BANK_ACCT]"), text)
+        XCTAssertFalse(text.contains("12345678"), text)
+        XCTAssertFalse(text.contains("! \" %"), text)
+    }
+
+    func testForceOCRPutsATextLayerPDFOnTheScanLane() async throws {
+        let pdf = try makeTextPDF(name: "doc.pdf")
+        let r = await run([pdf.path, "--json", "--force-ocr"])
+        XCTAssertEqual(r.code, 0, r.err)
+        let result = try XCTUnwrap((try json(r.out)["results"] as? [[String: Any]])?.first)
+        XCTAssertEqual((result["pages"] as? [[String: Any]])?.map { $0["lane"] as? String }, ["scan"])
+        XCTAssertTrue((result["text"] as? String ?? "").contains("readable text"), r.out)
+    }
+
     /// A locked PDF used to exit 0 with an empty text payload and a fabricated saving in the
     /// ledger. It is an input failure: an error entry, exit 1, and no ledger line at all.
     func testPasswordProtectedPDFIsAnErrorEntryAndWritesNoLedgerLine() async throws {
