@@ -10,6 +10,7 @@ Everything cheapshot stands on, with links. Add a line whenever a dependency, to
 - [FFmpeg](https://ffmpeg.org/) for scene detection in `--video` (`select`, `mpdecimate`, `metadata`, `-fps_mode vfr`).
 - [Swift](https://www.swift.org/) and [Swift Package Manager](https://www.swift.org/documentation/package-manager/).
 - [XCTest](https://developer.apple.com/documentation/xctest).
+- [Docling](https://github.com/docling-project/docling), with its [RapidOCR](https://github.com/RapidAI/RapidOCR) engine on [ONNX Runtime](https://onnxruntime.ai/), for the companion script `scripts/docling-save`. Not linked into the cheapshot binary.
 
 ## Built with
 
