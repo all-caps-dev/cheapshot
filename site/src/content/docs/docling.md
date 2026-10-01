@@ -16,6 +16,32 @@ Docling is not part of cheapshot. The cheapshot binary stays a single Swift
 program with no Python, and `docling-save` is a shell script in `scripts/` that
 you run beside it.
 
+## Why Docling
+
+cheapshot gives an agent the words on each page, in reading order, with a
+marker between pages. Docling gives the agent the structure around those words,
+so the agent knows where it is in the document:
+
+- Headings. Docling marks the large titles on a page as markdown headings. An
+  agent can see where a topic starts and go to one section instead of reading
+  a whole document of flat lines. On a 114 page slide deck, Docling found 77
+  headings.
+- Tables. Docling rebuilds a table as a markdown table with rows and columns.
+  On a 90 page deck, a slide with a grid of punch card codes came out as a 24
+  row table instead of a column of loose characters.
+- Pictures in place. Each picture sits in the markdown where it sat on the
+  page, as a link into `images/`, so the agent knows which text belongs with
+  which picture.
+- Positions. The JSON records the page and the position of every heading,
+  paragraph, table and picture, so a later tool can cite the page an answer
+  came from.
+
+Docling decides what a heading is from the size and the place of the text, and
+it does not judge meaning. On slides, a large quote or a large number also
+becomes a heading, e.g., a slide that shows only a dollar figure. Read the
+headings as a map of the document, and do not treat them as an outline the
+author wrote.
+
 ## What the folder holds
 
 For `report.pdf`, the script writes `report/` with six things:
