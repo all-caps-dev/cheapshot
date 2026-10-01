@@ -1,0 +1,122 @@
+#!/bin/sh
+# docling-save: save one PDF as a self-contained folder an agent can read later.
+#
+#   docling-save <file.pdf> [--name <slug>] [--dest <folder>] [--no-ocr] [--force]
+#
+# Writes <dest>/<slug>/ with:
+#   <slug>.pdf            the original, unchanged
+#   <slug>.docling.md     Docling markdown: headings, text, tables, relative links to the pictures
+#   <slug>.docling.json   Docling's lossless record (page and position of every item)
+#   images/               every picture Docling cut out of the pages
+#   <slug>.ocr-pages.txt  page by page text from cheapshot (Apple Vision, redacted), which also
+#                         reads the words inside screenshots; skipped when cheapshot is not on PATH
+#   manifest.json         source name, sha256, page and picture counts, tool versions, date
+#
+# Docling is not part of cheapshot. This companion script calls both: Docling for structure,
+# cheapshot for the redacted page text. Docling is found as $DOCLING, then `docling` on PATH, then
+# ~/.local/share/docling-venv/bin/docling. Its Python (for the manifest step) is $DOCLING_PYTHON,
+# then the python beside the resolved docling, then python3. OCR uses Docling's rapidocr engine,
+# which needs onnxruntime in the same environment; pass --no-ocr without it.
+#
+# All work happens in a temp folder. Only the finished folder is copied into <dest>, with plain cp,
+# so a synced folder (Dropbox, iCloud) never sees a half-written package. Default <dest> is
+# ./docling-save. Nothing is overwritten without --force.
+set -eu
+
+usage() { sed -n '3,4p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+# ---- find Docling and the Python that has it ---------------------------------------------------
+DOCLING=${DOCLING:-}
+[ -n "$DOCLING" ] || DOCLING=$(command -v docling 2>/dev/null || true)
+[ -n "$DOCLING" ] || DOCLING="$HOME/.local/share/docling-venv/bin/docling"
+# A uv or pipx install puts a symlink on PATH; the venv's python sits beside the real file.
+real=$DOCLING
+while [ -L "$real" ]; do
+  link=$(readlink "$real")
+  case "$link" in /*) real=$link ;; *) real="$(dirname "$real")/$link" ;; esac
+done
+PY=${DOCLING_PYTHON:-}
+[ -n "$PY" ] || { [ -x "$(dirname "$real")/python" ] && PY="$(dirname "$real")/python"; } || true
+[ -n "$PY" ] || PY=python3
+
+# ---- arguments ---------------------------------------------------------------------------------
+SRC=""; NAME=""; DEST="./docling-save"; OCR="--ocr --ocr-engine rapidocr"; FORCE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name) [ $# -ge 2 ] || usage; NAME=$2; shift 2 ;;
+    --dest) [ $# -ge 2 ] || usage; DEST=$2; shift 2 ;;
+    --no-ocr) OCR="--no-ocr"; shift ;;
+    --force) FORCE=1; shift ;;
+    -h|--help) usage ;;
+    -*) echo "docling-save: unknown option $1" >&2; exit 2 ;;
+    *) [ -z "$SRC" ] || { echo "docling-save: one PDF at a time" >&2; exit 2; }; SRC=$1; shift ;;
+  esac
+done
+[ -n "$SRC" ] || usage
+[ -f "$SRC" ] || { echo "docling-save: no such file: $SRC" >&2; exit 1; }
+[ -x "$DOCLING" ] || { echo "docling-save: docling not found (set DOCLING or put docling on PATH)" >&2; exit 1; }
+
+# Slug: --name, or the file name in lower case with every run of other characters turned into "-".
+[ -n "$NAME" ] || NAME=$(basename "$SRC" .pdf | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//' -e 's/-$//')
+[ -n "$NAME" ] || { echo "docling-save: cannot make a folder name from $SRC; pass --name" >&2; exit 2; }
+OUT="$DEST/$NAME"
+if [ -e "$OUT" ] && [ -z "$FORCE" ]; then echo "docling-save: $OUT exists; pass --force to replace it" >&2; exit 1; fi
+
+T=$(mktemp -d "${TMPDIR:-/tmp}/docling-save.XXXXXX")
+trap 'rm -rf "${T:?}"' EXIT
+mkdir -p "$T/in" "$T/pkg/images"
+cp "$SRC" "$T/in/$NAME.pdf"
+cp "$SRC" "$T/pkg/$NAME.pdf"
+
+# ---- Docling: markdown, lossless JSON, pictures as separate files -----------------------------
+echo "docling-save: converting $NAME" >&2
+# shellcheck disable=SC2086
+"$DOCLING" convert "$T/in/$NAME.pdf" --to md --to json --image-export-mode referenced $OCR --table-mode accurate --output "$T/out" > "$T/docling.log" 2>&1 \
+  || { echo "docling-save: docling failed; last lines:" >&2; tail -5 "$T/docling.log" >&2; exit 1; }
+[ -f "$T/out/$NAME.md" ] && [ -f "$T/out/$NAME.json" ] \
+  || { echo "docling-save: docling wrote no markdown or JSON; last lines:" >&2; tail -5 "$T/docling.log" >&2; exit 1; }
+cp "$T/out/$NAME.json" "$T/pkg/$NAME.docling.json"
+if [ -d "$T/out/${NAME}_artifacts" ]; then cp "$T/out/${NAME}_artifacts"/* "$T/pkg/images/" 2>/dev/null || true; fi
+
+# ---- cheapshot: redacted page text, including words inside pictures ---------------------------
+if command -v cheapshot >/dev/null 2>&1; then
+  cheapshot "$T/in/$NAME.pdf" > "$T/pkg/$NAME.ocr-pages.txt" 2>/dev/null || rm -f "$T/pkg/$NAME.ocr-pages.txt"
+fi
+
+SHA=$(shasum -a 256 "$SRC" 2>/dev/null || sha256sum "$SRC")
+SHA=${SHA%% *}
+
+# ---- Python: relative picture links, a header line, manifest.json -----------------------------
+"$PY" - "$T" "$NAME" "$SHA" "$(basename "$SRC")" "$OCR" <<'PY'
+import sys, re, os, json, datetime
+T, name, sha, srcname, ocr = sys.argv[1:6]
+try:
+    from importlib.metadata import version
+    dv = version("docling")
+except Exception:
+    dv = "unknown"
+md = open(f"{T}/out/{name}.md", encoding="utf-8").read()
+# Docling writes absolute paths to its temp artifacts folder; point them at images/ instead.
+links = len(re.findall(r"\]\([^)]*_artifacts/", md))
+md = re.sub(r"\]\([^)]*_artifacts/", "](images/", md)
+doc = json.load(open(f"{T}/out/{name}.json", encoding="utf-8"))
+pages = len(doc.get("pages", {}))
+with_ocr = "--no-ocr" not in ocr
+has_text = os.path.exists(f"{T}/pkg/{name}.ocr-pages.txt")
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+head = (f"> Converted from `{name}.pdf` with Docling {dv} on {now[:10]}, "
+        f"{'with OCR (rapidocr)' if with_ocr else 'without OCR'}. {pages} pages, {links} pictures in `images/`."
+        + (f" Docling keeps a screenshot as a picture; the words inside it are in `{name}.ocr-pages.txt`." if has_text else "")
+        + "\n\n")
+open(f"{T}/pkg/{name}.docling.md", "w", encoding="utf-8").write(head + md)
+manifest = {"source_file": srcname, "sha256": sha, "pages": pages, "picture_links": links,
+            "picture_files": len(os.listdir(f"{T}/pkg/images")), "ocr": "rapidocr" if with_ocr else None,
+            "docling": dv, "created": now, "page_text": f"{name}.ocr-pages.txt" if has_text else None}
+json.dump(manifest, open(f"{T}/pkg/manifest.json", "w"), indent=2)
+print(f"docling-save: {pages} pages, {links} pictures, sha256 {sha[:12]}", file=sys.stderr)
+PY
+
+mkdir -p "$DEST"
+if [ -e "$OUT" ]; then rm -rf "${OUT:?}"; fi
+cp -R "$T/pkg" "$OUT"
+echo "$OUT"

@@ -38,6 +38,8 @@ jobs:
         run: scripts/check-workflows.sh
       - name: README check
         run: scripts/check-readme.sh
+      - name: docling-save check
+        run: scripts/check-docling-save.sh
 
   plugin-and-mcp:
     runs-on: ubuntu-latest

@@ -58,7 +58,7 @@ ffmpeg hands over only the frames where the screen changed, cheapshot OCRs those
 cheapshot --pages 3-5 report.pdf
 ```
 
-Every page is rendered and OCR'd; a page keeps its PDFKit text layer only when that layer accounts for every line the OCR reads, so a garbled or gappy layer is replaced by the OCR, and `--json` reports the lane per page. `--force-ocr` skips the layer entirely. `--pages` on a non-PDF input is a usage error (exit 2).
+Every page is rendered and OCR'd; a page keeps its PDFKit text layer only when that layer accounts for every line the OCR reads, so a garbled or gappy layer is replaced by the OCR, and `--json` reports the lane per page. `--force-ocr` skips the layer entirely. `--pages` on a non-PDF input is a usage error (exit 2). To keep a PDF as Docling markdown and JSON plus cheapshot's page text, see `scripts/docling-save` and the [Docling page](https://all-caps-dev.github.io/cheapshot/docling/).
 
 ## Ledger
 
