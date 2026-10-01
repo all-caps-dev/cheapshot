@@ -12,6 +12,19 @@ export default defineConfig({
       title: 'cheapshot',
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
+      // English stays at the root (/cheapshot/install/); other languages get a
+      // folder (/cheapshot/es/install/). A page with no translation yet is shown
+      // in English with Starlight's "not translated yet" notice.
+      // Chinese is tagged zh-Hans (Simplified script), matching ilano.fyi. Starlight
+      // 0.42 cannot map that tag to its built-in Chinese UI strings, so they are
+      // supplied in src/content/i18n/zh-Hans.json.
+      defaultLocale: 'root',
+      locales: {
+        root: { label: 'English', lang: 'en' },
+        es: { label: 'Español' },
+        ar: { label: 'العربية', dir: 'rtl' },
+        zh: { label: '简体中文', lang: 'zh-Hans' },
+      },
       sidebar: [
         { label: 'Install', slug: 'install' },
         { label: 'Use', slug: 'use' },
