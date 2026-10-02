@@ -1,0 +1,21 @@
+{
+  "sidebar.install": "Install",
+  "sidebar.use": "Use",
+  "sidebar.redaction": "Redaction",
+  "sidebar.ledger": "Ledger",
+  "sidebar.video": "Video",
+  "sidebar.pdf": "PDF",
+  "sidebar.docling": "Save a PDF with Docling",
+  "sidebar.claude-code": "Claude Code",
+  "sidebar.mcp": "MCP",
+  "sidebar.research": "Research",
+  "sidebar.research.video-frames": "Video frames",
+  "sidebar.research.structured-output": "Structured output",
+  "sidebar.research.pdf-pipeline": "PDF pipeline",
+  "sidebar.research.no-llm": "No LLM in the pipeline",
+  "sidebar.credits": "Credits",
+  "nav.install": "Install",
+  "nav.use": "Use",
+  "nav.credits": "Credits",
+  "footer": "© 2026 Ryan Ilano. MIT. [Source](https://github.com/all-caps-dev/cheapshot)."
+}
