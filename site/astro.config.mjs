@@ -14,6 +14,11 @@ export default defineConfig({
       // The title is the product name and the description is a plain string in
       // Starlight 0.42 (it cannot be localized), so both stay English here.
       title: 'cheapshot',
+      customCss: ['./src/styles/custom.css'],
+      // Ours must be listed here, not left to the theme: a user override wins over the plugin's.
+      components: {
+        MarkdownContent: './src/components/MarkdownContent.astro',
+      },
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
       // English stays at the root (/cheapshot/install/). A language only gets

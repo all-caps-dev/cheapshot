@@ -8,17 +8,24 @@ public struct LedgerEntry: Codable, Equatable {
     public var textTokens: Int
     public var saved: Int
     public var redactions: Int
+    /// Whoever asked for this run, passed by the caller with --session. Opaque on purpose:
+    /// cheapshot never interprets it. The Claude Code hook sends the harness session id, so a
+    /// later tool can resolve the run to the conversation (and so the model) it belonged to,
+    /// without cheapshot itself knowing anything about any harness. Absent when unset, which
+    /// keeps every line written before this field byte-identical.
+    public var session: String?
 
     enum CodingKeys: String, CodingKey {
-        case ts, mode, inputs, saved, redactions
+        case ts, mode, inputs, saved, redactions, session
         case imageTokens = "image_tokens"
         case textTokens = "text_tokens"
     }
 
-    public init(ts: String = LedgerEntry.now(), mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int) {
+    public init(ts: String = LedgerEntry.now(), mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int, session: String? = nil) {
         self.ts = ts; self.mode = mode; self.inputs = inputs
         self.imageTokens = imageTokens; self.textTokens = textTokens
         self.saved = max(0, imageTokens - textTokens); self.redactions = redactions
+        self.session = (session?.isEmpty ?? true) ? nil : session
     }
 
     static let isoFormatter: DateFormatter = {
@@ -60,6 +67,23 @@ public struct LedgerModeSummary: Codable, Equatable {
         self.mode = mode; self.runs = runs; self.inputs = inputs; self.imageTokens = imageTokens
         self.textTokens = textTokens; self.saved = saved; self.redactions = redactions; self.percent = percent
     }
+}
+
+/// One row of `--ledger --by-session`. Runs the caller did not tag land under a single row
+/// whose session is nil, reported as "(untagged)": they are real savings that simply cannot be
+/// attributed, and folding them into an arbitrary caller would be a lie.
+public struct LedgerSessionSummary: Codable, Equatable {
+    public var session: String?, runs: Int, inputs: Int, imageTokens: Int, textTokens: Int, saved: Int, redactions: Int, percent: Int
+    enum CodingKeys: String, CodingKey {
+        case session, runs, inputs, saved, redactions, percent
+        case imageTokens = "image_tokens"
+        case textTokens = "text_tokens"
+    }
+    public init(session: String?, runs: Int, inputs: Int, imageTokens: Int, textTokens: Int, saved: Int, redactions: Int, percent: Int) {
+        self.session = session; self.runs = runs; self.inputs = inputs; self.imageTokens = imageTokens
+        self.textTokens = textTokens; self.saved = saved; self.redactions = redactions; self.percent = percent
+    }
+    public var label: String { session ?? "(untagged)" }
 }
 
 public struct LedgerError: Error, CustomStringConvertible {
@@ -145,6 +169,24 @@ public struct Ledger {
         }.sorted { $0.saved != $1.saved ? $0.saved > $1.saved : $0.mode < $1.mode }
     }
 
+    /// The same window grouped by the caller id on each line, biggest saving first. Untagged
+    /// runs group together under a nil session rather than being dropped.
+    public func summaryBySession(days: Int? = nil) throws -> [LedgerSessionSummary] {
+        var groups: [String?: [LedgerEntry]] = [:]
+        for e in try entries(days: days) { groups[e.session, default: []].append(e) }
+        return groups.map { session, rows in
+            let img = rows.reduce(0) { $0 + $1.imageTokens }
+            let saved = rows.reduce(0) { $0 + $1.saved }
+            return LedgerSessionSummary(session: session, runs: rows.count,
+                                        inputs: rows.reduce(0) { $0 + $1.inputs },
+                                        imageTokens: img,
+                                        textTokens: rows.reduce(0) { $0 + $1.textTokens },
+                                        saved: saved,
+                                        redactions: rows.reduce(0) { $0 + $1.redactions },
+                                        percent: img > 0 ? Int(Double(saved) / Double(img) * 100) : 0)
+        }.sorted { $0.saved != $1.saved ? $0.saved > $1.saved : $0.label < $1.label }
+    }
+
     static func pad(_ s: String, _ width: Int, right: Bool = true) -> String {
         s.count >= width ? s : (right ? String(repeating: " ", count: width - s.count) + s
                                       : s + String(repeating: " ", count: width - s.count))
@@ -160,6 +202,24 @@ public struct Ledger {
         out += row(["mode", "runs", "inputs", "image tokens", "text tokens", "saved", "%", "redactions"]) + "\n"
         for m in modes {
             out += row([m.mode, "\(m.runs)", "\(m.inputs)", "\(m.imageTokens)",
+                        "\(m.textTokens)", "\(m.saved)", "\(m.percent)", "\(m.redactions)"]) + "\n"
+        }
+        out += row(["TOTAL", "\(s.runs)", "\(s.inputs)", "\(s.imageTokens)",
+                    "\(s.textTokens)", "\(s.saved)", "\(s.percent)", "\(s.redactions)"]) + "\n\n"
+        return out
+    }
+
+    public func summaryTextBySession(_ s: LedgerSummary, _ sessions: [LedgerSessionSummary]) -> String {
+        let idWidth = max(9, sessions.map { $0.label.count }.max() ?? 9)
+        let widths = [idWidth, 7, 9, 14, 13, 14, 5, 11]
+        func row(_ cells: [String]) -> String {
+            "  " + zip(cells, widths).enumerated()
+                .map { i, cw in Ledger.pad(cw.0, cw.1, right: i > 0) }.joined(separator: " ")
+        }
+        var out = "cheapshot ledger  (\(s.days) day\(s.days == 1 ? "" : "s"), by session)\n"
+        out += row(["session", "runs", "inputs", "image tokens", "text tokens", "saved", "%", "redactions"]) + "\n"
+        for m in sessions {
+            out += row([m.label, "\(m.runs)", "\(m.inputs)", "\(m.imageTokens)",
                         "\(m.textTokens)", "\(m.saved)", "\(m.percent)", "\(m.redactions)"]) + "\n"
         }
         out += row(["TOTAL", "\(s.runs)", "\(s.inputs)", "\(s.imageTokens)",

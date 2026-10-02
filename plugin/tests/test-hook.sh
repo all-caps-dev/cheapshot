@@ -46,7 +46,17 @@ case "$reason" in *"hello world"*"key [AWS_KEY]"*) pass "reason carries the reda
 line='cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, run: cheapshot allow /tmp/shot.png, then Read again.'
 case "$reason" in *"$line") pass "reason ends with the savings line";; *) fail "reason ends with the savings line: $reason";; esac
 grep -qF "$line" "$err" && pass "savings line on stderr" || fail "savings line on stderr"
-grep -q -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "binary called with --json --stats" || fail "binary called with --json --stats: $(cat "$FAKE_LOG")"
+grep -q -- '--json --stats --session s1 /tmp/shot.png' "$FAKE_LOG" && pass "binary called with --json --stats --session" || fail "binary called with --json --stats --session: $(cat "$FAKE_LOG")"
+
+# 2b. the session id reaches the ledger line verbatim, and its absence drops the flag entirely
+# rather than passing an empty value the binary would have to guess about.
+fresh
+printf '{"session_id":"5b6f-UPPER.Case_id","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/tmp/shot.png"}}' | run_hook >/dev/null 2>&1
+grep -q -- '--session 5b6f-UPPER.Case_id ' "$FAKE_LOG" && pass "session id passed verbatim, not sanitised" || fail "session id passed verbatim: $(cat "$FAKE_LOG")"
+fresh
+printf '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/tmp/shot.png"}}' | run_hook >/dev/null 2>&1
+grep -q -- '--session' "$FAKE_LOG" && fail "no session_id must not pass --session: $(cat "$FAKE_LOG")" || pass "no session_id means no --session"
+grep -q -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "no session_id still runs normally" || fail "no session_id still runs normally: $(cat "$FAKE_LOG")"
 [ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')" = PreToolUse ] && pass "hookEventName set" || fail "hookEventName set"
 # Ruling 1: the deny also carries a top-level systemMessage with the savings line (stderr on exit 0 is not shown).
 [ "$(printf '%s' "$out" | jq -r '.systemMessage')" = "$line" ] && pass "deny carries systemMessage with the savings line" || fail "deny carries systemMessage: $(printf '%s' "$out" | jq -c '.systemMessage')"

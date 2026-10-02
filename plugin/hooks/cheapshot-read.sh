@@ -17,6 +17,11 @@ case "$ext" in png|jpg|jpeg|webp|gif|pdf) ;; *) exit 0 ;; esac
 
 tmp="${TMPDIR:-/tmp}"
 sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"' | tr -c 'A-Za-z0-9._\n-' '_')
+# The raw id goes on the ledger line so a later tool can resolve the run to the conversation it
+# came from. $sid above is the sanitised form, for marker filenames only; it must not be used
+# here, because the sanitiser would silently rewrite an id that has to match a transcript name.
+raw_sid=$(printf '%s' "$input" | jq -r '.session_id // empty')
+[ -n "$raw_sid" ] && set -- --session "$raw_sid" || set --
 
 # A hint that lets the Read proceed: one line on stderr, the same text as systemMessage on stdout.
 hint() {
@@ -66,9 +71,9 @@ if [ "$ext" = pdf ] && [ -z "$pages" ]; then
 fi
 
 if [ -n "$pages" ]; then
-  out=$(cheapshot --json --stats --pages "$pages" "$path" 2>/dev/null)
+  out=$(cheapshot --json --stats "$@" --pages "$pages" "$path" 2>/dev/null)
 else
-  out=$(cheapshot --json --stats "$path" 2>/dev/null)
+  out=$(cheapshot --json --stats "$@" "$path" 2>/dev/null)
 fi
 code=$?
 if [ "$code" != 0 ]; then
