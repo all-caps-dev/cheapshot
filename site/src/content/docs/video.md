@@ -88,6 +88,29 @@ big ones.
 `--dedupe <f>` drops a screen that is at least this similar to the one before it,
 measured on the recognized text rather than the pixels. Default 0.90.
 
+## Cut-free screens
+
+Scene detection fires on cuts. A screen the presenter scrolls through, or talks
+over for two minutes, produces no cut and gets walked past. Measured on a 15:37
+benchmark review (yt-cc vKy0154ey90): scene mode kept 21 frames for 38,724
+image tokens and missed 93 seconds of a scrolled summary page. The same file
+read at chapter midpoints kept 14 frames for 25,816 image tokens and caught it.
+
+```bash
+cheapshot --video talk.mp4 --frames-at 2:00,13:20,14:20     # read exactly these times
+cheapshot --video talk.mp4 --chapters meta.json             # one frame per chapter, at its midpoint
+```
+
+`--frames-at` takes `SS`, `MM:SS` or `HH:MM:SS`, comma separated.
+
+`--chapters` reads the `meta.json` that yt-cc writes next to a transcript:
+`chapters: [{"t": seconds, "title": ...}]` plus `duration_string`. It takes the
+midpoint on purpose: a chapter's first second is a title card, its middle is
+the content.
+
+Both flags need `--video`. A timestamp past the end of the file is skipped
+rather than failing the run.
+
 ## Requirements
 
 Requires ffmpeg on your PATH. Cheapshot uses whichever one you have.

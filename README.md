@@ -50,22 +50,7 @@ Fifteen built-in rules catch keys, tokens, cards, and contact details, ordered m
 cheapshot --video screen.mp4
 ```
 
-ffmpeg hands over only the frames where the screen changed, cheapshot OCRs those locally, drops near-duplicate screens, and prints a timestamped transcript.
-
-Scene detection fires on **cuts**. A screen the presenter scrolls through, or talks over for two
-minutes, produces no cut and gets walked past. Measured on a 15:37 benchmark review: scene mode
-kept 21 frames and missed 93 seconds of a scrolled results table; the same file read at chapter
-midpoints kept 14 frames, cost fewer image tokens, and caught it.
-
-```bash
-cheapshot --video talk.mp4 --frames-at 2:00,13:20,14:20     # read exactly these times
-cheapshot --video talk.mp4 --chapters meta.json             # one frame per chapter, at its midpoint
-```
-
-`--chapters` reads the `meta.json` that [yt-cc](https://github.com/all-caps-dev) writes next to a
-transcript: `chapters: [{"t": seconds, "title": ...}]` plus `duration_string`. The midpoint is
-deliberate — a chapter's first second is a title card, its middle is the content. Both flags need
-`--video`, and a timestamp past the end of the file is skipped rather than failing the run.
+ffmpeg hands over only the frames where the screen changed, cheapshot OCRs those locally, drops near-duplicate screens, and prints a timestamped transcript. A screen that is scrolled or talked over has no cut to detect: `--frames-at 2:00,13:20` reads exact times and `--chapters meta.json` reads one frame per yt-cc chapter ([docs](https://all-caps-dev.github.io/cheapshot/video/#cut-free-screens)).
 
 ## PDF
 
