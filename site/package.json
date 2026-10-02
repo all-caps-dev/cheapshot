@@ -8,7 +8,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "i18n:status": "node scripts/i18n-status.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.0",
