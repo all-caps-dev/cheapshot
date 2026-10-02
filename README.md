@@ -50,7 +50,7 @@ Fifteen built-in rules catch keys, tokens, cards, and contact details, ordered m
 cheapshot --video screen.mp4
 ```
 
-ffmpeg hands over only the frames where the screen changed, cheapshot OCRs those locally, drops near-duplicate screens, and prints a timestamped transcript.
+ffmpeg hands over only the frames where the screen changed, cheapshot OCRs those locally, drops near-duplicate screens, and prints a timestamped transcript. A screen that is scrolled or talked over has no cut to detect: `--frames-at 2:00,13:20` reads exact times and `--chapters meta.json` reads one frame per yt-cc chapter ([docs](https://all-caps-dev.github.io/cheapshot/video/#cut-free-screens)).
 
 ## PDF
 

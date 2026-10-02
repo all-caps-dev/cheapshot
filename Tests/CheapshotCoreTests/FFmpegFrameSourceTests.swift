@@ -102,4 +102,28 @@ final class FFmpegFrameSourceTests: XCTestCase {
         let anyPath = tmp.appendingPathComponent("unused.mp4")
         XCTAssertThrowsError(try FFmpegFrameSource(ffmpegPath: "/nonexistent/ffmpeg", tempBase: tmp).frames(of: anyPath, maxFrames: 1))
     }
+
+    /// --frames-at path: ffmpeg seeks to each requested second and writes exactly one frame per
+    /// timestamp, in order, with the requested times reported rather than ffmpeg's pts.
+    func testExplicitTimesYieldOneFrameEachInOrder() async throws {
+        let clip = try makeClip()
+        let source = FFmpegFrameSource(times: [2.5, 0.5], tempBase: tmp)
+        var times: [TimeInterval] = []
+        for try await frame in try source.frames(of: clip, maxFrames: 200) {
+            times.append(frame.time)
+            XCTAssertEqual(frame.image.width, 320)
+        }
+        XCTAssertEqual(times, [0.5, 2.5], "requested times are sorted and reported as asked")
+        XCTAssertEqual(try leftoverDirs(), [], "temp dir must be deleted when the stream finishes")
+    }
+
+    /// A timestamp past the end yields no frame for that entry instead of failing the run.
+    func testTimeBeyondEndIsSkipped() async throws {
+        let clip = try makeClip()
+        let source = FFmpegFrameSource(times: [1.0, 99.0], tempBase: tmp)
+        var times: [TimeInterval] = []
+        for try await frame in try source.frames(of: clip, maxFrames: 200) { times.append(frame.time) }
+        XCTAssertEqual(times, [1.0])
+        XCTAssertEqual(try leftoverDirs(), [])
+    }
 }

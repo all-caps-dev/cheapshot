@@ -23,6 +23,8 @@ public struct Options: Equatable {
     public var forceOCR = false
     public var minConfidence: Float = 0.3
     public var scene = 0.25, maxFrames = 200, dedupe = 0.90
+    /// Explicit frame times for a --video run. nil means scene detection picks the frames.
+    public var frameTimes: [TimeInterval]? = nil
     public var rulesPath: String? = nil
     public var pages: ClosedRange<Int>? = nil
 
@@ -43,6 +45,52 @@ public struct Options: Equatable {
             throw UsageError(message: "--pages: expected N or N-M with N >= 1, got \(s)")
         }
         return lo...hi
+    }
+
+    /// SS, SS.s, MM:SS or HH:MM:SS. Minutes and seconds stay under 60 so a typo like 1:75
+    /// is an error instead of a silently shifted timestamp.
+    public static func parseTimestamp(_ s: String) throws -> TimeInterval {
+        let parts = s.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard (1...3).contains(parts.count) else { throw UsageError(message: "--frames-at: not a timestamp: \(s)") }
+        var total: TimeInterval = 0
+        for (i, part) in parts.enumerated() {
+            guard let n = Double(part), n.isFinite, n >= 0 else {
+                throw UsageError(message: "--frames-at: not a timestamp: \(s)")
+            }
+            // Only the last field may carry a fraction; earlier fields are whole and under 60.
+            if i < parts.count - 1, n != n.rounded(.down) || n >= 60 {
+                throw UsageError(message: "--frames-at: not a timestamp: \(s)")
+            }
+            if parts.count > 1, i > 0, n >= 60 {
+                throw UsageError(message: "--frames-at: not a timestamp: \(s)")
+            }
+            total = total * 60 + n
+        }
+        return total
+    }
+
+    /// yt-cc writes meta.json with `chapters: [{"t": seconds, "title": ...}]` and a
+    /// `duration_string` of "MM:SS" or "HH:MM:SS". One frame per chapter, at the chapter's
+    /// midpoint: the start of a chapter is a title card, the middle is the result on screen.
+    public static func chapterMidpoints(metaPath: String) throws -> [TimeInterval] {
+        guard let data = FileManager.default.contents(atPath: metaPath) else {
+            throw UsageError(message: "--chapters: cannot read \(metaPath)")
+        }
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw UsageError(message: "--chapters: not JSON: \(metaPath)")
+        }
+        let chapters = (root["chapters"] as? [[String: Any]]) ?? []
+        let starts = chapters.compactMap { ($0["t"] as? NSNumber)?.doubleValue }
+        guard !starts.isEmpty else { throw UsageError(message: "--chapters: no chapters in \(metaPath)") }
+        // The final chapter ends at the video's duration when we know it, otherwise 60 s on.
+        var end = starts[starts.count - 1] + 60
+        if let d = root["duration_string"] as? String, let parsed = try? parseTimestamp(d), parsed > starts.last! {
+            end = parsed
+        }
+        return starts.enumerated().map { i, t in
+            let next = i + 1 < starts.count ? starts[i + 1] : end
+            return (t + next) / 2
+        }
     }
 
     public static func parse(_ args: [String]) throws -> Options {
@@ -114,6 +162,13 @@ public struct Options: Equatable {
             case "--pages":     o.pages = try parsePages(try value(a))
             case "--text":      text = try value(a)
             case "--video":     video = try value(a)
+            case "--frames-at":
+                let raw = try value(a)
+                let times = try raw.split(separator: ",").map { try parseTimestamp(String($0).trimmingCharacters(in: .whitespaces)) }
+                guard !times.isEmpty else { throw UsageError(message: "--frames-at: no timestamps") }
+                o.frameTimes = Array(Set(times)).sorted()
+            case "--chapters":
+                o.frameTimes = try chapterMidpoints(metaPath: try value(a))
             case "--newest":
                 var dir = ".", n = 1
                 if let k = try nextCount(a) {
@@ -140,6 +195,7 @@ public struct Options: Equatable {
         if byMode { throw UsageError(message: "--by-mode needs --ledger") }
         if let t = text { o.command = .text(path: t); return o }
         if let v = video { o.command = .video(path: v); return o }
+        if o.frameTimes != nil { throw UsageError(message: "--frames-at needs --video") }
         if let n = newest { o.command = .newest(dir: n.dir, count: n.count); return o }
         if let n = cleanshot { o.command = .cleanshot(count: n); return o }
         guard !positional.isEmpty else { throw UsageError(message: "no input files") }
