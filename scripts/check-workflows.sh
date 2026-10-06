@@ -34,4 +34,11 @@ for s in check-license check-workflows check-readme check-plugin check-mcp; do
 done
 grep -q "^  plugin-and-mcp:" .github/workflows/ci.yml || { echo "ci.yml lacks the plugin-and-mcp job"; exit 1; }
 grep -q "cache-dependency-path: mcp/package-lock.json" .github/workflows/ci.yml || { echo "plugin-and-mcp job must cache npm against mcp/package-lock.json"; exit 1; }
+n=.github/workflows/npm-publish.yml
+test -f $n || { echo "$n missing"; exit 1; }
+grep -q "tags: \['mcp-v\*'\]" $n || { echo "npm-publish.yml must trigger on mcp-v* tags only"; exit 1; }
+grep -q 'id-token: write' $n || { echo "npm-publish.yml needs id-token: write for trusted publishing"; exit 1; }
+grep -q 'npm publish --provenance' $n || { echo "npm-publish.yml must publish with --provenance"; exit 1; }
+grep -q 'runs-on: ubuntu-latest' $n || { echo "npm-publish.yml must run on a GitHub-hosted runner"; exit 1; }
+if grep -q 'NODE_AUTH_TOKEN\|NPM_TOKEN' $n; then echo "npm-publish.yml must not use a stored npm token"; exit 1; fi
 echo "ok: workflows parse and carry the required steps"
