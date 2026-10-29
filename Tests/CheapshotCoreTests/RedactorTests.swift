@@ -66,6 +66,6 @@ final class RedactorTests: XCTestCase {
     }
 
     func testVersionConstant() {
-        XCTAssertEqual(cheapshotVersion, "0.5.0-dev")
+        XCTAssertEqual(cheapshotVersion, "0.5.0")
     }
 }
