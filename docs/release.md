@@ -77,3 +77,11 @@ If anything fails, fix the workflow here, delete the rc release and tag (`gh rel
 
 ## Open decision carried
 Bundle id hyphen (dev.all-caps.cheapshot vs dev.allcaps.cheapshot) is not needed for the CLI; decide it when the app's App ID is created in Phase 4.
+
+## Unsigned tap path (Ryan chose this 2026-10-29)
+
+Steps 2 to 5 wait on the Apple Developer Program, which can take a week. `release.yml` no longer needs them: when the six Apple secrets are absent it zips the linker's ad-hoc signed binary and publishes it, and the release note says so. Homebrew downloads are never quarantined, so `brew install all-caps-dev/tap/cheapshot` works with that zip; a raw download of the zip is blocked by Gatekeeper, which the note also says. When the secrets arrive, the next tag signs and notarizes with no workflow change.
+
+The tap bump likewise runs only when `COMMITTER_TOKEN` is set. Without it, write the formula by hand after the release job finishes: copy `packaging/homebrew/cheapshot.rb` into the tap's `Formula/`, set `url` to the asset and `sha256` from the `.sha256` file on the release, commit, push.
+
+Order for v0.5.0 on this path: step 6.1 (create the tap) and 6.2 (seed it), optionally 6.3 and 6.4 (the token), then step 9 (version and tag), then `brew install all-caps-dev/tap/cheapshot && cheapshot --version` on a second Mac.

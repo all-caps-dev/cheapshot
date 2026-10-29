@@ -9,3 +9,4 @@ site/dist/
 site/.astro/
 mcp/node_modules/
 mcp/dist/
+Sources/CheapshotCore/BuildInfo.swift.orig
