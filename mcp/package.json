@@ -1,6 +1,6 @@
 {
   "name": "cheapshot-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for cheapshot: on-device OCR for coding agents with secrets redacted first. Shells out to the cheapshot binary.",
   "license": "MIT",
   "author": "Ryan Ilano",
