@@ -101,6 +101,57 @@ final class LedgerTests: XCTestCase {
         XCTAssertEqual(Set(lines[1...4].map(\.count)).count, 1, "ragged columns: \(lines[1...4].map(\.count))")
     }
 
+    func testSessionIsOmittedWhenUnsetSoOldLinesStayByteIdentical() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(ts: "2026-09-08T01:05:35Z", mode: "image", inputs: 1, imageTokens: 1550, textTokens: 54, redactions: 10))
+        // An empty string is treated as absent: the hook must never record a session it did not get.
+        try ledger.append(LedgerEntry(ts: "2026-09-08T01:05:36Z", mode: "image", inputs: 1, imageTokens: 1550, textTokens: 54, redactions: 10, session: ""))
+        let lines = try String(contentsOf: ledger.url, encoding: .utf8).split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines[0], #"{"image_tokens":1550,"inputs":1,"mode":"image","redactions":10,"saved":1496,"text_tokens":54,"ts":"2026-09-08T01:05:35Z"}"#)
+        XCTAssertFalse(lines[1].contains("session"), lines[1])
+        XCTAssertNil(try ledger.entries()[0].session)
+    }
+
+    func testSessionRoundTripsAndOldLinesStillDecode() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        // A line written before the field existed must still decode, with a nil session.
+        try Data((#"{"image_tokens":100,"inputs":1,"mode":"image","redactions":0,"saved":90,"text_tokens":10,"ts":"2026-09-01T00:00:00Z"}"# + "\n").utf8)
+            .write(to: ledger.url)
+        try ledger.append(LedgerEntry(ts: "2026-09-02T00:00:00Z", mode: "image", inputs: 1, imageTokens: 200, textTokens: 20, redactions: 0, session: "abc-123"))
+        let e = try ledger.entries()
+        XCTAssertEqual(e.count, 2)
+        XCTAssertNil(e[0].session)
+        XCTAssertEqual(e[1].session, "abc-123")
+        XCTAssertTrue(try String(contentsOf: ledger.url, encoding: .utf8).contains(#""session":"abc-123""#))
+    }
+
+    func testSummaryBySessionGroupsAndKeepsUntaggedSeparate() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "video", inputs: 70, imageTokens: 90_000, textTokens: 8_000, redactions: 9, session: "sess-a"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 2, session: "sess-a"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 500, textTokens: 100, redactions: 0, session: "sess-b"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 300, textTokens: 100, redactions: 0))
+        let rows = try ledger.summaryBySession()
+        XCTAssertEqual(rows.map(\.label), ["sess-a", "sess-b", "(untagged)"], "biggest saving first")
+        XCTAssertEqual(rows[0].runs, 2); XCTAssertEqual(rows[0].saved, 82_900)
+        XCTAssertNil(rows[2].session, "an untagged row keeps a nil session, it is not the literal string")
+        XCTAssertEqual(rows[2].saved, 200)
+        // The grouping must reconcile with the flat totals, and with the mode split.
+        let all = try ledger.summary()
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.saved }, all.saved)
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.runs }, all.runs)
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.saved }, try ledger.summaryByMode().reduce(0) { $0 + $1.saved })
+    }
+
+    func testSummaryBySessionHonoursDayWindowAndEmptyLedger() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(ts: "2020-01-01T00:00:00Z", mode: "pdf", inputs: 1, imageTokens: 900, textTokens: 100, redactions: 0, session: "old"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 400, textTokens: 100, redactions: 0, session: "new"))
+        XCTAssertEqual(try ledger.summaryBySession().map(\.label), ["old", "new"])
+        XCTAssertEqual(try ledger.summaryBySession(days: 7).map(\.label), ["new"])
+        XCTAssertEqual(try Ledger(at: tmp.appendingPathComponent("nope.jsonl")).summaryBySession(), [])
+    }
+
     func testSummaryOfMissingFileIsZero() throws {
         let s = try Ledger(at: tmp.appendingPathComponent("nope.jsonl")).summary()
         XCTAssertEqual(s.runs, 0); XCTAssertEqual(s.percent, 0)
