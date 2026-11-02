@@ -1,5 +1,5 @@
 ---
-title: cheapshot
+title: Introduction
 description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first. Install with Homebrew or build from source.
 ---
 
