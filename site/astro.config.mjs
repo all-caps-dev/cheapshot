@@ -10,7 +10,7 @@ export default defineConfig({
   site: 'https://all-caps-dev.github.io',
   base: '/cheapshot/',
   // The install page was folded into the home page; keep the old URL working.
-  redirects: { '/install/': '/' },
+  redirects: { '/install/': '/cheapshot/' },
   integrations: [
     starlight({
       // The title is the product name and the description is a plain string in
