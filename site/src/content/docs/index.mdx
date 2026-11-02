@@ -1,0 +1,45 @@
+---
+title: Cheapshot
+description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first.
+template: splash
+hero:
+  title: "Cheapshot: give your agent the words, not the pixels"
+  tagline: Cheapshot reads screenshots, screen recordings and PDFs on your Mac, redacts secrets before the text leaves it, and keeps a ledger of the image tokens your agent never had to pay for.
+  actions:
+    - text: Get started
+      link: /cheapshot/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/all-caps-dev/cheapshot
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<div class="three-up">
+<CardGrid>
+  <Card title="Words, not pixels" icon="document">
+    A screenshot costs roughly `(width x height) / 750` tokens, and rides along on
+    every later turn. A 4 megapixel capture, one Retina laptop screen, is about
+    4,800 tokens. The words are usually all the agent needed. On a real screenshot:
+
+    **1,018 image tokens became 37 text tokens, 96% saved.**
+  </Card>
+  <Card title="Secrets never leave the Mac" icon="seti:lock">
+    Upload a screenshot and every key in it is now in a provider's logs, forever.
+    Cheapshot replaces API keys, tokens, passwords and private hostnames with
+    `[AWS_KEY]` style labels on your Mac, before any text leaves it.
+
+    [How redaction works](/cheapshot/redaction/).
+  </Card>
+  <Card title="Screenshots, PDFs and recordings" icon="seti:video">
+    PNG, JPEG, WebP, GIF and PDF, plus any video ffmpeg can open. A recording is
+    read only where the screen changed: a 51 minute 4K talk became a 17 screen
+    transcript in 35 seconds on an M4 Pro Mac mini, **31,348 image tokens to
+    1,133, 96% saved.**
+
+    [How video works](/cheapshot/video/).
+  </Card>
+</CardGrid>
+</div>

@@ -9,8 +9,8 @@ if [ -n "$CI" ] || [ ! -d node_modules ]; then npm ci --no-audit --no-fund; fi
 npm run build
 test -f dist/index.html || { echo "no dist/index.html"; exit 1; }
 test -f dist/.nojekyll || { echo "no dist/.nojekyll"; exit 1; }
-grep -q 'href="#_top"' dist/install/index.html || grep -qi 'skip to content' dist/install/index.html || { echo "no skip link in built HTML"; exit 1; }
-for p in $(cd src/content/docs && find . -name '*.md' | sed 's|^\./||; s|\.md$||; s|/index$||'); do
+grep -q 'href="#_top"' dist/use/index.html || grep -qi 'skip to content' dist/use/index.html || { echo "no skip link in built HTML"; exit 1; }
+for p in $(cd src/content/docs && find . -name '*.md' -o -name '*.mdx' | sed 's|^\./||; s|\.mdx*$||; s|/index$||'); do
   case "$p" in index) t=dist/index.html;; *) t="dist/$p/index.html";; esac
   test -f "$t" || { echo "page $p did not build"; exit 1; }
 done
@@ -28,7 +28,7 @@ for n in video-frames structured-output pdf-pipeline; do
   rm -f "$a" "$b"
 done
 # the two facts rescued from the README live on the site now; keep them there
-grep -q '1,018' src/content/docs/index.md || { echo "site index lost the 1,018-run ledger figure"; exit 1; }
+grep -q '1,018' src/content/docs/index.mdx && grep -q '1,018' src/content/docs/introduction.mdx || { echo "site index lost the 1,018-run ledger figure"; exit 1; }
 test -f src/content/docs/research/no-llm.md || { echo "site lost research/no-llm.md"; exit 1; }
 # the credits page is the docs/credits.md body under a 4-line frontmatter and a blank line;
 # the note's own h1 and its blank line are the only lines the page does not carry

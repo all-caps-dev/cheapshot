@@ -1,0 +1,73 @@
+---
+title: Introduction
+description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first. Install with Homebrew or build from source.
+---
+
+Give your coding agent the words on your screen, not the pixels. Cheapshot reads
+screenshots, screen recordings, and PDFs with Apple's Vision framework, redacts
+secrets before the text leaves your Mac, and keeps a ledger of the image tokens
+your agent did not have to pay for. No model in the loop. MIT. The
+[source is on GitHub](https://github.com/all-caps-dev/cheapshot).
+
+## Words, not pixels
+
+A screenshot costs roughly `(width x height) / 750` tokens, and rides along on
+every later turn. A 4 megapixel capture, one Retina laptop screen, is about
+4,800 tokens. The words are usually all the agent needed. On a real screenshot,
+**1,018 image tokens became 37 text tokens, 96% saved.**
+
+A model has no memory between turns. Every time the agent speaks, the whole
+conversation so far is sent again as input, and that includes every image you
+ever pasted. A screenshot is not paid for once. It is paid for on the turn you
+paste it, and again on every turn after that, until the session ends.
+
+That compounds fast. One 4 megapixel screenshot is about 4,800 tokens. Over a
+50 turn session it is sent 50 times, roughly 240,000 input tokens for one
+picture. The 37 words cheapshot would have read from it cost under 2,000 tokens
+over the same 50 turns. Paste five screenshots in an afternoon of debugging and
+the pixels alone are more than a million input tokens of resend.
+
+Prompt caching lowers the price of the resend, but it does not shrink the
+context the images occupy. A long session hits the context window sooner, gets
+compacted sooner, and loses earlier work sooner, and the images are the
+heaviest thing in it. The words are a few lines of text that cost almost
+nothing to carry.
+
+
+Works with Claude Code as a [plugin](/cheapshot/claude-code/), and with Cursor,
+Cline, Codex, OpenCode, pi and oh-my-pi through the [MCP server](/cheapshot/mcp/).
+
+## Requirements
+
+- A Mac on macOS 13 or later. The binary is universal, Apple silicon and Intel;
+  Intel is best-effort since Homebrew moved x86_64 to Tier 3 in September 2026.
+- Nothing else for screenshots and PDFs. OCR is Apple's Vision framework, already
+  on the machine. No account, no API key, no network.
+- `ffmpeg` on the PATH for `--video` (`brew install ffmpeg`).
+- Node 22 or later for the MCP server, which runs through `npx`. The Claude Code
+  plugin needs it too, since the plugin bundles that server.
+- Xcode, only if you build from source.
+
+## Install with Homebrew
+
+```sh
+brew install all-caps-dev/tap/cheapshot
+```
+
+Universal binary (Apple silicon and Intel), notarized, macOS 13 or later. Intel is best-effort: Homebrew moved x86_64 to Tier 3 in September 2026.
+
+## Build from source
+
+```sh
+git clone https://github.com/all-caps-dev/cheapshot
+cd cheapshot
+make            # builds ./cheapshot and checks it is universal with a macOS 13 floor
+sudo make install   # copies to /usr/local/bin
+```
+
+Needs Xcode; the universal build uses the Xcode build system, which the command
+line tools alone do not provide.
+
+`make test` runs the suite. `--video` needs `ffmpeg` on the PATH (`brew install ffmpeg`); everything else is Apple frameworks only.
+
+[Use](/cheapshot/use/) covers the commands; [Redaction](/cheapshot/redaction/) explains what never leaves the Mac.

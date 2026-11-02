@@ -16,6 +16,11 @@ cheapshot --video screen.mp4
 Measured on a 13 minute, 2.9 GB screen recording at 2560x1440: 12 scene frames,
 22,128 image tokens to 1,091 text tokens, 95% saved.
 
+Measured again on 2026-11-02 on an M4 Pro Mac mini: a 51 minute, 273 MB webinar
+recording at 3776x2124 (a public Kimi K3 talk) took 35 seconds wall clock and
+kept 17 scene frames, 14 distinct screens, 31,348 image tokens to 1,133 text
+tokens, 96% saved.
+
 ## Watch it run
 
 ![Terminal recording of cheapshot --video on a 40 second screen capture of a Tailscale policy note. The transcript scrolls with every IP address replaced by an IPV4 token and the owner's email by an EMAIL token, then the stats line reports 5 scene frames, 9,220 image tokens to 6,151 text tokens, 33% saved.](/cheapshot/tailnet-demo.gif)

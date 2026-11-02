@@ -42,7 +42,7 @@ export const LOCALES = {
   zh: { label: '简体中文', lang: 'zh-Hans' },
 };
 
-/** English stays at the root (/cheapshot/install/). */
+/** English stays at the root (/cheapshot/use/). */
 export const ROOT_LOCALE = { label: 'English', lang: 'en' };
 
 // Paths are worked out from this file's location, so the module behaves the

@@ -21,15 +21,93 @@ The binary first:
 brew install all-caps-dev/tap/cheapshot
 ```
 
-Then one entry in the host's MCP config:
+Then one entry in the host's MCP config. Every host runs the same
+`npx -y cheapshot-mcp` command; only the file and the key differ.
+
+### Cursor and Claude Desktop
+
+`.cursor/mcp.json`, or Claude Desktop's `claude_desktop_config.json`:
 
 ```json
-{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp"] } } }
+{
+  "mcpServers": {
+    "cheapshot": {
+      "command": "npx",
+      "args": ["-y", "cheapshot-mcp"]
+    }
+  }
+}
 ```
 
-Claude Code users who installed the [plugin](/cheapshot/claude-code/) already have this entry. Cursor reads
-`.cursor/mcp.json`; Codex CLI reads `~/.codex/config.toml` with a
-`[mcp_servers.cheapshot]` table (`command = "npx"`, `args = ["-y", "cheapshot-mcp"]`).
+### Claude Code
+
+The [plugin](/cheapshot/claude-code/) already carries this entry. Without the plugin:
+
+```sh
+claude mcp add cheapshot -- npx -y cheapshot-mcp
+```
+
+### Cline
+
+```sh
+cline mcp add cheapshot --yes -- npx -y cheapshot-mcp
+```
+
+Or the Configure tab in the extension. The file is the Cursor shape plus two keys:
+
+```json
+{
+  "mcpServers": {
+    "cheapshot": {
+      "command": "npx",
+      "args": ["-y", "cheapshot-mcp"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+### Codex CLI
+
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.cheapshot]
+command = "npx"
+args = ["-y", "cheapshot-mcp"]
+```
+
+### OpenCode
+
+`~/.config/opencode/opencode.jsonc`, with the command as one array:
+
+```jsonc
+{
+  "mcp": {
+    "cheapshot": {
+      "type": "local",
+      "command": ["npx", "-y", "cheapshot-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+### pi
+
+```sh
+pi mcp add cheapshot -- npx -y cheapshot-mcp
+```
+
+Or the Cursor shape in `~/.pi/agent/mcp.json`. pi gives MCP tools codemode
+exposure by default; add `"toolExposure": "direct"` to the server entry to
+declare them to the model like built-in tools.
+
+### oh-my-pi (omp)
+
+`/mcp add` inside a session, or the Cursor shape in `~/.omp/agent/mcp.json`
+(per project: `.omp/mcp.json`).
 
 ## Tools
 

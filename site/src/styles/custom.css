@@ -1,0 +1,42 @@
+/* Layout overrides for the lucode-starlight theme.
+
+   On a doc page the theme lays out a grid of [content 1fr | table of contents
+   240px] and centres a .main block of --content-max-width (40rem by default)
+   inside the content column. That left the article floating mid-screen on a
+   landscape monitor. Widen it and pin it to the left, next to the sidebar. */
+:root {
+  --content-max-width: 64rem;
+}
+
+.container-main > .main {
+  margin-inline: 0 auto;
+}
+
+/* The markdown wrapper just fills whatever block it sits in: .main on a doc
+   page, the container-section on the landing page. */
+.markdown-wrapper {
+  max-width: none;
+}
+
+/* Starlight's CardGrid is two columns. A grid wrapped in .three-up shows three
+   portrait cards in a row once the screen is wide enough for them. */
+@media (min-width: 64rem) {
+  .three-up .card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Inside a .three-up card the body is a column and its last paragraph (the
+   "How X works" link) is pushed to the bottom, so the three links line up. */
+.three-up .card {
+  display: flex;
+  flex-direction: column;
+}
+.three-up .card .body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.three-up .card .body > :last-child {
+  margin-top: auto;
+}

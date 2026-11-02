@@ -9,6 +9,8 @@ import { starlightLocaleConfig, label, localized } from './i18n.mjs';
 export default defineConfig({
   site: 'https://all-caps-dev.github.io',
   base: '/cheapshot/',
+  // The install page was folded into the home page; keep the old URL working.
+  redirects: { '/install/': '/cheapshot/introduction/' },
   integrations: [
     starlight({
       // The title is the product name and the description is a plain string in
@@ -16,22 +18,23 @@ export default defineConfig({
       title: 'cheapshot',
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
-      // English stays at the root (/cheapshot/install/). A language only gets
-      // a folder (/cheapshot/es/install/) once i18n.mjs finds it complete; with
+      customCss: ['./src/styles/custom.css'],
+      // English stays at the root (/cheapshot/use/). A language only gets
+      // a folder (/cheapshot/es/use/) once i18n.mjs finds it complete; with
       // none complete this adds nothing and the site is monolingual English.
       ...starlightLocaleConfig(),
       // Labels live in src/i18n/ui/en.json; label() adds the translations from
       // src/i18n/ui/<locale>.json for each language that is on.
       sidebar: [
-        { ...label('sidebar.install'), slug: 'install' },
+        { ...label('sidebar.intro'), slug: 'introduction' },
+        { ...label('sidebar.claude-code'), slug: 'claude-code' },
+        { ...label('sidebar.mcp'), slug: 'mcp' },
         { ...label('sidebar.use'), slug: 'use' },
         { ...label('sidebar.redaction'), slug: 'redaction' },
         { ...label('sidebar.ledger'), slug: 'ledger' },
         { ...label('sidebar.video'), slug: 'video' },
         { ...label('sidebar.pdf'), slug: 'pdf' },
         { ...label('sidebar.docling'), slug: 'docling' },
-        { ...label('sidebar.claude-code'), slug: 'claude-code' },
-        { ...label('sidebar.mcp'), slug: 'mcp' },
         {
           ...label('sidebar.research'),
           items: [
@@ -46,7 +49,7 @@ export default defineConfig({
       plugins: [
         lucode({
           navLinks: [
-            { ...label('nav.install'), link: '/install/' },
+            { ...label('nav.intro'), link: '/introduction/' },
             { ...label('nav.use'), link: '/use/' },
             { ...label('nav.credits'), link: '/credits/' },
           ],
