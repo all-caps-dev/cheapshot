@@ -11,3 +11,11 @@
   max-width: var(--section-max-width, var(--sl-content-width));
   margin-inline: auto;
 }
+
+/* Starlight's CardGrid is two columns. A grid wrapped in .three-up shows three
+   portrait cards in a row once the screen is wide enough for them. */
+@media (min-width: 64rem) {
+  .three-up .card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
