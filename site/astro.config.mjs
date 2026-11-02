@@ -27,14 +27,14 @@ export default defineConfig({
       // src/i18n/ui/<locale>.json for each language that is on.
       sidebar: [
         { ...label('sidebar.intro'), slug: 'introduction' },
+        { ...label('sidebar.claude-code'), slug: 'claude-code' },
+        { ...label('sidebar.mcp'), slug: 'mcp' },
         { ...label('sidebar.use'), slug: 'use' },
         { ...label('sidebar.redaction'), slug: 'redaction' },
         { ...label('sidebar.ledger'), slug: 'ledger' },
         { ...label('sidebar.video'), slug: 'video' },
         { ...label('sidebar.pdf'), slug: 'pdf' },
         { ...label('sidebar.docling'), slug: 'docling' },
-        { ...label('sidebar.claude-code'), slug: 'claude-code' },
-        { ...label('sidebar.mcp'), slug: 'mcp' },
         {
           ...label('sidebar.research'),
           items: [
