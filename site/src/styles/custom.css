@@ -19,3 +19,18 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* Inside a .three-up card the body is a column and its last paragraph (the
+   "How X works" link) is pushed to the bottom, so the three links line up. */
+.three-up .card {
+  display: flex;
+  flex-direction: column;
+}
+.three-up .card .body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.three-up .card .body > :last-child {
+  margin-top: auto;
+}
