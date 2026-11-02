@@ -15,7 +15,7 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <div class="three-up">
 <CardGrid>
@@ -43,23 +43,3 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
   </Card>
 </CardGrid>
 </div>
-
-## Works where your agent works
-
-In Claude Code it is a plugin: a Read hook swaps the pixels for the words
-automatically. Everywhere else it is one MCP server with three tools.
-
-<CardGrid>
-  <LinkCard title="Claude Code plugin" description="Hook, skill and MCP server in one install." href="/cheapshot/claude-code/" />
-  <LinkCard title="MCP server" description="Cursor, Cline, Codex, OpenCode, pi and oh-my-pi." href="/cheapshot/mcp/" />
-  <LinkCard title="Command line" description="Every flag, the input modes and the exit codes." href="/cheapshot/use/" />
-</CardGrid>
-
-## Install
-
-```sh
-brew install all-caps-dev/tap/cheapshot
-```
-
-Universal binary, notarized, macOS 13 or later. MIT.
-[Read the introduction](/cheapshot/introduction/) for the build-from-source route and what to do first.
