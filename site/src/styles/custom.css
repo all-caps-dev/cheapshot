@@ -9,7 +9,8 @@
 
 .markdown-wrapper {
   max-width: var(--section-max-width, var(--sl-content-width));
-  margin-inline: auto;
+  /* Left-aligned, next to the sidebar, rather than floating in the middle. */
+  margin-inline: 0 auto;
 }
 
 /* Starlight's CardGrid is two columns. A grid wrapped in .three-up shows three
