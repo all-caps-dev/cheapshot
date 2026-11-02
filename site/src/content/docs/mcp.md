@@ -27,15 +27,17 @@ Then one entry in the host's MCP config:
 { "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp"] } } }
 ```
 
-Claude Code users who installed the [plugin](/cheapshot/claude-code/) already have this entry. Cursor reads
-`.cursor/mcp.json`; Codex CLI reads `~/.codex/config.toml` with a
-`[mcp_servers.cheapshot]` table (`command = "npx"`, `args = ["-y", "cheapshot-mcp"]`).
-OpenCode reads `~/.config/opencode/opencode.jsonc` and wants the command as one array
-under `mcp` instead of `mcpServers`:
+Claude Code users who installed the [plugin](/cheapshot/claude-code/) already have this entry.
+Every other host takes the same `npx -y cheapshot-mcp` command; only the file and the key differ:
 
-```jsonc
-"mcp": { "cheapshot": { "type": "local", "command": ["npx", "-y", "cheapshot-mcp"], "enabled": true } }
-```
+| Host | Where | Shape |
+|---|---|---|
+| Cursor | `.cursor/mcp.json` | `mcpServers` as above |
+| Cline | `cline mcp add cheapshot --yes -- npx -y cheapshot-mcp`, or the Configure tab; the CLI writes `~/.cline/data/settings/cline_mcp_settings.json` | `mcpServers` as above, plus `"disabled": false, "autoApprove": []` |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.cheapshot]` with `command = "npx"`, `args = ["-y", "cheapshot-mcp"]` |
+| OpenCode | `~/.config/opencode/opencode.jsonc` | `"mcp": { "cheapshot": { "type": "local", "command": ["npx", "-y", "cheapshot-mcp"], "enabled": true } }` |
+| pi | `pi mcp add cheapshot -- npx -y cheapshot-mcp`, or `~/.pi/agent/mcp.json` | `mcpServers` as above. Tools default to codemode exposure; set `"toolExposure": "direct"` on the server to declare them to the model like built-in tools |
+| oh-my-pi (omp) | `/mcp add` in a session, or `~/.omp/agent/mcp.json` (project: `.omp/mcp.json`) | `mcpServers` as above |
 
 ## Tools
 

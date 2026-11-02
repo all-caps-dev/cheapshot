@@ -16,7 +16,7 @@ Then point your host at the server:
 { "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp"] } } }
 ```
 
-Claude Code users get this for free from the cheapshot plugin (`claude plugin install cheapshot@all-caps-dev`). This package is for every other host: Cursor (`.cursor/mcp.json`), Codex CLI (`~/.codex/config.toml`, `[mcp_servers.cheapshot]`), Claude Desktop, and anything else that speaks MCP over stdio.
+Claude Code users get this for free from the cheapshot plugin (`claude plugin install cheapshot@all-caps-dev`). This package is for every other host: Cursor, Cline, Codex CLI, OpenCode, pi, oh-my-pi, Claude Desktop, and anything else that speaks MCP over stdio. The [MCP page](https://all-caps.dev/cheapshot/mcp/) has the file and key for each.
 
 ## Tools
 
