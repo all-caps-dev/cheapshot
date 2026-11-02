@@ -3,7 +3,7 @@ title: Introduction
 description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first. Install with Homebrew or build from source.
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card } from '@astrojs/starlight/components';
 
 Give your coding agent the words on your screen, not the pixels. Cheapshot reads
 screenshots, screen recordings, and PDFs with Apple's Vision framework, redacts
@@ -11,32 +11,33 @@ secrets before the text leaves your Mac, and keeps a ledger of the image tokens
 your agent did not have to pay for. No model in the loop. MIT. The
 [source is on GitHub](https://github.com/all-caps-dev/cheapshot).
 
-<div class="three-up">
-<CardGrid>
-  <Card title="Words, not pixels" icon="document">
-    A screenshot costs roughly `(width x height) / 750` tokens, and rides along on
-    every later turn. A 4 megapixel capture, one Retina laptop screen, is about
-    4,800 tokens. The words are usually all the agent needed. On a real screenshot:
+<Card title="Words, not pixels" icon="document">
+  A screenshot costs roughly `(width x height) / 750` tokens, and rides along on
+  every later turn. A 4 megapixel capture, one Retina laptop screen, is about
+  4,800 tokens. The words are usually all the agent needed. On a real screenshot:
 
-    **1,018 image tokens became 37 text tokens, 96% saved.**
-  </Card>
-  <Card title="Secrets never leave the Mac" icon="seti:lock">
-    Upload a screenshot and every key in it is now in a provider's logs, forever.
-    Cheapshot replaces API keys, tokens, passwords and private hostnames with
-    `[AWS_KEY]` style labels on your Mac, before any text leaves it.
+  **1,018 image tokens became 37 text tokens, 96% saved.**
+</Card>
 
-    [How redaction works](/cheapshot/redaction/).
-  </Card>
-  <Card title="Screenshots, PDFs and recordings" icon="seti:video">
-    PNG, JPEG, WebP, GIF and PDF, plus any video ffmpeg can open. A recording is
-    read only where the screen changed: a 51 minute 4K talk became a 17 screen
-    transcript in 35 seconds on an M4 Pro Mac mini, **31,348 image tokens to
-    1,133, 96% saved.**
+## Why an image gets more expensive the longer a session runs
 
-    [How video works](/cheapshot/video/).
-  </Card>
-</CardGrid>
-</div>
+A model has no memory between turns. Every time the agent speaks, the whole
+conversation so far is sent again as input, and that includes every image you
+ever pasted. A screenshot is not paid for once. It is paid for on the turn you
+paste it, and again on every turn after that, until the session ends.
+
+That compounds fast. One 4 megapixel screenshot is about 4,800 tokens. Over a
+50 turn session it is sent 50 times, roughly 240,000 input tokens for one
+picture. The 37 words cheapshot would have read from it cost under 2,000 tokens
+over the same 50 turns. Paste five screenshots in an afternoon of debugging and
+the pixels alone are more than a million input tokens of resend.
+
+Prompt caching lowers the price of the resend, but it does not shrink the
+context the images occupy. A long session hits the context window sooner, gets
+compacted sooner, and loses earlier work sooner, and the images are the
+heaviest thing in it. The words are a few lines of text that cost almost
+nothing to carry.
+
 
 Works with Claude Code as a [plugin](/cheapshot/claude-code/), and with Cursor,
 Cline, Codex, OpenCode, pi and oh-my-pi through the [MCP server](/cheapshot/mcp/).
