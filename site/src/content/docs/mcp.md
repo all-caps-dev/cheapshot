@@ -30,6 +30,12 @@ Then one entry in the host's MCP config:
 Claude Code users who installed the [plugin](/cheapshot/claude-code/) already have this entry. Cursor reads
 `.cursor/mcp.json`; Codex CLI reads `~/.codex/config.toml` with a
 `[mcp_servers.cheapshot]` table (`command = "npx"`, `args = ["-y", "cheapshot-mcp"]`).
+OpenCode reads `~/.config/opencode/opencode.jsonc` and wants the command as one array
+under `mcp` instead of `mcpServers`:
+
+```jsonc
+"mcp": { "cheapshot": { "type": "local", "command": ["npx", "-y", "cheapshot-mcp"], "enabled": true } }
+```
 
 ## Tools
 
