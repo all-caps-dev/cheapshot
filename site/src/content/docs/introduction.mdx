@@ -37,6 +37,17 @@ nothing to carry.
 Works with Claude Code as a [plugin](/cheapshot/claude-code/), and with Cursor,
 Cline, Codex, OpenCode, pi and oh-my-pi through the [MCP server](/cheapshot/mcp/).
 
+## Requirements
+
+- A Mac on macOS 13 or later. The binary is universal, Apple silicon and Intel;
+  Intel is best-effort since Homebrew moved x86_64 to Tier 3 in September 2026.
+- Nothing else for screenshots and PDFs. OCR is Apple's Vision framework, already
+  on the machine. No account, no API key, no network.
+- `ffmpeg` on the PATH for `--video` (`brew install ffmpeg`).
+- Node 22 or later for the MCP server, which runs through `npx`. The Claude Code
+  plugin needs it too, since the plugin bundles that server.
+- Xcode, only if you build from source.
+
 ## Install with Homebrew
 
 ```sh
