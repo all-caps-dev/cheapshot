@@ -3,23 +3,18 @@ title: Introduction
 description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first. Install with Homebrew or build from source.
 ---
 
-import { Card } from '@astrojs/starlight/components';
-
 Give your coding agent the words on your screen, not the pixels. Cheapshot reads
 screenshots, screen recordings, and PDFs with Apple's Vision framework, redacts
 secrets before the text leaves your Mac, and keeps a ledger of the image tokens
 your agent did not have to pay for. No model in the loop. MIT. The
 [source is on GitHub](https://github.com/all-caps-dev/cheapshot).
 
-<Card title="Words, not pixels" icon="document">
-  A screenshot costs roughly `(width x height) / 750` tokens, and rides along on
-  every later turn. A 4 megapixel capture, one Retina laptop screen, is about
-  4,800 tokens. The words are usually all the agent needed. On a real screenshot:
+## Words, not pixels
 
-  **1,018 image tokens became 37 text tokens, 96% saved.**
-</Card>
-
-## Why an image gets more expensive the longer a session runs
+A screenshot costs roughly `(width x height) / 750` tokens, and rides along on
+every later turn. A 4 megapixel capture, one Retina laptop screen, is about
+4,800 tokens. The words are usually all the agent needed. On a real screenshot,
+**1,018 image tokens became 37 text tokens, 96% saved.**
 
 A model has no memory between turns. Every time the agent speaks, the whole
 conversation so far is sent again as input, and that includes every image you
