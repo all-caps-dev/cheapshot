@@ -28,7 +28,7 @@ for n in video-frames structured-output pdf-pipeline; do
   rm -f "$a" "$b"
 done
 # the two facts rescued from the README live on the site now; keep them there
-grep -q '1,018' src/content/docs/index.mdx || { echo "site index lost the 1,018-run ledger figure"; exit 1; }
+grep -q '1,018' src/content/docs/index.mdx && grep -q '1,018' src/content/docs/introduction.mdx || { echo "site index lost the 1,018-run ledger figure"; exit 1; }
 test -f src/content/docs/research/no-llm.md || { echo "site lost research/no-llm.md"; exit 1; }
 # the credits page is the docs/credits.md body under a 4-line frontmatter and a blank line;
 # the note's own h1 and its blank line are the only lines the page does not carry

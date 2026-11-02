@@ -1,55 +1,87 @@
 ---
 title: Cheapshot
-description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first. Install with Homebrew or build from source.
+description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first.
+template: splash
+hero:
+  title: Give your agent the words, not the pixels
+  tagline: Cheapshot reads screenshots, screen recordings and PDFs on your Mac, redacts secrets before the text leaves it, and keeps a ledger of the image tokens your agent never had to pay for.
+  actions:
+    - text: Get started
+      link: /cheapshot/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/all-caps-dev/cheapshot
+      icon: external
+      variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-Give your coding agent the words on your screen, not the pixels. Cheapshot reads
-screenshots, screen recordings, and PDFs with Apple's Vision framework, redacts
-secrets before the text leaves your Mac, and keeps a ledger of the image tokens
-your agent did not have to pay for. No model in the loop. MIT. The
-[source is on GitHub](https://github.com/all-caps-dev/cheapshot).
+## One screenshot, in numbers
+
+An image costs roughly `(width x height) / 750` tokens, and it stays in the
+conversation, riding along on every later turn. Measured on a real screenshot:
 
 <CardGrid>
-  <Card title="Words, not pixels" icon="document">
-    An image costs roughly `(width x height) / 750` tokens and rides along on every
-    later turn. The text is usually all the agent needed. Measured on a real
-    screenshot: **1,018 image tokens -> 37 text tokens, 96% saved.**
+  <Card title="1,018 image tokens" icon="seti:image">
+    What the pixels would have cost, on every turn after the first.
   </Card>
-  <Card title="Secrets never leave the Mac" icon="seti:lock">
-    API keys, tokens, passwords and private hostnames are redacted on device,
-    before any text reaches the model. [How redaction works](/cheapshot/redaction/).
+  <Card title="37 text tokens" icon="document">
+    What the agent actually needed: the words, in reading order, code kept in a fence.
   </Card>
-  <Card title="A ledger you can show" icon="list-format">
-    Every run logs the tokens it saved and the secrets it caught, split by
-    screenshot, video and PDF. [Read the ledger](/cheapshot/ledger/).
+  <Card title="96% saved" icon="approve-check">
+    Logged to the ledger. `cheapshot --ledger` totals every run you have ever made.
   </Card>
 </CardGrid>
 
-Works with Claude Code as a [plugin](/cheapshot/claude-code/), and with Cursor,
-Cline, Codex, OpenCode, pi and oh-my-pi through the [MCP server](/cheapshot/mcp/).
+## Why Cheapshot
 
-## Install with Homebrew
+<CardGrid stagger>
+  <Card title="No model in the loop" icon="laptop">
+    OCR runs on Apple's Vision framework, on device. Nothing is uploaded to read a
+    screenshot, and nothing is paid for.
+  </Card>
+  <Card title="Secrets redacted first" icon="seti:lock">
+    AWS keys, GitHub tokens, OpenAI keys, Slack tokens, JWTs, PEM blocks and bearer
+    headers become `[AWS_KEY]`, `[GITHUB_PAT]` and so on before any text reaches the
+    model. Add your own rules as JSON.
+  </Card>
+  <Card title="Screenshots of code stay code" icon="seti:code">
+    Fixed-width regions are wrapped in a fence with their indentation rebuilt from
+    the bounding boxes, and recognized with language correction off so hashes and
+    tokens are not "corrected" into words.
+  </Card>
+  <Card title="Video and PDF too" icon="seti:video">
+    A screen recording becomes a timestamped transcript of only the frames that
+    changed. A PDF uses its text layer, and falls back to OCR on a page whose text
+    is garbled.
+  </Card>
+  <Card title="A ledger you can show" icon="list-format">
+    Every run appends one JSON line: image tokens, text tokens, saved, redactions.
+    Split it by screenshot, video and PDF before anyone turns it into dollars.
+  </Card>
+  <Card title="Structured when you need it" icon="seti:json">
+    `--json` returns the text, each line with its box, redaction counts, and for a
+    PDF the page numbers and file hash, so an agent can cite line 42 of a screenshot.
+  </Card>
+</CardGrid>
+
+## Works where your agent works
+
+In Claude Code it is a plugin: a Read hook swaps the pixels for the words
+automatically. Everywhere else it is one MCP server with three tools.
+
+<CardGrid>
+  <LinkCard title="Claude Code plugin" description="Hook, skill and MCP server in one install." href="/cheapshot/claude-code/" />
+  <LinkCard title="MCP server" description="Cursor, Cline, Codex, OpenCode, pi and oh-my-pi." href="/cheapshot/mcp/" />
+  <LinkCard title="Command line" description="Every flag, the input modes and the exit codes." href="/cheapshot/use/" />
+</CardGrid>
+
+## Install
 
 ```sh
 brew install all-caps-dev/tap/cheapshot
 ```
 
-Universal binary (Apple silicon and Intel), notarized, macOS 13 or later. Intel is best-effort: Homebrew moved x86_64 to Tier 3 in September 2026.
-
-## Build from source
-
-```sh
-git clone https://github.com/all-caps-dev/cheapshot
-cd cheapshot
-make            # builds ./cheapshot and checks it is universal with a macOS 13 floor
-sudo make install   # copies to /usr/local/bin
-```
-
-Needs Xcode; the universal build uses the Xcode build system, which the command
-line tools alone do not provide.
-
-`make test` runs the suite. `--video` needs `ffmpeg` on the PATH (`brew install ffmpeg`); everything else is Apple frameworks only.
-
-[Use](/cheapshot/use/) covers the commands; [Redaction](/cheapshot/redaction/) explains what never leaves the Mac.
+Universal binary, notarized, macOS 13 or later. MIT.
+[Read the introduction](/cheapshot/introduction/) for the build-from-source route and what to do first.

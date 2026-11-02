@@ -10,7 +10,7 @@ export default defineConfig({
   site: 'https://all-caps-dev.github.io',
   base: '/cheapshot/',
   // The install page was folded into the home page; keep the old URL working.
-  redirects: { '/install/': '/cheapshot/' },
+  redirects: { '/install/': '/cheapshot/introduction/' },
   integrations: [
     starlight({
       // The title is the product name and the description is a plain string in
@@ -26,7 +26,7 @@ export default defineConfig({
       // Labels live in src/i18n/ui/en.json; label() adds the translations from
       // src/i18n/ui/<locale>.json for each language that is on.
       sidebar: [
-        { ...label('sidebar.intro'), link: '/' },
+        { ...label('sidebar.intro'), slug: 'introduction' },
         { ...label('sidebar.use'), slug: 'use' },
         { ...label('sidebar.redaction'), slug: 'redaction' },
         { ...label('sidebar.ledger'), slug: 'ledger' },
@@ -49,7 +49,7 @@ export default defineConfig({
       plugins: [
         lucode({
           navLinks: [
-            { ...label('nav.intro'), link: '/' },
+            { ...label('nav.intro'), link: '/introduction/' },
             { ...label('nav.use'), link: '/use/' },
             { ...label('nav.credits'), link: '/credits/' },
           ],

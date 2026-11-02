@@ -1,0 +1,55 @@
+---
+title: Introduction
+description: On-device OCR for coding agents. The words on your screen, not the pixels, with secrets redacted first. Install with Homebrew or build from source.
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+Give your coding agent the words on your screen, not the pixels. Cheapshot reads
+screenshots, screen recordings, and PDFs with Apple's Vision framework, redacts
+secrets before the text leaves your Mac, and keeps a ledger of the image tokens
+your agent did not have to pay for. No model in the loop. MIT. The
+[source is on GitHub](https://github.com/all-caps-dev/cheapshot).
+
+<CardGrid>
+  <Card title="Words, not pixels" icon="document">
+    An image costs roughly `(width x height) / 750` tokens and rides along on every
+    later turn. The text is usually all the agent needed. Measured on a real
+    screenshot: **1,018 image tokens -> 37 text tokens, 96% saved.**
+  </Card>
+  <Card title="Secrets never leave the Mac" icon="seti:lock">
+    API keys, tokens, passwords and private hostnames are redacted on device,
+    before any text reaches the model. [How redaction works](/cheapshot/redaction/).
+  </Card>
+  <Card title="A ledger you can show" icon="list-format">
+    Every run logs the tokens it saved and the secrets it caught, split by
+    screenshot, video and PDF. [Read the ledger](/cheapshot/ledger/).
+  </Card>
+</CardGrid>
+
+Works with Claude Code as a [plugin](/cheapshot/claude-code/), and with Cursor,
+Cline, Codex, OpenCode, pi and oh-my-pi through the [MCP server](/cheapshot/mcp/).
+
+## Install with Homebrew
+
+```sh
+brew install all-caps-dev/tap/cheapshot
+```
+
+Universal binary (Apple silicon and Intel), notarized, macOS 13 or later. Intel is best-effort: Homebrew moved x86_64 to Tier 3 in September 2026.
+
+## Build from source
+
+```sh
+git clone https://github.com/all-caps-dev/cheapshot
+cd cheapshot
+make            # builds ./cheapshot and checks it is universal with a macOS 13 floor
+sudo make install   # copies to /usr/local/bin
+```
+
+Needs Xcode; the universal build uses the Xcode build system, which the command
+line tools alone do not provide.
+
+`make test` runs the suite. `--video` needs `ffmpeg` on the PATH (`brew install ffmpeg`); everything else is Apple frameworks only.
+
+[Use](/cheapshot/use/) covers the commands; [Redaction](/cheapshot/redaction/) explains what never leaves the Mac.
