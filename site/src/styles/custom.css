@@ -1,5 +1,13 @@
 /* Starlight centres the article in a 45rem column, which floats in the middle of a
-   landscape monitor. Widen it; the sidebar and the table of contents keep their widths. */
+   landscape monitor. The lucode theme's ContainerSection has named widths
+   (sm 640, md 768, lg 1024, xl 1280 px) and the landing page uses lg. Make the
+   doc column the same width, and make the markdown wrapper follow whatever
+   container-section it sits in, so splash and doc pages line up. */
 :root {
-  --sl-content-width: 62rem;
+  --sl-content-width: 1024px;
+}
+
+.markdown-wrapper {
+  max-width: var(--section-max-width, var(--sl-content-width));
+  margin-inline: auto;
 }
