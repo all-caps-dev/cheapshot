@@ -16,14 +16,14 @@ export default defineConfig({
       title: 'cheapshot',
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
-      // English stays at the root (/cheapshot/install/). A language only gets
+      // English stays at the root (/cheapshot/use/). A language only gets
       // a folder (/cheapshot/es/install/) once i18n.mjs finds it complete; with
       // none complete this adds nothing and the site is monolingual English.
       ...starlightLocaleConfig(),
       // Labels live in src/i18n/ui/en.json; label() adds the translations from
       // src/i18n/ui/<locale>.json for each language that is on.
       sidebar: [
-        { ...label('sidebar.install'), slug: 'install' },
+        { ...label('sidebar.intro'), link: '/' },
         { ...label('sidebar.use'), slug: 'use' },
         { ...label('sidebar.redaction'), slug: 'redaction' },
         { ...label('sidebar.ledger'), slug: 'ledger' },
@@ -46,7 +46,7 @@ export default defineConfig({
       plugins: [
         lucode({
           navLinks: [
-            { ...label('nav.install'), link: '/install/' },
+            { ...label('nav.intro'), link: '/' },
             { ...label('nav.use'), link: '/use/' },
             { ...label('nav.credits'), link: '/credits/' },
           ],
