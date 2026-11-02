@@ -1,16 +1,21 @@
-/* Starlight centres the article in a 45rem column, which floats in the middle of a
-   landscape monitor. The lucode theme's ContainerSection has named widths
-   (sm 640, md 768, lg 1024, xl 1280 px) and the landing page uses lg. Make the
-   doc column the same width, and make the markdown wrapper follow whatever
-   container-section it sits in, so splash and doc pages line up. */
+/* Layout overrides for the lucode-starlight theme.
+
+   On a doc page the theme lays out a grid of [content 1fr | table of contents
+   240px] and centres a .main block of --content-max-width (40rem by default)
+   inside the content column. That left the article floating mid-screen on a
+   landscape monitor. Widen it and pin it to the left, next to the sidebar. */
 :root {
-  --sl-content-width: 1024px;
+  --content-max-width: 64rem;
 }
 
-.markdown-wrapper {
-  max-width: var(--section-max-width, var(--sl-content-width));
-  /* Left-aligned, next to the sidebar, rather than floating in the middle. */
+.container-main > .main {
   margin-inline: 0 auto;
+}
+
+/* The markdown wrapper just fills whatever block it sits in: .main on a doc
+   page, the container-section on the landing page. */
+.markdown-wrapper {
+  max-width: none;
 }
 
 /* Starlight's CardGrid is two columns. A grid wrapped in .three-up shows three
