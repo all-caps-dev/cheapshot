@@ -9,6 +9,8 @@ import { starlightLocaleConfig, label, localized } from './i18n.mjs';
 export default defineConfig({
   site: 'https://all-caps-dev.github.io',
   base: '/cheapshot/',
+  // The install page was folded into the home page; keep the old URL working.
+  redirects: { '/install/': '/' },
   integrations: [
     starlight({
       // The title is the product name and the description is a plain string in
@@ -17,7 +19,7 @@ export default defineConfig({
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
       // English stays at the root (/cheapshot/use/). A language only gets
-      // a folder (/cheapshot/es/install/) once i18n.mjs finds it complete; with
+      // a folder (/cheapshot/es/use/) once i18n.mjs finds it complete; with
       // none complete this adds nothing and the site is monolingual English.
       ...starlightLocaleConfig(),
       // Labels live in src/i18n/ui/en.json; label() adds the translations from
