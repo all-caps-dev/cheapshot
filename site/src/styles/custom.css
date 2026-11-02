@@ -12,10 +12,17 @@
   margin-inline: 0 auto;
 }
 
-/* The markdown wrapper just fills whatever block it sits in: .main on a doc
-   page, the container-section on the landing page. */
-.markdown-wrapper {
+/* On a doc page the markdown wrapper fills .main, which is already capped at
+   --content-max-width. The landing page has no .main, so it gets its own cap
+   here: the hero and the three cards sit in a centred block instead of running
+   edge to edge on a wide monitor. Doc pages: no cap on the wrapper. */
+.container-main .markdown-wrapper {
   max-width: none;
+}
+[data-has-hero] .markdown-wrapper,
+[data-has-hero] .hero {
+  max-width: var(--content-max-width);
+  margin-inline: auto;
 }
 
 /* Starlight's CardGrid is two columns. A grid wrapped in .three-up shows three
