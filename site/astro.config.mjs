@@ -18,6 +18,7 @@ export default defineConfig({
       title: 'cheapshot',
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
+      customCss: ['./src/styles/custom.css'],
       // English stays at the root (/cheapshot/use/). A language only gets
       // a folder (/cheapshot/es/use/) once i18n.mjs finds it complete; with
       // none complete this adds nothing and the site is monolingual English.

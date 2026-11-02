@@ -1,0 +1,5 @@
+/* Starlight centres the article in a 45rem column, which floats in the middle of a
+   landscape monitor. Widen it; the sidebar and the table of contents keep their widths. */
+:root {
+  --sl-content-width: 62rem;
+}
