@@ -2,6 +2,15 @@
 
 Everything below is a hand step for Ryan unless marked AGENT. Do them in order. Nothing in this repo pushes, tags, or creates remote things on its own.
 
+## Status: v0.5.0 shipped 2026-11-04
+
+This file is now the record of how v0.5.0 went out. The steps below stay as written.
+
+- Release: https://github.com/all-caps-dev/cheapshot/releases/tag/v0.5.0 , tagged at `bff1aa2`, signed with Developer ID, and past the workflow's notarization check.
+- Tap: https://github.com/all-caps-dev/homebrew-tap/blob/main/Formula/cheapshot.rb points at v0.5.0 with a real `sha256`. `brew install all-caps-dev/tap/cheapshot` was tested on the mini only, not on a second Mac.
+- Token: `COMMITTER_TOKEN` is set and expires 2027-04-01. The tap job cannot bump the formula after that until the token is replaced.
+- Tap job 403: `Resource not accessible by personal access token` means the token does not cover `homebrew-tap`. Fix its repository access at https://github.com/settings/personal-access-tokens , then run `gh run rerun <run-id> --failed`. Saving the edit keeps the token value, so the secret and the tag stay as they are.
+
 ## 0. Preconditions (AGENT, done in Phase 2)
 - `scripts/check-phase2.sh` prints `ok: phase 2` on a clean main.
 - `main` is ahead of `origin/main` by the Phase 1 and Phase 2 commits, unpushed.
@@ -79,6 +88,8 @@ If anything fails, fix the workflow here, delete the rc release and tag (`gh rel
 Bundle id hyphen (dev.all-caps.cheapshot vs dev.allcaps.cheapshot) is not needed for the CLI; decide it when the app's App ID is created in Phase 4.
 
 ## Unsigned tap path (Ryan chose this 2026-10-29)
+
+Superseded: the six Apple secrets were set on 2026-10-29, and v0.5.0 shipped signed. Kept as the fallback if the secrets are ever removed.
 
 Steps 2 to 5 wait on the Apple Developer Program, which can take a week. `release.yml` no longer needs them: when the six Apple secrets are absent it zips the linker's ad-hoc signed binary and publishes it, and the release note says so. Homebrew downloads are never quarantined, so `brew install all-caps-dev/tap/cheapshot` works with that zip; a raw download of the zip is blocked by Gatekeeper, which the note also says. When the secrets arrive, the next tag signs and notarizes with no workflow change.
 
