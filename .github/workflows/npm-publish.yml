@@ -1,0 +1,47 @@
+name: Publish cheapshot-mcp to npm
+
+# Pushing a tag like mcp-v0.1.1 publishes mcp/ to npm through trusted
+# publishing (OIDC). No npm token is stored anywhere: npm checks that the
+# publish came from this workflow file in this repository, and attaches a
+# signed provenance statement that links the package to this exact commit.
+
+on:
+  push:
+    tags: ['mcp-v*']
+
+permissions:
+  id-token: write # lets GitHub mint the OIDC token npm and Sigstore check
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest # provenance needs a GitHub-hosted runner
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          # no cache: release builds start clean
+
+      - name: npm 11.5.1 or later (trusted publishing needs it)
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+
+      - name: Tag matches package.json version
+        run: |
+          want="mcp-v$(node -p 'require("./package.json").version')"
+          test "$GITHUB_REF_NAME" = "$want" || { echo "tag $GITHUB_REF_NAME does not match $want"; exit 1; }
+
+      - name: Build, test, check pack contents
+        run: ../scripts/check-mcp.sh
+        env:
+          CI: true
+
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
