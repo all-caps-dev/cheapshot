@@ -31,7 +31,7 @@ The plugin registers a `PreToolUse` hook on `Read`. When the path ends in png,
 jpg, jpeg, webp, gif, or pdf, the hook runs `cheapshot --json --stats` on it and
 denies the Read. The deny reason is the redacted text plus one line:
 
-```
+```text wrap
 cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, run: cheapshot allow /path/shot.png, then Read again.
 ```
 
@@ -44,6 +44,8 @@ hold:
 - `CHEAPSHOT_PASSTHROUGH=1` is set in the environment.
 - `cheapshot` is not on `PATH`. The hook prints the brew command once per
   session, to stderr and as a system message, and steps aside.
+- `jq` is not on `PATH`. The hook steps aside with no message, so install it
+  with `brew install jq`.
 - The path is on the one-shot allowlist (below).
 - The binary fails on the file. The hook says so on stderr and lets the pixels
   through rather than blocking the agent.
@@ -71,7 +73,8 @@ agent can run this itself from Bash, so nothing about the Read tool changes.
 A screenshot pasted into the chat never reaches a hook
 ([claude-code#16592](https://github.com/anthropics/claude-code/issues/16592)).
 Give the agent a path instead. The menu bar app that will sit on this engine
-covers the paste case; the CLI cannot.
+covers the paste case, and we're working on handling pasted images automatically
+in the plugin too.
 
 ## Injection note
 

@@ -9,8 +9,6 @@ import { starlightLocaleConfig, label, localized } from './i18n.mjs';
 export default defineConfig({
   site: 'https://all-caps-dev.github.io',
   base: '/cheapshot/',
-  // The install page was folded into the home page; keep the old URL working.
-  redirects: { '/install/': '/cheapshot/introduction/' },
   integrations: [
     starlight({
       // The title is the product name and the description is a plain string in
@@ -27,6 +25,7 @@ export default defineConfig({
       // src/i18n/ui/<locale>.json for each language that is on.
       sidebar: [
         { ...label('sidebar.intro'), slug: 'introduction' },
+        { ...label('sidebar.install'), slug: 'install' },
         { ...label('sidebar.claude-code'), slug: 'claude-code' },
         { ...label('sidebar.mcp'), slug: 'mcp' },
         { ...label('sidebar.use'), slug: 'use' },
@@ -50,6 +49,7 @@ export default defineConfig({
         lucode({
           navLinks: [
             { ...label('nav.intro'), link: '/introduction/' },
+            { ...label('nav.install'), link: '/install/' },
             { ...label('nav.use'), link: '/use/' },
             { ...label('nav.credits'), link: '/credits/' },
           ],
