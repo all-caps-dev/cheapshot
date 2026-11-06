@@ -3,9 +3,12 @@
    On a doc page the theme lays out a grid of [content 1fr | table of contents
    240px] and centres a .main block of --content-max-width (40rem by default)
    inside the content column. That left the article floating mid-screen on a
-   landscape monitor. Widen it and pin it to the left, next to the sidebar. */
+   landscape monitor. Keep the theme's width, which holds lines to a readable
+   length, and pin it to the left, next to the sidebar. The landing page has its
+   own, wider cap so the three cards fit. */
 :root {
-  --content-max-width: 64rem;
+  --content-max-width: 40rem;
+  --landing-max-width: 64rem;
 }
 
 .container-main > .main {
@@ -21,8 +24,52 @@
 }
 [data-has-hero] .markdown-wrapper,
 [data-has-hero] .hero {
-  max-width: var(--content-max-width);
+  max-width: var(--landing-max-width);
   margin-inline: auto;
+}
+
+/* Starlight's hero has no slot below its buttons, so this line is the first
+   thing in the page body, which puts it directly under them. */
+.hero-note {
+  text-align: center;
+  /* The page body has no side padding on a phone, so the text would touch the edge. */
+  padding-inline: 1rem;
+}
+[data-has-hero] .hero {
+  padding-bottom: 0;
+}
+/* The same 2rem step between the tagline, the buttons, the line under them and
+   the cards, so the hero does not read as one block. */
+[data-has-hero] .hero .actions {
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+/* The hero buttons follow the first two cards left to right: orange, purple.
+   Get started is the full colour so it is the brightest thing in the hero, and
+   its text stays near-black in both themes. View on GitHub uses the same 18%
+   tint as the card icons. */
+[data-has-hero] .hero .actions .hero-btn-start {
+  background: var(--sl-color-orange);
+  color: #0a0a0a;
+}
+[data-has-hero] .hero .actions .hero-btn-start:hover {
+  background: color-mix(in oklab, var(--sl-color-orange) 85%, var(--foreground));
+}
+[data-has-hero] .hero .actions .hero-btn-github {
+  /* Starlight puts a button's icon after its text; this puts it first. */
+  flex-direction: row-reverse;
+  background: color-mix(in oklab, var(--sl-color-purple) 18%, var(--secondary));
+  color: var(--foreground);
+}
+[data-has-hero] .hero .actions .hero-btn-github:hover {
+  background: color-mix(in oklab, var(--sl-color-purple) 30%, var(--secondary));
+}
+[data-has-hero] .hero-note {
+  margin-block: 2rem;
+}
+[data-has-hero] .starlight-aside {
+  margin-top: 2rem;
 }
 
 /* Starlight's CardGrid is two columns. A grid wrapped in .three-up shows three

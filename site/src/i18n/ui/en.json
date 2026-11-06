@@ -1,5 +1,6 @@
 {
   "sidebar.intro": "Introduction",
+  "sidebar.install": "Install",
   "sidebar.use": "Use",
   "sidebar.redaction": "Redaction",
   "sidebar.ledger": "Ledger",
@@ -15,6 +16,7 @@
   "sidebar.research.no-llm": "No LLM in the pipeline",
   "sidebar.credits": "Credits",
   "nav.intro": "Introduction",
+  "nav.install": "Install",
   "nav.use": "Use",
   "nav.credits": "Credits",
   "footer": "© 2026 Ryan Ilano. MIT. [Source](https://github.com/all-caps-dev/cheapshot)."

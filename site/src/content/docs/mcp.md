@@ -8,8 +8,7 @@ Claude Code users who prefer tools over the Read hook. It shells out to the same
 `cheapshot` binary and never reimplements OCR, so the text, the redaction, and
 the ledger line are identical to the CLI's.
 
-The package is published to npm with the v0.5.0 release. Until then, the
-`npx` command below does not resolve, and the source lives in the
+The package is published to npm as `cheapshot-mcp`. The source lives in the
 [mcp directory](https://github.com/all-caps-dev/cheapshot/tree/main/mcp) of the
 repository.
 

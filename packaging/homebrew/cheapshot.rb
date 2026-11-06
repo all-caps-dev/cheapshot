@@ -5,6 +5,7 @@ class Cheapshot < Formula
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
 
+  depends_on "jq"
   depends_on macos: :ventura
 
   def install
