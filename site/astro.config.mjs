@@ -16,6 +16,11 @@ export default defineConfig({
       title: 'cheapshot',
       description: 'On-device OCR for coding agents: the words on your screen, not the pixels, with secrets redacted first.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/all-caps-dev/cheapshot' }],
+      // Plausible analytics, self-hosted at stats.ilano.fyi. No cookies.
+      head: [
+        { tag: 'script', attrs: { defer: true, src: 'https://stats.ilano.fyi/js/pa-Q8k7ajw1geZTJC-_LaKW6.js' } },
+        { tag: 'script', content: 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init();' },
+      ],
       customCss: ['./src/styles/custom.css'],
       // English stays at the root (/cheapshot/use/). A language only gets
       // a folder (/cheapshot/es/use/) once i18n.mjs finds it complete; with
