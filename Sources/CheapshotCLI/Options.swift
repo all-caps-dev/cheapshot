@@ -94,8 +94,10 @@ public struct Options: Equatable {
     }
 
     public static func parse(_ args: [String]) throws -> Options {
-        if args.isEmpty || args.contains("-h") || args.contains("--help") { return Options(command: .help) }
-        if args.contains("--version") { return Options(command: .version) }
+        // Only tokens before "--" can be options, so a file named "--help" after it stays a file (#290).
+        let flags = args.firstIndex(of: "--").map { Array(args[..<$0]) } ?? args
+        if args.isEmpty || flags.contains("-h") || flags.contains("--help") { return Options(command: .help) }
+        if flags.contains("--version") { return Options(command: .version) }
         if args.first == "allow" {
             guard args.count >= 2 else { throw UsageError(message: "allow needs a path") }
             guard args.count == 2 else { throw UsageError(message: "allow takes exactly one path") }
@@ -144,6 +146,13 @@ public struct Options: Equatable {
 
         while i < args.count {
             let a = args[i]
+            // "--" ends option parsing: every token after it is a file, even "--raw" or "--text".
+            // The MCP server puts it before the paths a model hands in, so a path can never act
+            // as a flag and switch redaction off (#290).
+            if a == "--" {
+                positional.append(contentsOf: args[(i + 1)...])
+                break
+            }
             switch a {
             case "--raw":       o.redact = false
             case "--json":      o.json = true

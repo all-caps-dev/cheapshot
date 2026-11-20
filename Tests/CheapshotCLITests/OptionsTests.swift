@@ -205,4 +205,31 @@ final class OptionsTests: XCTestCase {
                            UsageError(message: "--chapters: no chapters in \(meta.path)"))
         }
     }
+
+    // Fleet #290: "--" ends option parsing, so a file named like a flag stays a file
+    // and cannot switch redaction off or turn a path into --text.
+    func testDoubleDashEndsOptions() throws {
+        let o = try Options.parse(["--json", "--", "--raw", "--text", "a.png"])
+        XCTAssertEqual(o.command, .files(["--raw", "--text", "a.png"]))
+        XCTAssertTrue(o.redact, "redaction stays on")
+        XCTAssertTrue(o.json)
+    }
+
+    func testDoubleDashKeepsHelpAndVersionAsFiles() throws {
+        XCTAssertEqual(try Options.parse(["--", "--help"]).command, .files(["--help"]))
+        XCTAssertEqual(try Options.parse(["--", "-h"]).command, .files(["-h"]))
+        XCTAssertEqual(try Options.parse(["--", "--version"]).command, .files(["--version"]))
+    }
+
+    func testDoubleDashWithNothingAfterIsNoInputs() {
+        XCTAssertThrowsError(try Options.parse(["--json", "--"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "no input files"))
+        }
+    }
+
+    func testFlagsBeforeDoubleDashStillApply() throws {
+        let o = try Options.parse(["--raw", "--", "a.png"])
+        XCTAssertEqual(o.command, .files(["a.png"]))
+        XCTAssertFalse(o.redact)
+    }
 }

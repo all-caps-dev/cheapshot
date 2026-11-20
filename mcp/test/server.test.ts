@@ -183,7 +183,7 @@ test("cheapshot_ocr newest: the real run gets the probed paths, not --newest", a
     const calls = fs.readFileSync(log, "utf8").trim().split("\n");
     assert.equal(calls.length, 2);
     assert.match(calls[0], /--no-ledger --pages 1-1 --newest \/tmp\/inbox 2$/);
-    assert.equal(calls[1], "--json /tmp/report.pdf");
+    assert.equal(calls[1], "--json -- /tmp/report.pdf");
   } finally {
     delete process.env.FAKE_PAGES;
     delete process.env.FAKE_LOG;
@@ -232,5 +232,36 @@ test("cheapshot://ledger resource reports non-JSON stdout as an error object", a
     assert.equal(JSON.parse(item.text ?? "{}").error, "cheapshot printed no JSON");
   } finally {
     delete process.env.FAKE_RAW;
+  }
+});
+
+// Fleet #290: the exploit from the card. The binary must never run, so nothing is read raw.
+test("cheapshot_ocr: flag-shaped paths are an error result and the binary never runs", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_LOG = log;
+  try {
+    const c = await connected();
+    const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["--raw", "--text", "/etc/hosts"] } })) as ToolResult;
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text ?? "", /must not start with "-"/);
+    assert.equal(fs.existsSync(log), false, "the binary was called");
+  } finally {
+    delete process.env.FAKE_LOG;
+  }
+});
+
+test("cheapshot_ocr: a pdf probe puts -- before the path", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_PAGES = "3";
+  process.env.FAKE_LOG = log;
+  try {
+    const c = await connected();
+    await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/report.pdf"] } });
+    const calls = fs.readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(calls[0], "--json --no-ledger --pages 1-1 -- /tmp/report.pdf");
+    assert.equal(calls[1], "--json -- /tmp/report.pdf");
+  } finally {
+    delete process.env.FAKE_PAGES;
+    delete process.env.FAKE_LOG;
   }
 });

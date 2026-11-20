@@ -31,6 +31,13 @@ export function parsePages(s: string): { lo: number; hi: number } {
   return { lo, hi };
 }
 
+/** Refuses a value the binary could read as an option. The caller of these tools is the model, and
+ *  text it has read can steer it, so a path like "--raw" must never reach the command line (#290).
+ *  Absolute paths never start with "-", and "-" (stdin) has no meaning for an MCP call. */
+export function assertNotOption(what: string, value: string): void {
+  if (value.startsWith("-")) throw new Error(`${what} must not start with "-", got ${JSON.stringify(value)}`);
+}
+
 export function ocrArgs(input: OcrInput): string[] {
   const hasPaths = Array.isArray(input.paths) && input.paths.length > 0;
   if (!hasPaths && !input.newest) throw new Error("cheapshot_ocr needs paths or newest");
@@ -39,9 +46,13 @@ export function ocrArgs(input: OcrInput): string[] {
   if (input.min_confidence !== undefined) args.push("--min-conf", String(input.min_confidence));
   if (input.pages !== undefined) { parsePages(input.pages); args.push("--pages", input.pages); }
   if (hasPaths) {
-    args.push(...(input.paths as string[]));
+    const paths = input.paths as string[];
+    for (const p of paths) assertNotOption("each path", p);
+    // "--" ends option parsing in the binary, so the paths after it are only ever files.
+    args.push("--", ...paths);
   } else {
     const n = input.newest as { dir: string; count?: number };
+    assertNotOption("newest.dir", n.dir);
     args.push("--newest", n.dir);
     if (n.count !== undefined) args.push(String(n.count));
   }
@@ -49,6 +60,7 @@ export function ocrArgs(input: OcrInput): string[] {
 }
 
 export function videoArgs(input: VideoInput): string[] {
+  assertNotOption("path", input.path);
   const args = ["--json"];
   if (input.raw) args.push("--raw");
   if (input.scene !== undefined) args.push("--scene", String(input.scene));

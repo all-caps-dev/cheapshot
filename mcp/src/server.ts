@@ -110,7 +110,7 @@ export function createServer(): McpServer {
         } else {
           for (const path of input.paths ?? []) {
             if (!path.toLowerCase().endsWith(".pdf")) continue;
-            const found = await probe([path]);
+            const found = await probe(["--", path]);
             for (const p of found ?? []) { const msg = overCap(p); if (msg !== undefined) return errorResult(msg); }
           }
         }
