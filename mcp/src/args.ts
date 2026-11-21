@@ -20,6 +20,25 @@ export interface VideoInput {
 
 export interface LedgerInput { days?: number; by_mode?: boolean; }
 
+/** The environment variable a person sets to let the model ask for unredacted text (#290 item 3).
+ *  It is read from the MCP server's own environment, which the model cannot change mid-session:
+ *  it comes from the shell that started the host, or the "env" block of the MCP config. */
+export const RAW_ENV = "CHEAPSHOT_ALLOW_RAW";
+
+/** True only when a person has opted in to raw output for this server process. */
+export function rawAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[RAW_ENV] === "1";
+}
+
+/** Refuses raw: true unless a person opted in. The caller of these tools is the model, and text it
+ *  has read can steer it, so "skip redaction" must not be a choice the model makes on its own. */
+export function assertRawAllowed(raw: boolean | undefined, env: NodeJS.ProcessEnv = process.env): void {
+  if (raw && !rawAllowed(env)) {
+    throw new Error(`raw is off: redaction can only be skipped when a person sets ${RAW_ENV}=1 in the environment ` +
+      `that starts the cheapshot MCP server. Ask the user; do not retry without raw unless redacted text is enough.`);
+  }
+}
+
 const PAGES = /^(\d+)(?:-(\d+))?$/;
 
 export function parsePages(s: string): { lo: number; hi: number } {
@@ -47,7 +66,8 @@ export function assertAbsoluteDir(value: string): void {
   }
 }
 
-export function ocrArgs(input: OcrInput): string[] {
+export function ocrArgs(input: OcrInput, env: NodeJS.ProcessEnv = process.env): string[] {
+  assertRawAllowed(input.raw, env);
   const hasPaths = Array.isArray(input.paths) && input.paths.length > 0;
   if (!hasPaths && !input.newest) throw new Error("cheapshot_ocr needs paths or newest");
   const args = ["--json"];
@@ -70,7 +90,8 @@ export function ocrArgs(input: OcrInput): string[] {
   return args;
 }
 
-export function videoArgs(input: VideoInput): string[] {
+export function videoArgs(input: VideoInput, env: NodeJS.ProcessEnv = process.env): string[] {
+  assertRawAllowed(input.raw, env);
   assertNotOption("path", input.path);
   const args = ["--json"];
   if (input.raw) args.push("--raw");

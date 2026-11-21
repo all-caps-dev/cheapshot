@@ -1,4 +1,5 @@
 import Foundation
+import CheapshotCore
 
 public struct UsageError: Error, Equatable {
     public let message: String
@@ -10,6 +11,7 @@ public struct Options: Equatable {
         case help, version
         case ledger(json: Bool, migrate: Bool, days: Int?, byMode: Bool)
         case allow(path: String)         // one-shot hook escape hatch, see plugin/hooks/cheapshot-read.sh
+        case notePassthrough(reason: String)  // the hook records a pass-through in the ledger (#290 item 4)
         case text(path: String)          // "-" means stdin
         case video(path: String)
         case files([String])
@@ -103,6 +105,13 @@ public struct Options: Equatable {
             guard args.count == 2 else { throw UsageError(message: "allow takes exactly one path") }
             guard !args[1].hasPrefix("-") else { throw UsageError(message: "unknown option \(args[1])") }
             return Options(command: .allow(path: args[1]))
+        }
+        if args.first == "--note-passthrough" {
+            // Only a fixed set of reasons, never a path, so the ledger cannot collect file names.
+            guard args.count == 2, LedgerEntry.passthroughReasons.contains(args[1]) else {
+                throw UsageError(message: "--note-passthrough takes one of: " + LedgerEntry.passthroughReasons.joined(separator: ", "))
+            }
+            return Options(command: .notePassthrough(reason: args[1]))
         }
 
         var o = Options(command: .files([]))

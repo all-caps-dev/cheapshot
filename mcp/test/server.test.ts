@@ -272,3 +272,36 @@ test("cheapshot_ocr: a pdf probe sends no -- marker, so older binaries still wor
     delete process.env.FAKE_LOG;
   }
 });
+
+// Fleet #290 item 3: raw from the model is an error result, and the binary never runs.
+test("cheapshot_ocr and cheapshot_video: raw without the opt-in is refused before the binary runs", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_LOG = log;
+  delete process.env.CHEAPSHOT_ALLOW_RAW;
+  try {
+    const c = await connected();
+    const o = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/shot.png"], raw: true } })) as ToolResult;
+    assert.equal(o.isError, true);
+    assert.match(o.content[0].text ?? "", /CHEAPSHOT_ALLOW_RAW=1/);
+    const v = (await c.callTool({ name: "cheapshot_video", arguments: { path: "/tmp/screen.mp4", raw: true } })) as ToolResult;
+    assert.equal(v.isError, true);
+    assert.equal(fs.existsSync(log), false, "the binary was called");
+  } finally {
+    delete process.env.FAKE_LOG;
+  }
+});
+
+test("cheapshot_ocr: raw with CHEAPSHOT_ALLOW_RAW=1 reaches the binary as --raw", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_LOG = log;
+  process.env.CHEAPSHOT_ALLOW_RAW = "1";
+  try {
+    const c = await connected();
+    const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/shot.png"], raw: true } })) as ToolResult;
+    assert.equal(r.isError ?? false, false);
+    assert.equal(fs.readFileSync(log, "utf8").trim(), "--json --raw /tmp/shot.png");
+  } finally {
+    delete process.env.FAKE_LOG;
+    delete process.env.CHEAPSHOT_ALLOW_RAW;
+  }
+});

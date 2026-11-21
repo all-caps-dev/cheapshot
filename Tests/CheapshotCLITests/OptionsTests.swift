@@ -88,6 +88,7 @@ final class OptionsTests: XCTestCase {
         }
         XCTAssertThrowsError(try Options.parse(["allow", "a.png", "b.png"]))
         XCTAssertThrowsError(try Options.parse(["allow", "--json"]))       // a flag is not a path
+        XCTAssertEqual(try Options.parse(["--note-passthrough", "over_cap"]).command, .notePassthrough(reason: "over_cap"))
     }
 
     func testNumericBoundsAreValidated() {

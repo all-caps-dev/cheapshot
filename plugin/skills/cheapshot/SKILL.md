@@ -33,7 +33,7 @@ cheapshot --text notes.txt          # redact text with no OCR ("-" reads stdin)
 cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
-cheapshot allow /abs/path/shot.png  # let the next Read of that path see the pixels
+cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels
 ```
 
 The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot report.pdf`
@@ -43,8 +43,10 @@ reads every page.
 
 1. When the user points at a screenshot, PDF, or recording, work from cheapshot's text. Read
    the image itself only when the question is about layout, colour, or something visual.
-2. If the hook denied a Read and you really need the pixels, run `cheapshot allow <path>` from
-   Bash, then Read the same path again. The allowance lasts five minutes and is used once.
+2. If the hook denied a Read and you really need the pixels, ask the user. They run
+   `cheapshot allow <path>` in a terminal (it refuses to run without one), then you Read the same
+   path again. The allowance lasts five minutes and is used once. The MCP tools' `raw` argument
+   is refused unless the user set `CHEAPSHOT_ALLOW_RAW=1`; do not route around either.
 3. Never retype a macOS screenshot path. Apple puts U+202F (narrow no-break space) before AM/PM
    in every timestamp it formats; it looks like a space and is not one. Glob the folder, or use
    `--newest`.

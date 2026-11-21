@@ -20,14 +20,16 @@ public enum Output {
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
-          cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes)
+          cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes;
+                                           needs a terminal, so an agent cannot run it for itself)
 
         OPTIONS
           --raw             do not redact (redaction is ON by default)
           --json            emit JSON
           --stats           print token savings to stderr
           --min-conf <f>    confidence floor, default 0.3
-          --rules <file>    extra redaction rules, JSON [{name, pattern, caseInsensitive}]
+          --rules <file>    extra redaction rules, JSON [{name, pattern, caseInsensitive}]. Without
+                            it: $CHEAPSHOT_RULES, else rules.json next to the ledger if present
           --pages <N|N-M>   PDF page range, default all
           --force-ocr       OCR every PDF page, even one whose text layer checks out
           --scene <f>       video scene-change threshold, default 0.25

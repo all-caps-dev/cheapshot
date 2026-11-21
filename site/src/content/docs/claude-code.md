@@ -32,14 +32,20 @@ jpg, jpeg, webp, gif, or pdf, the hook runs `cheapshot --json --stats` on it and
 denies the Read. The deny reason is the redacted text plus one line:
 
 ```text wrap
-cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, run: cheapshot allow /path/shot.png, then Read again.
+cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, ask the user to approve it.
 ```
 
-The same line goes to stderr and to the hook's `systemMessage`, so you see the
-saving as it happens, and every run adds a line to the [ledger](/cheapshot/ledger/).
+You get the same saving on stderr and in the hook's `systemMessage`, with the
+command to approve the pixels yourself, and every run adds a line to the
+[ledger](/cheapshot/ledger/):
 
-The Read goes ahead untouched, with no output from the hook, when any of these
-hold:
+```text wrap
+cheapshot: 1018 image tokens -> 37 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow /path/shot.png
+```
+
+The Read goes ahead with the pixels when any of these hold. Each one except a
+missing binary or `jq` adds a zero-token `passthrough` line with its reason to
+the ledger, and `cheapshot --ledger` counts them:
 
 - `CHEAPSHOT_PASSTHROUGH=1` is set in the environment.
 - `cheapshot` is not on `PATH`. The hook prints the brew command once per
@@ -47,8 +53,22 @@ hold:
 - `jq` is not on `PATH`. The hook steps aside with no message, so install it
   with `brew install jq`.
 - The path is on the one-shot allowlist (below).
-- The binary fails on the file. The hook says so on stderr and lets the pixels
-  through rather than blocking the agent.
+- The binary fails on the file. The hook says so in a system message and lets
+  the pixels through rather than blocking the agent.
+
+## Strict mode
+
+Set `CHEAPSHOT_STRICT=1` and every failure above (missing binary, missing `jq`,
+a binary error, unreadable output, a PDF over 20 pages with no range) denies the
+Read instead of passing the pixels through. `CHEAPSHOT_PASSTHROUGH=1` and
+`cheapshot allow` still work, because those are your decisions.
+
+## Custom rules
+
+The hook and the MCP server never pass `--rules`, so cheapshot looks for rules
+itself: `$CHEAPSHOT_RULES` if set, else `rules.json` next to the ledger
+(`~/Library/Application Support/cheapshot/rules.json`, or `$CHEAPSHOT_HOME`).
+A named file that is missing or broken counts as a failure.
 
 ## PDFs
 
@@ -58,15 +78,18 @@ range, so a whole manual is never dumped into context by accident.
 
 ## The escape hatch
 
-When the agent needs the pixels, for layout, colour, or a chart, it runs:
+When the agent needs the pixels, for layout, colour, or a chart, it asks you,
+and you run this in a terminal:
 
 ```bash
 cheapshot allow /absolute/path/shot.png
 ```
 
 That appends the path to `$TMPDIR/cheapshot-allow` with a five minute expiry.
-The next Read of that exact path passes through and the entry is consumed. The
-agent can run this itself from Bash, so nothing about the Read tool changes.
+The next Read of that exact path passes through and the entry is consumed.
+`allow` refuses to run without a terminal on stdin, so the agent cannot approve
+itself from its Bash tool. This is a speed bump, not a wall: a program running
+as you can still fake a terminal or write the file.
 
 ## Pasted images
 
