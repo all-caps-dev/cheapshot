@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP } from "../src/args.js";
 
 test("ocr: paths with defaults", () => {
-  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] }), ["--json", "--", "/tmp/a.png", "/tmp/b.jpg"]);
+  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] }), ["--json", "/tmp/a.png", "/tmp/b.jpg"]);
 });
 
 test("ocr: raw, min_confidence, pages", () => {
   assert.deepEqual(ocrArgs({ paths: ["/tmp/r.pdf"], raw: true, min_confidence: 0.5, pages: "3-5" }),
-    ["--json", "--raw", "--min-conf", "0.5", "--pages", "3-5", "--", "/tmp/r.pdf"]);
+    ["--json", "--raw", "--min-conf", "0.5", "--pages", "3-5", "/tmp/r.pdf"]);
 });
 
 test("ocr: newest with dir and count", () => {
@@ -57,9 +57,12 @@ test("ocr: a path that starts with a dash is refused", () => {
   assert.throws(() => ocrArgs({ paths: ["--rules=/tmp/x.json"] }), /must not start with "-"/);
 });
 
-test("ocr: paths come after an end-of-options marker", () => {
+// No "--" marker: binaries older than #290 reject it, and assertNotOption already keeps every
+// path from parsing as a flag.
+test("ocr: paths are sent without an end-of-options marker", () => {
   const args = ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] });
-  assert.deepEqual(args.slice(-3), ["--", "/tmp/a.png", "/tmp/b.jpg"]);
+  assert.deepEqual(args, ["--json", "/tmp/a.png", "/tmp/b.jpg"]);
+  assert.ok(!args.includes("--"), "older binaries reject --");
   assert.ok(!args.includes("--raw"), "redaction stays on by default");
 });
 

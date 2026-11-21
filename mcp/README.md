@@ -13,7 +13,7 @@ brew install all-caps-dev/tap/cheapshot
 Then point your host at the server:
 
 ```json
-{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp@0.1.1"] } } }
+{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp@0.1.2"] } } }
 ```
 
 Pin an exact version, as above. A bare `cheapshot-mcp` runs whatever is newest on npm at every launch.

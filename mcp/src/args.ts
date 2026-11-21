@@ -47,9 +47,11 @@ export function ocrArgs(input: OcrInput): string[] {
   if (input.pages !== undefined) { parsePages(input.pages); args.push("--pages", input.pages); }
   if (hasPaths) {
     const paths = input.paths as string[];
+    // assertNotOption is the guard: no path can start with "-", so none can parse as a flag.
+    // No "--" marker is sent, because cheapshot binaries older than #290 reject "--" as an
+    // unknown option, and the npm package and the brew binary update separately.
     for (const p of paths) assertNotOption("each path", p);
-    // "--" ends option parsing in the binary, so the paths after it are only ever files.
-    args.push("--", ...paths);
+    args.push(...paths);
   } else {
     const n = input.newest as { dir: string; count?: number };
     assertNotOption("newest.dir", n.dir);

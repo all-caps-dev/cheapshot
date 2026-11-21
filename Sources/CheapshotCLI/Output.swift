@@ -14,6 +14,7 @@ public enum Output {
 
         USAGE
           cheapshot <file.png|file.pdf> [more ...]
+          cheapshot [options] -- <file> ...  everything after -- is a file, even one starting with -
           cheapshot --newest [dir] [n]
           cheapshot --cleanshot [n]
           cheapshot --video <file.mp4>

@@ -44,6 +44,11 @@ test "$(jq -r '.mcpServers.cheapshot.command' plugin/.mcp.json)" = "npx" || { ec
 # whatever is newest on npm under that name, so a hijacked or bad release runs unreviewed.
 jq -e '.mcpServers.cheapshot.args | length == 2 and .[0] == "-y" and (.[1] | test("^cheapshot-mcp@[0-9]+\\.[0-9]+\\.[0-9]+$"))' plugin/.mcp.json >/dev/null \
   || { echo ".mcp.json args must be [-y, cheapshot-mcp@X.Y.Z] with an exact version, got $(jq -c '.mcpServers.cheapshot.args' plugin/.mcp.json)"; exit 1; }
+# The pin must be the version mcp/package.json is at, so a version bump (often a security fix)
+# cannot ship while plugin users stay on the old release.
+want="cheapshot-mcp@$(jq -r .version mcp/package.json)"
+got=$(jq -r '.mcpServers.cheapshot.args[1]' plugin/.mcp.json)
+test "$got" = "$want" || { echo ".mcp.json pins $got but mcp/package.json is $want"; exit 1; }
 test "$(jq -r .mcpServers plugin/.claude-plugin/plugin.json)" = "./.mcp.json" || { echo "plugin.json mcpServers pointer wrong"; exit 1; }
 test -x plugin/scripts/cheapshot-statusline.sh || { echo "status line script is not executable"; exit 1; }
 plugin/tests/test-statusline.sh

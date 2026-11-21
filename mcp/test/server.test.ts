@@ -28,6 +28,13 @@ before(() => {
   delete process.env.CHEAPSHOT_BIN;
 });
 
+// The handshake reports the package version, so a host can tell which build (and which #290 fix) runs.
+test("serverInfo.version matches package.json", async () => {
+  const c = await connected();
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(here, "..", "..", "package.json"), "utf8")) as { version: string };
+  assert.equal(c.getServerVersion()?.version, pkg.version);
+});
+
 test("lists the three tools and the ledger resource", async () => {
   const c = await connected();
   const tools = (await c.listTools()).tools.map((t) => t.name).sort();
@@ -183,7 +190,7 @@ test("cheapshot_ocr newest: the real run gets the probed paths, not --newest", a
     const calls = fs.readFileSync(log, "utf8").trim().split("\n");
     assert.equal(calls.length, 2);
     assert.match(calls[0], /--no-ledger --pages 1-1 --newest \/tmp\/inbox 2$/);
-    assert.equal(calls[1], "--json -- /tmp/report.pdf");
+    assert.equal(calls[1], "--json /tmp/report.pdf");
   } finally {
     delete process.env.FAKE_PAGES;
     delete process.env.FAKE_LOG;
@@ -250,7 +257,7 @@ test("cheapshot_ocr: flag-shaped paths are an error result and the binary never 
   }
 });
 
-test("cheapshot_ocr: a pdf probe puts -- before the path", async () => {
+test("cheapshot_ocr: a pdf probe sends no -- marker, so older binaries still work", async () => {
   const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
   process.env.FAKE_PAGES = "3";
   process.env.FAKE_LOG = log;
@@ -258,8 +265,8 @@ test("cheapshot_ocr: a pdf probe puts -- before the path", async () => {
     const c = await connected();
     await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/report.pdf"] } });
     const calls = fs.readFileSync(log, "utf8").trim().split("\n");
-    assert.equal(calls[0], "--json --no-ledger --pages 1-1 -- /tmp/report.pdf");
-    assert.equal(calls[1], "--json -- /tmp/report.pdf");
+    assert.equal(calls[0], "--json --no-ledger --pages 1-1 /tmp/report.pdf");
+    assert.equal(calls[1], "--json /tmp/report.pdf");
   } finally {
     delete process.env.FAKE_PAGES;
     delete process.env.FAKE_LOG;

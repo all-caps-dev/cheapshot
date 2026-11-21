@@ -1,9 +1,15 @@
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { runCheapshot } from "./run.js";
 import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP, type OcrInput, type VideoInput, type LedgerInput } from "./args.js";
 
-export const VERSION = "0.1.0";
+// TypeScript: read the version from package.json so the MCP handshake always reports the build
+// that is running. From dist/src/server.js, "../../package.json" is the package root, and npm
+// always ships package.json in the tarball.
+export const VERSION: string = (
+  JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }
+).version;
 
 type Payload = Record<string, unknown>;
 type ToolResult = {
@@ -110,7 +116,8 @@ export function createServer(): McpServer {
         } else {
           for (const path of input.paths ?? []) {
             if (!path.toLowerCase().endsWith(".pdf")) continue;
-            const found = await probe(["--", path]);
+            // path already passed assertNotOption inside ocrArgs above, so it cannot read as a flag.
+            const found = await probe([path]);
             for (const p of found ?? []) { const msg = overCap(p); if (msg !== undefined) return errorResult(msg); }
           }
         }
