@@ -1,2 +1,5 @@
 tailscale up --auth-key=tsk⟦⟧ey-auth-kQ7xYz3CNTRL-AbCdEfGhIjKlMnOpQrStUvWx
 api tsk⟦⟧ey-api-k9w8v7CNTRL-ZyXwVuTsRqPoNmLk
+legacy tsk⟦⟧ey-abcdef1432341818
+oauth "access_token":"tsk⟦⟧ey-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+docs mention tskey-auth only

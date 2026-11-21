@@ -61,8 +61,10 @@ public struct Rule: Sendable {
         Rule(name: "NPM_TOKEN",   pattern: #"\bnpm_[A-Za-z0-9]{36}\b"#, options: []),
         Rule(name: "PYPI_TOKEN",  pattern: #"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\-]{30,}"#, options: []),
         Rule(name: "HF_TOKEN",    pattern: #"\bhf_[A-Za-z0-9]{30,}\b"#, options: []),
-        // Tailscale auth, API and OAuth client keys: tskey-auth-<id>-<secret>.
-        Rule(name: "TAILSCALE_KEY", pattern: #"\btskey-(?:[a-z]+-)?[A-Za-z0-9]{6,}-[A-Za-z0-9]{10,}"#, options: []),
+        // Tailscale auth, API and OAuth client keys: tskey-auth-<id>-<secret>, plus the older
+        // dash-free form (tskey-abcdef1432341818 in the Tailscale auth-keys docs) and OAuth
+        // access tokens (tskey-0123456789ABCDEF...).
+        Rule(name: "TAILSCALE_KEY", pattern: #"\btskey-(?:[a-z]+-[A-Za-z0-9_]{6,}-[A-Za-z0-9_]{10,}|[A-Za-z0-9]{16,}\b)"#, options: []),
         // 1Password: service account tokens, the account Secret Key from an Emergency Kit, and
         // op:// secret references. A reference is not the secret, but it names the vault and
         // item that hold one. A reference with a space in a name must be quoted, so the

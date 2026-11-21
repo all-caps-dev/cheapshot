@@ -1,2 +1,5 @@
 tailscale up --auth-key=[TAILSCALE_KEY]
 api [TAILSCALE_KEY]
+legacy [TAILSCALE_KEY]
+oauth "access_token":"[TAILSCALE_KEY]"
+docs mention tskey-auth only
