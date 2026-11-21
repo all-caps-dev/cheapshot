@@ -53,6 +53,107 @@ public enum OCR {
         return Layout.render(lines, runs: runs)
     }
 
+    // MARK: - Cold-start retry
+
+    /// Whether a run found text. `empty` after a run that `retried` is a screenshot-like image that
+    /// still read as blank: a caller should treat that as a likely OCR failure, not as a photo.
+    public enum Status: String { case ok, empty }
+
+    /// `recognizeLayout` plus the cold-start check. `retried` is true when a second pass ran;
+    /// `screenshotLike` is the image heuristic the retry was gated on.
+    public struct CheckedLayout {
+        public let lines: [RenderedLine]
+        public let retried: Bool
+        public let screenshotLike: Bool
+        public var status: Status { lines.isEmpty ? .empty : .ok }
+    }
+
+    /// A first pass slower than this was a cold start: macOS `aned` was compiling Vision's models.
+    /// Warm runs take 0.2 to 0.6 s on a 1500x2000 image; cold runs 25 to 41 s.
+    static let coldSeconds: Double = 3
+    /// A cold pass with fewer lines than this share of the fast probe's count dropped lines.
+    /// The fast recognizer over-counts slightly (94 vs 81 lines on an 80-line image), so a
+    /// healthy accurate pass sits near 0.86 to 1.0 of it; 8 of 40 dropped is 0.8.
+    static let shortRatio: Double = 0.85
+    /// Below this many probe lines the ratio is noise.
+    static let minProbeLines = 5
+
+    /// The full pipeline with one in-process retry. On some cold starts (`aned` compiling the
+    /// accurate recognizer twice under contention) Vision returns no lines, or drops lines, with
+    /// no error. By the time the first pass returns the models are compiled, so a second pass in
+    /// the same process is warm and cheap. Only screenshot-like images are retried: a photo with
+    /// no text is expected to come back empty.
+    public static func recognizeLayoutChecked(image: CGImage, minConfidence: Float) throws -> CheckedLayout {
+        let shot = isScreenshotLike(image)
+        return try checked(
+            screenshotLike: shot,
+            run: { try recognizeLayout(image: image, minConfidence: minConfidence) },
+            probe: { fastLineCount(image: image, minConfidence: minConfidence) },
+            now: { Date().timeIntervalSinceReferenceDate })
+    }
+
+    /// The decision and the retry with Vision taken out, so tests can drive it with stubs.
+    /// `probe` (the fast recognizer, about 0.3 s, no Neural Engine compile) only runs when it can
+    /// change the answer: never on a warm pass that found text.
+    static func checked(screenshotLike: Bool, run: () throws -> [RenderedLine], probe: () -> Int?,
+                        now: () -> Double) throws -> CheckedLayout {
+        let t0 = now()
+        let first = try run()
+        let elapsed = now() - t0
+        guard shouldRetry(firstCount: first.count, elapsed: elapsed, screenshotLike: screenshotLike, probe: probe) else {
+            return CheckedLayout(lines: first, retried: false, screenshotLike: screenshotLike)
+        }
+        // A retry that throws keeps the first answer: the first pass did not fail, it was thin.
+        let second = (try? run()) ?? []
+        return CheckedLayout(lines: second.count > first.count ? second : first, retried: true, screenshotLike: screenshotLike)
+    }
+
+    /// Retry when a screenshot-like image read as empty, or when a cold pass came back well short
+    /// of the fast probe's line count.
+    static func shouldRetry(firstCount: Int, elapsed: Double, screenshotLike: Bool, probe: () -> Int?) -> Bool {
+        guard screenshotLike else { return false }
+        if firstCount == 0 { return true }
+        guard elapsed >= coldSeconds, let p = probe(), p >= minProbeLines else { return false }
+        return Double(firstCount) < shortRatio * Double(p)
+    }
+
+    /// Line count from the fast recognizer: no language correction, no Neural Engine compile.
+    /// Used only as a cross-check of a cold accurate pass; its text is never output (it misreads
+    /// IPs as "192. 168. 42.17", which would slip past redaction).
+    static func fastLineCount(image: CGImage, minConfidence: Float) -> Int? {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .fast
+        request.usesLanguageCorrection = false
+        return (try? perform(request, on: image, minConfidence: minConfidence, roi: nil))?.count
+    }
+
+    /// At least 200 x 200 px and mostly flat colour. A UI screenshot is dominated by a few exact
+    /// background and text colours; a photo spreads over many. Measured on a 64 x 64 thumbnail
+    /// with each channel cut to 4 bits: the 4 most common colours must cover half the pixels.
+    public static func isScreenshotLike(_ image: CGImage) -> Bool {
+        guard image.width >= 200, image.height >= 200 else { return false }
+        return flatColorShare(image) >= 0.5
+    }
+
+    /// Share of a 64 x 64 thumbnail covered by its 4 most common 12-bit colours.
+    static func flatColorShare(_ image: CGImage) -> Double {
+        let side = 64
+        guard let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return 0 }
+        ctx.interpolationQuality = .none            // nearest neighbour: keep exact UI colours
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let data = ctx.data else { return 0 }
+        let px = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
+        var counts: [Int: Int] = [:]
+        for i in 0..<(side * side) {
+            let r = Int(px[i * 4] >> 4), g = Int(px[i * 4 + 1] >> 4), b = Int(px[i * 4 + 2] >> 4)
+            counts[(r << 8) | (g << 4) | b, default: 0] += 1
+        }
+        let top = counts.values.sorted(by: >).prefix(4).reduce(0, +)
+        return Double(top) / Double(side * side)
+    }
+
     static func perform(_ request: VNRecognizeTextRequest, on image: CGImage, minConfidence: Float, roi: CGRect?) throws -> [OCRLine] {
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         do { try handler.perform([request]) } catch { throw Failure(message: "vision: \(error.localizedDescription)") }

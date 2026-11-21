@@ -21,6 +21,10 @@ Security hardening from Fleet #290 and a larger redaction rule set from Fleet #3
 - Post-merge review fixes. TOKEN catches 20 to 31 character mixed-case secrets (about 91%, was 0 to 18%) with a length-scaled entropy bar and shape checks that keep identifiers, filenames and versions out. URL_CREDS takes an empty username (`redis://:pw@host`). JWT and URL_CREDS were quadratic on adversarial lines (16 s at 100,000 characters) and now take about 0.1 s. SECRET catches `--password X`, `-p X` after sshpass, docker/podman login and mysql (`-pX`), `curl -u user:pass`, aligned gaps of up to 40 spaces or tabs, a tab separator, and `Authorization: token <value>`. Every value on a `Cookie:` line and the first on a `Set-Cookie:` line is redacted, URL-encoded tails included. Fewer false positives: `response.data.token`, `142/150`, `viewBox="0 0 24 24"` (IPV4) and `sk-` CSS classes (OPENAI_KEY) stay as written.
 - Rules lookup. Extra rules come from `--rules`, then `$CHEAPSHOT_RULES`, then `rules.json` next to the ledger. A named rules file that is missing or broken fails the run; a broken default `rules.json` is skipped with a warning and the built-in redaction stays on.
 
+### OCR
+
+- Cold-start retry. On some cold starts (macOS `aned` compiling Vision's models twice under contention) the accurate recognizer returned no lines, or dropped lines, with exit 0, and callers took the empty text for a photo and sent the pixels. A screenshot-like image (at least 200 x 200 px and mostly flat colour) that reads as empty, or a cold pass (over 3 s) that comes back under 85% of a fast-recognizer line count, is now OCR'd once more in the same process, where the models are already compiled. Each image result in `--json` carries `"ocr_status": "ok" | "empty"`, `"retried"` and `"screenshot_like"`; `"empty"` with `"retried": true` means a screenshot that still read blank, not a photo, and stderr says so. The fast recognizer is only counted, never output, since it misreads IPs past redaction.
+
 ### Ledger
 
 - Each line gains `raw` (true on `--raw` runs) and `passthrough_reason`.
