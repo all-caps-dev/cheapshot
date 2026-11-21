@@ -70,6 +70,16 @@ test("ocr: a newest dir that starts with a dash is refused", () => {
   assert.throws(() => ocrArgs({ newest: { dir: "--raw" } }), /must not start with "-"/);
 });
 
+// Fleet #15 review: the binary reads a bare integer as a count, so "2024" would scan the cwd
+// for the newest 2024 files instead of listing that directory.
+test("ocr: newest dir must be an absolute path", () => {
+  assert.throws(() => ocrArgs({ newest: { dir: "2024" } }), /must be an absolute path/);
+  assert.throws(() => ocrArgs({ newest: { dir: "shots", count: 2 } }), /must be an absolute path/);
+  assert.throws(() => ocrArgs({ newest: { dir: "." } }), /must be an absolute path/);
+  assert.throws(() => ocrArgs({ newest: { dir: "~" } }), /must be an absolute path/);
+  assert.deepEqual(ocrArgs({ newest: { dir: "/tmp/shots" } }), ["--json", "--newest", "/tmp/shots"]);
+});
+
 test("video: a path that starts with a dash is refused", () => {
   assert.throws(() => videoArgs({ path: "--raw" }), /must not start with "-"/);
   assert.throws(() => videoArgs({ path: "-x.mp4" }), /must not start with "-"/);

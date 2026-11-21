@@ -12,6 +12,10 @@ test "$(jq -r '.plugins[0].name' .claude-plugin/marketplace.json)" = "cheapshot"
 test "$(jq -r '.plugins[0].source' .claude-plugin/marketplace.json)" = "./plugin" || { echo "marketplace source must be ./plugin"; exit 1; }
 test "$(jq -r .name plugin/.claude-plugin/plugin.json)" = "cheapshot" || { echo "plugin name must be cheapshot"; exit 1; }
 jq -e '.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")' plugin/.claude-plugin/plugin.json >/dev/null || { echo "plugin.json needs a semver version"; exit 1; }
+# Claude Code offers an update from the marketplace entry's version, so the two must agree
+# or the plugin shows an update that never arrives.
+test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$(jq -r .version plugin/.claude-plugin/plugin.json)" \
+  || { echo "marketplace.json plugin version must equal plugin.json version"; exit 1; }
 # The manifest must NOT point at hooks/hooks.json. Claude Code loads that path from the plugin
 # root on its own, and naming it again is a duplicate that makes the whole plugin fail to load
 # ("Duplicate hooks file detected"), so the Read interceptor runs for nobody. manifest.hooks is

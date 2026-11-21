@@ -198,6 +198,18 @@ public struct Options: Equatable {
             i += 1
         }
 
+        // A mode flag runs its own input, so a leftover file would be silently dropped.
+        // Report the clash instead of guessing which one the caller meant.
+        let mode: String? = ledger ? "--ledger"
+            : text != nil ? "--text"
+            : video != nil ? "--video"
+            : newest != nil ? "--newest"
+            : cleanshot != nil ? "--cleanshot"
+            : nil
+        if let m = mode, !positional.isEmpty {
+            throw UsageError(message: "files cannot be combined with \(m): \(positional.joined(separator: " "))")
+        }
+
         if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days, byMode: byMode); return o }
         if migrate { throw UsageError(message: "--migrate needs --ledger") }
         if days != nil { throw UsageError(message: "--days needs --ledger") }

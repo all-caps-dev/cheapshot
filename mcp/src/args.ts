@@ -38,6 +38,15 @@ export function assertNotOption(what: string, value: string): void {
   if (value.startsWith("-")) throw new Error(`${what} must not start with "-", got ${JSON.stringify(value)}`);
 }
 
+/** newest.dir must be absolute. The binary reads a bare integer as a count, so "2024" would
+ *  scan the cwd for the newest 2024 files instead of listing that directory (#15 review). */
+export function assertAbsoluteDir(value: string): void {
+  assertNotOption("newest.dir", value);
+  if (!value.startsWith("/")) {
+    throw new Error(`newest.dir must be an absolute path, got ${JSON.stringify(value)}`);
+  }
+}
+
 export function ocrArgs(input: OcrInput): string[] {
   const hasPaths = Array.isArray(input.paths) && input.paths.length > 0;
   if (!hasPaths && !input.newest) throw new Error("cheapshot_ocr needs paths or newest");
@@ -54,7 +63,7 @@ export function ocrArgs(input: OcrInput): string[] {
     args.push(...paths);
   } else {
     const n = input.newest as { dir: string; count?: number };
-    assertNotOption("newest.dir", n.dir);
+    assertAbsoluteDir(n.dir);
     args.push("--newest", n.dir);
     if (n.count !== undefined) args.push(String(n.count));
   }

@@ -15,6 +15,13 @@ case "$ext" in png|jpg|jpeg|webp|gif|pdf) ;; *) exit 0 ;; esac
 
 [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ] && exit 0
 
+# The model supplies file_path, so it can start with "-" and parse as a flag. The binary has no
+# "--" marker to lean on (older builds reject it), so refuse such a path and let Read show pixels.
+case "$path" in
+  -*) echo "cheapshot: $path starts with \"-\", so it would parse as a flag. Reading it as pixels." >&2
+      exit 0 ;;
+esac
+
 tmp="${TMPDIR:-/tmp}"
 sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"' | tr -c 'A-Za-z0-9._\n-' '_')
 

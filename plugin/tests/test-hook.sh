@@ -170,6 +170,16 @@ fresh
 out=$(input /tmp/shot.png "" '../../evil id' | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null)
 [ -n "$out" ] && [ -e "$TMPDIR/cheapshot-missing-.._.._evil_id" ] && pass "marker name sanitised" || fail "marker name sanitised: $(ls "$TMPDIR")"
 
+# 10c. Fleet #15 review: a model-supplied path that starts with "-" would parse as a flag.
+# Refuse it, let the Read show pixels, and never call the binary.
+fresh
+err=$(mktemp "$ROOT/err.XXXXXX")
+out=$(input "-dash.png" | run_hook 2>"$err"); code=$?
+dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')
+[ "$code" = 0 ] && [ -z "$dec" ] && pass "dash path passes through" || fail "dash path passes through (code=$code out=$out)"
+grep -q 'starts with "-"' "$err" && pass "dash path reported on stderr" || fail "dash path reported on stderr: $(cat "$err")"
+[ ! -s "$FAKE_LOG" ] && pass "dash path never reaches the binary" || fail "dash path never reaches the binary: $(cat "$FAKE_LOG")"
+
 # 11. Ruling 3: the hook runs as an executable (no leading sh) from a plugin root that has a space,
 # invoked the way hooks.json may spell it: "${CLAUDE_PLUGIN_ROOT}"/hooks/cheapshot-read.sh and unquoted.
 fresh
