@@ -1,0 +1,2 @@
+tailscale up --auth-key=tsk⟦⟧ey-auth-kQ7xYz3CNTRL-AbCdEfGhIjKlMnOpQrStUvWx
+api tsk⟦⟧ey-api-k9w8v7CNTRL-ZyXwVuTsRqPoNmLk

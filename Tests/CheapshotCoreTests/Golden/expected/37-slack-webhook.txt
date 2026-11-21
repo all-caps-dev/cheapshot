@@ -1,0 +1,2 @@
+post to [SLACK_WEBHOOK]
+docs at https://api.slack.com/messaging/webhooks

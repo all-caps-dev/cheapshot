@@ -1,0 +1,2 @@
+Authorization: Basic YWxhZGRpbjpvcGVuc2VzYW1l
+Basic setup takes five minutes

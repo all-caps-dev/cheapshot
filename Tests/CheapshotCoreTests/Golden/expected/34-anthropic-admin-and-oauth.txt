@@ -1,0 +1,2 @@
+admin [ANTHROPIC_KEY]
+oauth [ANTHROPIC_KEY]

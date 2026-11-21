@@ -1,0 +1,2 @@
+[DISCORD_WEBHOOK]
+invite https://discord.com/invite/abc123
