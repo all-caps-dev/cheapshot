@@ -39,6 +39,15 @@ cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read
 The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot report.pdf`
 reads every page.
 
+Settings the user controls (never set or unset them yourself):
+
+| Variable | Effect |
+|---|---|
+| `CHEAPSHOT_PASSTHROUGH=1` | The Read hook steps aside for the session. |
+| `CHEAPSHOT_STRICT=1` | The Read hook denies the Read on any failure (missing binary or `jq`, a binary error, a PDF over 20 pages with no range) instead of passing the pixels through. |
+| `CHEAPSHOT_ALLOW_RAW=1` | The MCP tools accept `raw: true`. |
+| `CHEAPSHOT_RULES=<file>` | Extra redaction rules for runs without `--rules` (the hook, the MCP server); else `rules.json` next to the ledger. |
+
 ## Rules
 
 1. When the user points at a screenshot, PDF, or recording, work from cheapshot's text. Read

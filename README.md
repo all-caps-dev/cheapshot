@@ -85,7 +85,7 @@ OCR text enters the agent's context as data. A screenshot of a web page containi
 ## MCP
 
 ```bash
-npx -y cheapshot-mcp@0.1.2
+npx -y cheapshot-mcp@0.1.3
 ```
 
 Stdio server for any MCP host. Tools `cheapshot_ocr`, `cheapshot_video`, `cheapshot_ledger`; resource `cheapshot://ledger`. It shells out to the same binary. Pin an exact version, as above.

@@ -13,7 +13,7 @@ brew install all-caps-dev/tap/cheapshot
 Then point your host at the server:
 
 ```json
-{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp@0.1.2"] } } }
+{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp@0.1.3"] } } }
 ```
 
 Pin an exact version, as above. A bare `cheapshot-mcp` runs whatever is newest on npm at every launch.
@@ -33,6 +33,22 @@ Resource `cheapshot://ledger` returns the same summary as JSON.
 `by_mode` splits the same window into video, image and pdf, biggest saving first. Ask for it before turning the total into money: a screenshot is spend that would really have been paid, a video frame is one of thousands nobody was going to upload individually, and the video share is usually most of the total.
 
 A PDF over 20 pages needs a `pages` range; the tool refuses to dump the whole document.
+
+## Environment
+
+Set these in the shell that starts the host, or in the server entry's `env` block. The model cannot change them mid-session.
+
+| Variable | Effect |
+|---|---|
+| `CHEAPSHOT_ALLOW_RAW=1` | Lets `raw: true` through on `cheapshot_ocr` and `cheapshot_video`. Without it, `raw` is refused and the binary never runs, so the model cannot switch redaction off on its own. Only the exact value `1` counts. |
+| `CHEAPSHOT_RULES=/abs/rules.json` | Extra redaction rules for every call (the server never passes `--rules`). Without it, `rules.json` next to the ledger is used if present. A named file that is missing or broken fails the call. Needs a cheapshot binary that reads it. |
+| `CHEAPSHOT_BIN` | Path to the binary, if it is not on `PATH`. |
+
+`CHEAPSHOT_STRICT` belongs to the Claude Code Read hook, not this server; see the [Claude Code page](https://all-caps.dev/cheapshot/claude-code/).
+
+```json
+{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp@0.1.3"], "env": { "CHEAPSHOT_RULES": "/Users/me/.config/cheapshot/rules.json" } } } }
+```
 
 ## Injection note
 

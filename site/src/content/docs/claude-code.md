@@ -59,9 +59,13 @@ the ledger, and `cheapshot --ledger` counts them:
 ## Strict mode
 
 Set `CHEAPSHOT_STRICT=1` and every failure above (missing binary, missing `jq`,
-a binary error, unreadable output, a PDF over 20 pages with no range) denies the
-Read instead of passing the pixels through. `CHEAPSHOT_PASSTHROUGH=1` and
-`cheapshot allow` still work, because those are your decisions.
+a binary error, unreadable output, a PDF over 20 pages with no range, a path
+that starts with `-`) denies the Read instead of passing the pixels through.
+`CHEAPSHOT_PASSTHROUGH=1` and `cheapshot allow` still work, because those are
+your decisions.
+
+The plugin's MCP tools refuse `raw: true` unless `CHEAPSHOT_ALLOW_RAW=1` is set
+in the environment that starts Claude Code; see the [MCP page](/cheapshot/mcp/#environment).
 
 ## Custom rules
 
