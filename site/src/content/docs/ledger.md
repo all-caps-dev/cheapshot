@@ -23,6 +23,10 @@ and screenshots writes one line per kind. They are kept apart because the PDF
 number is an estimate of what reading the pages as images would have cost, not a
 measured saving, and mixing the two would quietly inflate the total.
 
+`redactions` is the number of hits for the run, across every rule. 0.6.0 adds
+24 built-in rule entries (see [Redaction](/cheapshot/redaction/)), so the same
+screenshot can count more redactions than it did under 0.5.x.
+
 A run with redaction off (`--raw`) adds `"raw":true`. A redacted run has no
 `raw` key, so old and new redacted lines look the same.
 

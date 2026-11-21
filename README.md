@@ -42,7 +42,7 @@ Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 us
 cheapshot --rules my-rules.json shot.png
 ```
 
-Fifteen built-in rules catch keys, tokens, cards, and contact details, ordered most specific first; your own rules run before them and are a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b", "caseInsensitive": true}]`.
+Thirty-seven built-in rules catch provider keys, passwords and other `KEY=value` secrets, credentials in URLs, cards, bank numbers, and contact details, ordered most specific first; your own rules run before them and are a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b", "caseInsensitive": true}]`.
 
 ## Video
 

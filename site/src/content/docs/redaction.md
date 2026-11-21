@@ -93,6 +93,10 @@ line count in the `--json` line array and left the token in the clear there.
 Custom rules run before the built-in rules, so a pattern of yours wins over a
 looser built-in that would otherwise swallow the same text.
 
+The Claude Code hook and the MCP server never pass `--rules`. From 0.6.0 they
+read `$CHEAPSHOT_RULES`, else `rules.json` next to the ledger; see
+[Custom rules in Claude Code](/cheapshot/claude-code/#custom-rules).
+
 ## Text with no OCR
 
 `--text <file|->` redacts text that is already text. Use `-` to read standard

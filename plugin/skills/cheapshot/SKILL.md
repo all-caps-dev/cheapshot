@@ -61,9 +61,11 @@ Settings the user controls (never set or unset them yourself):
 3. Never retype a macOS screenshot path. Apple puts U+202F (narrow no-break space) before AM/PM
    in every timestamp it formats; it looks like a space and is not one. Glob the folder, or use
    `--newest`.
-4. Redaction is on by default: emails, cards, SSNs, phones, IPs, bank account and routing
-   numbers, AWS, GitHub, OpenAI, and Slack keys, JWTs, bearer tokens, PEM headers, and opaque
-   long tokens become `[LABEL]`. Use `--raw` only when the frame is known-safe and the literal
+4. Redaction is on by default: emails, cards, IBANs, SSNs, phones, IPs, bank account and
+   routing numbers, provider keys (AWS, GitHub, GitLab, Anthropic, OpenAI, Stripe, Slack,
+   Google, Azure, npm, PyPI, Hugging Face, Tailscale, 1Password, Vault), webhook URLs, the value
+   after `password=` or `api_key:`, credentials in URLs, Basic and Bearer auth, JWTs, PEM
+   headers, product keys, and opaque long tokens become `[LABEL]`. Use `--raw` only when the frame is known-safe and the literal
    text matters.
 5. Quote the lines you rely on. OCR reads UI text cleanly but garbles stylised text and long
    random strings (`0` to `Ø`, `l` to `I`); check anything odd against the image, do not guess.
