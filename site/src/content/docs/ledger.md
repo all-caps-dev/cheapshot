@@ -18,10 +18,30 @@ If `$CHEAPSHOT_HOME` is set and not empty, the file is
 {"image_tokens":1550,"inputs":1,"mode":"image","redactions":10,"saved":1496,"text_tokens":54,"ts":"2026-09-08T01:05:35Z"}
 ```
 
-`mode` is one of three values: `image`, `pdf`, or `video`. A run that mixes PDFs
+`mode` is `image`, `pdf`, or `video` for a run (and `passthrough`, below). A run that mixes PDFs
 and screenshots writes one line per kind. They are kept apart because the PDF
 number is an estimate of what reading the pages as images would have cost, not a
 measured saving, and mixing the two would quietly inflate the total.
+
+`redactions` is the number of hits for the run, across every rule. 0.6.0 adds
+24 built-in rule entries (see [Redaction](/cheapshot/redaction/)), so the same
+screenshot can count more redactions than it did under 0.5.x.
+
+A run with redaction off (`--raw`) adds `"raw":true`. A redacted run has no
+`raw` key, so old and new redacted lines look the same.
+
+Since 0.6.0 the Claude Code hook also writes a zero-token line each time it lets
+the pixels through, with `mode` set to `passthrough` and a reason, never a path:
+
+```json
+{"image_tokens":0,"inputs":1,"mode":"passthrough","passthrough_reason":"allow","redactions":0,"saved":0,"text_tokens":0,"ts":"2026-11-20T00:00:00Z"}
+```
+
+`passthrough_reason` is one of `allow`, `passthrough_env`, `error`, `over_cap`
+or `no_text`. These lines stay out of the savings and the `--by-mode` split.
+`--ledger` counts them as `passthroughs`, counts raw runs as `raw runs`, and
+prints both only when they are not zero; `--json` always carries `raw_runs` and
+`passthroughs`.
 
 ## Reading it
 

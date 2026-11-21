@@ -88,6 +88,7 @@ final class OptionsTests: XCTestCase {
         }
         XCTAssertThrowsError(try Options.parse(["allow", "a.png", "b.png"]))
         XCTAssertThrowsError(try Options.parse(["allow", "--json"]))       // a flag is not a path
+        XCTAssertEqual(try Options.parse(["--note-passthrough", "over_cap"]).command, .notePassthrough(reason: "over_cap"))
     }
 
     func testNumericBoundsAreValidated() {
@@ -219,6 +220,24 @@ final class OptionsTests: XCTestCase {
         XCTAssertEqual(try Options.parse(["--", "--help"]).command, .files(["--help"]))
         XCTAssertEqual(try Options.parse(["--", "-h"]).command, .files(["-h"]))
         XCTAssertEqual(try Options.parse(["--", "--version"]).command, .files(["--version"]))
+    }
+
+    // Fleet #15 review: a mode flag runs its own input, so a leftover file is an error
+    // rather than a silent drop.
+    func testFilesWithModeFlagsAreUsageError() {
+        XCTAssertThrowsError(try Options.parse(["--text", "notes.txt", "a.png"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "files cannot be combined with --text: a.png"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--video", "v.mp4", "a.png"]))
+        XCTAssertThrowsError(try Options.parse(["--newest", "/tmp/shots", "2", "a.png"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "files cannot be combined with --newest: a.png"))
+        }
+        XCTAssertThrowsError(try Options.parse(["--cleanshot", "2", "a.png"]))
+        XCTAssertThrowsError(try Options.parse(["--ledger", "a.png"]))
+        // A file after "--" is still a file, so it clashes the same way.
+        XCTAssertThrowsError(try Options.parse(["--text", "notes.txt", "--", "a.png"])) { e in
+            XCTAssertEqual(e as? UsageError, UsageError(message: "files cannot be combined with --text: a.png"))
+        }
     }
 
     func testDoubleDashWithNothingAfterIsNoInputs() {

@@ -1,0 +1,8 @@
+postgres://[URL_CREDS]@db.internal:5432/app
+redis://[URL_CREDS]@cache.example.com:6379
+http://localhost:3000?next=[EMAIL]
+http://localhost:3000/[EMAIL]
+call [PHONE] 2024
+stat +12345678
+grouped +12.345.678
+date +2026-11-20

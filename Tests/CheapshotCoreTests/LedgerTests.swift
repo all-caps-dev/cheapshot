@@ -112,4 +112,37 @@ final class LedgerTests: XCTestCase {
         XCTAssertTrue(text.contains("cheapshot ledger  (1 day)"))
         XCTAssertTrue(text.contains("saved          900  (90%)"))
     }
+
+    // Fleet #290 item 4: old lines decode, new optional keys are omitted when unset.
+    func testRawAndPassthroughKeysAreOptional() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(.passthrough(reason: "allow", ts: "2026-11-20T00:00:00Z"))
+        let body = try String(contentsOf: ledger.url, encoding: .utf8)
+        XCTAssertEqual(body, #"{"image_tokens":0,"inputs":1,"mode":"passthrough","passthrough_reason":"allow","redactions":0,"saved":0,"text_tokens":0,"ts":"2026-11-20T00:00:00Z"}"# + "\n")
+        let entries = try ledger.entries()
+        XCTAssertEqual(entries[0].passthroughReason, "allow")
+        XCTAssertNil(entries[0].raw)
+    }
+
+    func testSummaryLeavesPassthroughsOutOfSavings() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 2, raw: true))
+        try ledger.append(.passthrough(reason: "no_text"))
+        try ledger.append(.passthrough(reason: "allow"))
+        let s = try ledger.summary()
+        XCTAssertEqual(s.runs, 1)
+        XCTAssertEqual(s.inputs, 1)
+        XCTAssertEqual(s.rawRuns, 1)
+        XCTAssertEqual(s.passthroughs, 2)
+        XCTAssertEqual(try ledger.summaryByMode().map(\.mode), ["image"])
+        XCTAssertTrue(ledger.summaryText(s).contains("passthroughs   2"))
+    }
+
+    func testSummaryTextWithoutRawOrPassthroughsIsUnchanged() throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 0))
+        let text = ledger.summaryText(try ledger.summary())
+        XCTAssertFalse(text.contains("passthroughs"))
+        XCTAssertTrue(text.hasSuffix("redactions     0\n"))
+    }
 }

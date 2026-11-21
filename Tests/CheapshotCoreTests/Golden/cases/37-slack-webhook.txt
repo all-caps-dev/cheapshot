@@ -1,0 +1,2 @@
+post to https://hooks.sl⟦⟧ack.com/services/T024BE7LD/B01HQ3KJ5ML/x3QwErTyUiOpAsDfGhJkLzXc
+docs at https://api.slack.com/messaging/webhooks

@@ -21,7 +21,7 @@ brew install all-caps-dev/tap/cheapshot
 ```
 
 Then one entry in the host's MCP config. Every host runs the same
-`npx -y cheapshot-mcp@0.1.2` command; only the file and the key differ.
+`npx -y cheapshot-mcp@0.1.3` command; only the file and the key differ.
 
 ### Cursor and Claude Desktop
 
@@ -32,7 +32,7 @@ Then one entry in the host's MCP config. Every host runs the same
   "mcpServers": {
     "cheapshot": {
       "command": "npx",
-      "args": ["-y", "cheapshot-mcp@0.1.2"]
+      "args": ["-y", "cheapshot-mcp@0.1.3"]
     }
   }
 }
@@ -43,13 +43,13 @@ Then one entry in the host's MCP config. Every host runs the same
 The [plugin](/cheapshot/claude-code/) already carries this entry. Without the plugin:
 
 ```sh
-claude mcp add cheapshot -- npx -y cheapshot-mcp@0.1.2
+claude mcp add cheapshot -- npx -y cheapshot-mcp@0.1.3
 ```
 
 ### Cline
 
 ```sh
-cline mcp add cheapshot --yes -- npx -y cheapshot-mcp@0.1.2
+cline mcp add cheapshot --yes -- npx -y cheapshot-mcp@0.1.3
 ```
 
 Or the Configure tab in the extension. The file is the Cursor shape plus two keys:
@@ -59,7 +59,7 @@ Or the Configure tab in the extension. The file is the Cursor shape plus two key
   "mcpServers": {
     "cheapshot": {
       "command": "npx",
-      "args": ["-y", "cheapshot-mcp@0.1.2"],
+      "args": ["-y", "cheapshot-mcp@0.1.3"],
       "disabled": false,
       "autoApprove": []
     }
@@ -74,7 +74,7 @@ Or the Configure tab in the extension. The file is the Cursor shape plus two key
 ```toml
 [mcp_servers.cheapshot]
 command = "npx"
-args = ["-y", "cheapshot-mcp@0.1.2"]
+args = ["-y", "cheapshot-mcp@0.1.3"]
 ```
 
 ### OpenCode
@@ -86,7 +86,7 @@ args = ["-y", "cheapshot-mcp@0.1.2"]
   "mcp": {
     "cheapshot": {
       "type": "local",
-      "command": ["npx", "-y", "cheapshot-mcp@0.1.2"],
+      "command": ["npx", "-y", "cheapshot-mcp@0.1.3"],
       "enabled": true
     }
   }
@@ -96,7 +96,7 @@ args = ["-y", "cheapshot-mcp@0.1.2"]
 ### pi
 
 ```sh
-pi mcp add cheapshot -- npx -y cheapshot-mcp@0.1.2
+pi mcp add cheapshot -- npx -y cheapshot-mcp@0.1.3
 ```
 
 Or the Cursor shape in `~/.pi/agent/mcp.json`. pi gives MCP tools codemode
@@ -112,8 +112,8 @@ declare them to the model like built-in tools.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `cheapshot_ocr` | One of `paths` (string[], absolute) or `newest` ({`dir` required; `count` integer >= 1, default 1}); optional `raw` (boolean), `min_confidence` (0 to 1, default 0.3), `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox`, PDF `source` and `pages`) |
-| `cheapshot_video` | `path` (required); optional `scene` (0 to 1, default 0.25), `max_frames` (integer >= 1, default 200), `dedupe` (0 to 1, default 0.90), `raw` (boolean) | Timestamped transcript; `structuredContent` is the `--json` payload with `segments[]` |
+| `cheapshot_ocr` | One of `paths` (string[], absolute) or `newest` ({`dir` required; `count` integer >= 1, default 1}); optional `raw` (boolean, refused unless `CHEAPSHOT_ALLOW_RAW=1` is set for the server), `min_confidence` (0 to 1, default 0.3), `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox`, PDF `source` and `pages`) |
+| `cheapshot_video` | `path` (required); optional `scene` (0 to 1, default 0.25), `max_frames` (integer >= 1, default 200), `dedupe` (0 to 1, default 0.90), `raw` (boolean, same opt-in) | Timestamped transcript; `structuredContent` is the `--json` payload with `segments[]` |
 | `cheapshot_ledger` | `days` (integer >= 1, optional; default all time), `by_mode` (boolean, optional) | The ledger summary as text and as `structuredContent`. With `by_mode`, one extra text line per mode and a `modes` array in the payload |
 
 Resource `cheapshot://ledger` returns the all time summary as JSON.
@@ -141,6 +141,19 @@ reports a split only when there is really one.
 quote line 42 of a screenshot by its `lines[].n` or cite a PDF page by
 `source.sha256` and `pages[].n`. The [use](/cheapshot/use/) page documents the
 payload.
+
+## Environment
+
+Set these in the shell that starts the host, or in the server entry's `env`
+block. The model cannot change them mid-session.
+
+| Variable | Effect |
+|---|---|
+| `CHEAPSHOT_ALLOW_RAW=1` | Lets `raw: true` through on `cheapshot_ocr` and `cheapshot_video`. Without it, `raw` is refused before the binary runs. Only the exact value `1` counts. Enforced by cheapshot-mcp 0.1.3 or later, with any binary. |
+| `CHEAPSHOT_RULES=/abs/rules.json` | Extra redaction rules for every call. Without it, `rules.json` next to the ledger is used if present. A named file that is missing or broken fails the call; a broken default file is skipped with a warning. Needs the cheapshot binary 0.6.0 or later. |
+| `CHEAPSHOT_BIN` | Path to the binary, if it is not on `PATH`. |
+
+`CHEAPSHOT_STRICT` belongs to the [Claude Code hook](/cheapshot/claude-code/#strict-mode).
 
 ## Limits
 

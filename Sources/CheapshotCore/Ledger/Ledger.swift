@@ -8,18 +8,39 @@ public struct LedgerEntry: Codable, Equatable {
     public var textTokens: Int
     public var saved: Int
     public var redactions: Int
+    /// true when redaction was off for this run (--raw). Absent (nil) on a redacted run, so old
+    /// lines and new redacted lines look the same on disk (#290 item 4).
+    public var raw: Bool?
+    /// Set only on a "passthrough" line: why the Read hook let pixels reach the model. One of
+    /// ``LedgerEntry/passthroughReasons``. Never a path, so the ledger stays free of file names.
+    public var passthroughReason: String?
+
+    /// The reasons the hook may record. "allow" is a one-shot `cheapshot allow`, "passthrough_env"
+    /// is CHEAPSHOT_PASSTHROUGH=1, "error" is any hook or binary failure, "over_cap" a PDF over the
+    /// page cap, "no_text" an image with nothing recognised.
+    public static let passthroughReasons = ["allow", "passthrough_env", "error", "over_cap", "no_text"]
 
     enum CodingKeys: String, CodingKey {
-        case ts, mode, inputs, saved, redactions
+        case ts, mode, inputs, saved, redactions, raw
         case imageTokens = "image_tokens"
         case textTokens = "text_tokens"
+        case passthroughReason = "passthrough_reason"
     }
 
-    public init(ts: String = LedgerEntry.now(), mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int) {
+    public init(ts: String = LedgerEntry.now(), mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int,
+                raw: Bool? = nil, passthroughReason: String? = nil) {
         self.ts = ts; self.mode = mode; self.inputs = inputs
         self.imageTokens = imageTokens; self.textTokens = textTokens
         self.saved = max(0, imageTokens - textTokens); self.redactions = redactions
+        self.raw = raw; self.passthroughReason = passthroughReason
     }
+
+    /// A zero-token line that records one hook pass-through. Kept out of the savings totals.
+    public static func passthrough(reason: String, ts: String = LedgerEntry.now()) -> LedgerEntry {
+        LedgerEntry(ts: ts, mode: "passthrough", inputs: 1, imageTokens: 0, textTokens: 0, redactions: 0, passthroughReason: reason)
+    }
+
+    var isPassthrough: Bool { passthroughReason != nil }
 
     static let isoFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -35,14 +56,19 @@ public struct LedgerEntry: Codable, Equatable {
 
 public struct LedgerSummary: Codable, Equatable {
     public var days: Int, runs: Int, inputs: Int, imageTokens: Int, textTokens: Int, saved: Int, redactions: Int, percent: Int
+    /// Runs with redaction off, and Read hook pass-throughs (pixels reached the model). #290 item 4.
+    public var rawRuns: Int, passthroughs: Int
     enum CodingKeys: String, CodingKey {
-        case days, runs, inputs, saved, redactions, percent
+        case days, runs, inputs, saved, redactions, percent, passthroughs
         case imageTokens = "image_tokens"
         case textTokens = "text_tokens"
+        case rawRuns = "raw_runs"
     }
-    public init(days: Int, runs: Int, inputs: Int, imageTokens: Int, textTokens: Int, saved: Int, redactions: Int, percent: Int) {
+    public init(days: Int, runs: Int, inputs: Int, imageTokens: Int, textTokens: Int, saved: Int, redactions: Int, percent: Int,
+                rawRuns: Int = 0, passthroughs: Int = 0) {
         self.days = days; self.runs = runs; self.inputs = inputs; self.imageTokens = imageTokens
         self.textTokens = textTokens; self.saved = saved; self.redactions = redactions; self.percent = percent
+        self.rawRuns = rawRuns; self.passthroughs = passthroughs
     }
 }
 
@@ -115,7 +141,9 @@ public struct Ledger {
     }
 
     public func summary(days: Int? = nil) throws -> LedgerSummary {
-        let all = try entries(days: days)
+        let window = try entries(days: days)
+        // Pass-through lines carry no tokens; counting them as runs would dilute the savings.
+        let all = window.filter { !$0.isPassthrough }
         let dayCount = Set(all.map { String($0.ts.prefix(10)) }).count
         let img = all.reduce(0) { $0 + $1.imageTokens }
         let txt = all.reduce(0) { $0 + $1.textTokens }
@@ -124,14 +152,16 @@ public struct Ledger {
                              inputs: all.reduce(0) { $0 + $1.inputs },
                              imageTokens: img, textTokens: txt, saved: saved,
                              redactions: all.reduce(0) { $0 + $1.redactions },
-                             percent: img > 0 ? Int(Double(saved) / Double(img) * 100) : 0)
+                             percent: img > 0 ? Int(Double(saved) / Double(img) * 100) : 0,
+                             rawRuns: all.filter { $0.raw == true }.count,
+                             passthroughs: window.count - all.count)
     }
 
     /// The same window split by mode, biggest saving first. Ties break on the mode name so the
     /// order is stable across runs.
     public func summaryByMode(days: Int? = nil) throws -> [LedgerModeSummary] {
         var byMode: [String: [LedgerEntry]] = [:]
-        for e in try entries(days: days) { byMode[e.mode, default: []].append(e) }
+        for e in try entries(days: days) where !e.isPassthrough { byMode[e.mode, default: []].append(e) }
         return byMode.map { mode, rows in
             let img = rows.reduce(0) { $0 + $1.imageTokens }
             let saved = rows.reduce(0) { $0 + $1.saved }
@@ -168,7 +198,10 @@ public struct Ledger {
     }
 
     public func summaryText(_ s: LedgerSummary) -> String {
-        """
+        // The two #290 counters print only when non-zero, so a ledger with neither reads as before.
+        let extra = s.rawRuns + s.passthroughs > 0
+            ? "  raw runs       \(s.rawRuns)\n  passthroughs   \(s.passthroughs)\n" : ""
+        return """
         cheapshot ledger  (\(s.days) day\(s.days == 1 ? "" : "s"))
           runs           \(s.runs)
           inputs         \(s.inputs)
@@ -176,7 +209,7 @@ public struct Ledger {
           text tokens    \(s.textTokens)
           saved          \(s.saved)  (\(s.percent)%)
           redactions     \(s.redactions)
-
+        \(extra)
         """
     }
 }

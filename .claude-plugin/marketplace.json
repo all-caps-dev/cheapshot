@@ -9,7 +9,7 @@
       "name": "cheapshot",
       "source": "./plugin",
       "description": "Read the words in a screenshot or PDF instead of the pixels. PreToolUse hook on Read, a skill, and the cheapshot MCP server.",
-      "version": "0.1.0"
+      "version": "0.1.1"
     }
   ]
 }

@@ -25,13 +25,14 @@ final class RunnerTests: XCTestCase {
     }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: tmp) }
 
-    func run(_ args: [String], stdin: String = "", env: [String: String] = [:]) async -> (code: Int32, out: String, err: String) {
+    func run(_ args: [String], stdin: String = "", env: [String: String] = [:],
+             interactive: Bool = false) async -> (code: Int32, out: String, err: String) {
         final class Box { var out = "", err = "" }
         let box = Box()
         var env = env
         env["CHEAPSHOT_HOME"] = env["CHEAPSHOT_HOME"] ?? tmp.path   // never write the real ledger
         let io = CLIIO(out: { box.out += $0 }, err: { box.err += $0 }, readStdin: { stdin },
-                       environment: env, home: tmp.path)
+                       environment: env, home: tmp.path, isInteractive: interactive)
         let code = await CLI.run(arguments: args, io: io)
         return (code, box.out, box.err)
     }
@@ -619,7 +620,7 @@ final class RunnerTests: XCTestCase {
     }
 
     func testAllowAppendsEntry() async throws {
-        let r = await run(["allow", "/tmp/shot.png"], env: ["TMPDIR": tmp.path])
+        let r = await run(["allow", "/tmp/shot.png"], env: ["TMPDIR": tmp.path], interactive: true)
         XCTAssertEqual(r.code, 0)
         XCTAssertEqual(r.out, "cheapshot: allowed /tmp/shot.png for 5 minutes\n")
         let body = try String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)
@@ -631,7 +632,7 @@ final class RunnerTests: XCTestCase {
         XCTAssert(expiry >= now + 295 && expiry <= now + 305, "expiry \(expiry) is not about 5 minutes from \(now)")
 
         // A second allow appends, never truncates, and a relative path is made absolute.
-        _ = await run(["allow", "rel.png"], env: ["TMPDIR": tmp.path])
+        _ = await run(["allow", "rel.png"], env: ["TMPDIR": tmp.path], interactive: true)
         let lines = try String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)
             .split(separator: "\n")
         XCTAssertEqual(lines.count, 2)
@@ -696,6 +697,104 @@ final class RunnerTests: XCTestCase {
         XCTAssertTrue(h.out.contains("USAGE"))
         let v = await run(["--version"])
         XCTAssertEqual(v.out, cheapshotVersionForTests + "\n")
+    }
+
+    // MARK: - Fleet #290 items 3 and 4
+
+    /// Item 3: an agent's shell tool has no terminal, so the model cannot approve its own raw access.
+    func testAllowRefusedWithoutATerminal() async throws {
+        let r = await run(["allow", "/tmp/shot.png"], env: ["TMPDIR": tmp.path], interactive: false)
+        XCTAssertEqual(r.code, 2)
+        XCTAssertTrue(r.err.contains("must be run by a person in a terminal"), r.err)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("cheapshot-allow").path),
+                       "a refused allow must not create the allow file")
+    }
+
+    /// Item 4: the hook records a pass-through as a zero-token line with a reason and no path.
+    func testNotePassthroughWritesAReasonLine() async throws {
+        let r = await run(["--note-passthrough", "allow"])
+        XCTAssertEqual(r.code, 0)
+        let lines = try ledgerEntries()
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines[0]["mode"] as? String, "passthrough")
+        XCTAssertEqual(lines[0]["passthrough_reason"] as? String, "allow")
+        XCTAssertEqual(lines[0]["image_tokens"] as? Int, 0)
+        XCTAssertNil(lines[0]["raw"])
+    }
+
+    func testNotePassthroughRejectsUnknownReasons() async throws {
+        for args in [["--note-passthrough"], ["--note-passthrough", "/tmp/shot.png"], ["--note-passthrough", "allow", "x"]] {
+            let r = await run(args)
+            XCTAssertEqual(r.code, 2, "\(args)")
+        }
+        XCTAssertEqual(try ledgerEntries().count, 0)
+    }
+
+    /// Item 4: a --raw run is marked raw in the ledger; a redacted run carries no raw key at all.
+    func testRecordMarksRawRuns() throws {
+        let io = CLIIO(out: { _ in }, err: { _ in }, readStdin: { "" },
+                       environment: ["CHEAPSHOT_HOME": tmp.path], home: tmp.path)
+        let entry = LedgerEntry(mode: "image", inputs: 1, imageTokens: 100, textTokens: 10, redactions: 0)
+        CLI.record(entry, try Options.parse(["--raw", "a.png"]), io)
+        CLI.record(entry, try Options.parse(["a.png"]), io)
+        let lines = try ledgerEntries()
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0]["raw"] as? Bool, true)
+        XCTAssertNil(lines[1]["raw"])
+    }
+
+    /// Item 4: custom rules reach runs that never pass --rules (the Read hook, the MCP server).
+    func testRulesFromEnvironmentApply() async throws {
+        let rules = tmp.appendingPathComponent("env-rules.json")
+        try #"[{"name":"ticket","pattern":"\\bINT-\\d{6}\\b"}]"#.write(to: rules, atomically: true, encoding: .utf8)
+        let r = await run(["--text", "-"], stdin: "INT-123456", env: ["CHEAPSHOT_RULES": rules.path])
+        XCTAssertEqual(r.out, "[TICKET]\n")
+    }
+
+    func testDefaultRulesFileNextToTheLedgerApplies() async throws {
+        let home = tmp.appendingPathComponent("home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try #"[{"name":"ticket","pattern":"\\bINT-\\d{6}\\b"}]"#.write(to: home.appendingPathComponent("rules.json"), atomically: true, encoding: .utf8)
+        let r = await run(["--text", "-"], stdin: "INT-123456", env: ["CHEAPSHOT_HOME": home.path])
+        XCTAssertEqual(r.out, "[TICKET]\n")
+        // --rules still wins over the default file.
+        let other = tmp.appendingPathComponent("other.json")
+        try #"[{"name":"other","pattern":"INT"}]"#.write(to: other, atomically: true, encoding: .utf8)
+        let r2 = await run(["--rules", other.path, "--text", "-"], stdin: "INT-123456", env: ["CHEAPSHOT_HOME": home.path])
+        XCTAssertEqual(r2.out, "[OTHER]-123456\n")
+    }
+
+    /// A broken default rules.json warns and keeps the built-in rules; it never fails the run.
+    func testBrokenDefaultRulesFileFallsBackToBuiltIns() async throws {
+        let home = tmp.appendingPathComponent("home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try "not json".write(to: home.appendingPathComponent("rules.json"), atomically: true, encoding: .utf8)
+        let r = await run(["--text", "-"], stdin: "mail me at a@b.co", env: ["CHEAPSHOT_HOME": home.path])
+        XCTAssertEqual(r.code, 0)
+        XCTAssertEqual(r.out, "mail me at [EMAIL]\n")
+        XCTAssertTrue(r.err.contains("warning: ignoring"), r.err)
+        // A file named on purpose stays fatal.
+        let named = await run(["--text", "-"], stdin: "x", env: ["CHEAPSHOT_HOME": home.path,
+                                                                 "CHEAPSHOT_RULES": home.appendingPathComponent("rules.json").path])
+        XCTAssertEqual(named.code, 2)
+    }
+
+    func testNamedRulesFileThatIsMissingIsAUsageError() async {
+        let r = await run(["--text", "-"], stdin: "x", env: ["CHEAPSHOT_RULES": "/nonexistent-cheapshot-rules.json"])
+        XCTAssertEqual(r.code, 2)
+    }
+
+    /// Item 4: pass-throughs and raw runs show up in --ledger --json, and do not dilute the savings.
+    func testLedgerJSONCountsRawRunsAndPassthroughs() async throws {
+        let ledger = Ledger(at: tmp.appendingPathComponent("ledger.jsonl"))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 0))
+        try ledger.append(LedgerEntry(mode: "image", inputs: 1, imageTokens: 1000, textTokens: 100, redactions: 0, raw: true))
+        try ledger.append(.passthrough(reason: "error"))
+        let o = try json(await run(["--ledger", "--json"]).out)
+        XCTAssertEqual(o["runs"] as? Int, 2)
+        XCTAssertEqual(o["raw_runs"] as? Int, 1)
+        XCTAssertEqual(o["passthroughs"] as? Int, 1)
+        XCTAssertEqual(o["percent"] as? Int, 90)
     }
 }
 

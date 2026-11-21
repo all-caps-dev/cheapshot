@@ -32,14 +32,23 @@ jpg, jpeg, webp, gif, or pdf, the hook runs `cheapshot --json --stats` on it and
 denies the Read. The deny reason is the redacted text plus one line:
 
 ```text wrap
-cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, run: cheapshot allow /path/shot.png, then Read again.
+cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, ask the user to approve it.
 ```
 
-The same line goes to stderr and to the hook's `systemMessage`, so you see the
-saving as it happens, and every run adds a line to the [ledger](/cheapshot/ledger/).
+You get the same saving on stderr and in the hook's `systemMessage`, with the
+command to approve the pixels yourself, and every run adds a line to the
+[ledger](/cheapshot/ledger/):
 
-The Read goes ahead untouched, with no output from the hook, when any of these
-hold:
+```text wrap
+cheapshot: 1018 image tokens -> 37 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow '/path/shot.png'
+```
+
+The path is shell-quoted, so a macOS screenshot name with spaces pastes as one
+argument.
+
+The Read goes ahead with the pixels when any of these hold. Each one except a
+missing binary or `jq` adds a zero-token `passthrough` line with its reason to
+the ledger, and `cheapshot --ledger` counts them:
 
 - `CHEAPSHOT_PASSTHROUGH=1` is set in the environment.
 - `cheapshot` is not on `PATH`. The hook prints the brew command once per
@@ -47,8 +56,36 @@ hold:
 - `jq` is not on `PATH`. The hook steps aside with no message, so install it
   with `brew install jq`.
 - The path is on the one-shot allowlist (below).
-- The binary fails on the file. The hook says so on stderr and lets the pixels
-  through rather than blocking the agent.
+- The binary fails on the file. The hook says so in a system message and lets
+  the pixels through rather than blocking the agent.
+- The path starts with `-`, so it would parse as a flag. The hook never hands
+  it to the binary and says so in a system message.
+- OCR finds no text in the image. There is nothing to redact, so the pixels are
+  the content.
+
+## Strict mode
+
+Set `CHEAPSHOT_STRICT=1` and every failure above (missing binary, missing `jq`,
+a binary error, unreadable output, a PDF over 20 pages with no range, a path
+that starts with `-`) denies the Read instead of passing the pixels through.
+`CHEAPSHOT_PASSTHROUGH=1` and `cheapshot allow` still work, because those are
+your decisions. Strict mode still lets an image with no recognised text through:
+that is not a failure, and there is no text to redact. It is recorded in the
+ledger as a `no_text` pass-through.
+
+The plugin's MCP tools refuse `raw: true` unless `CHEAPSHOT_ALLOW_RAW=1` is set
+in the environment that starts Claude Code; see the [MCP page](/cheapshot/mcp/#environment).
+
+## Custom rules
+
+The hook and the MCP server never pass `--rules`, so cheapshot looks for rules
+itself: `$CHEAPSHOT_RULES` if set, else `rules.json` next to the ledger
+(`~/Library/Application Support/cheapshot/rules.json`, or `$CHEAPSHOT_HOME`).
+A file you name with `--rules` or `$CHEAPSHOT_RULES` that is missing or broken
+stops the run, and the hook denies the Read in every mode, since passing the
+pixels would skip the built-in redaction too. A broken default `rules.json` is
+skipped with a warning and the built-in rules still run. Both lookups need
+cheapshot 0.6.0 or later; older binaries read `--rules` only.
 
 ## PDFs
 
@@ -58,15 +95,19 @@ range, so a whole manual is never dumped into context by accident.
 
 ## The escape hatch
 
-When the agent needs the pixels, for layout, colour, or a chart, it runs:
+When the agent needs the pixels, for layout, colour, or a chart, it asks you,
+and you run this in a terminal:
 
 ```bash
 cheapshot allow /absolute/path/shot.png
 ```
 
 That appends the path to `$TMPDIR/cheapshot-allow` with a five minute expiry.
-The next Read of that exact path passes through and the entry is consumed. The
-agent can run this itself from Bash, so nothing about the Read tool changes.
+The next Read of that exact path passes through and the entry is consumed.
+`allow` (0.6.0 or later) refuses to run unless stdin and stdout are a terminal
+and it is in that terminal's foreground process group, so cheapshot stops
+offering the agent the bypass. It is not a sandbox: a model with a free Bash
+tool runs as you and can still fake a terminal (`script`) or write the file.
 
 ## Pasted images
 

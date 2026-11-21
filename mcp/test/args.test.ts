@@ -1,13 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP } from "../src/args.js";
+import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP, rawAllowed } from "../src/args.js";
+
+// A person opted in to raw output (#290 item 3). Tests that want --raw pass this env explicitly.
+const OPTED_IN = { CHEAPSHOT_ALLOW_RAW: "1" };
 
 test("ocr: paths with defaults", () => {
   assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] }), ["--json", "/tmp/a.png", "/tmp/b.jpg"]);
 });
 
 test("ocr: raw, min_confidence, pages", () => {
-  assert.deepEqual(ocrArgs({ paths: ["/tmp/r.pdf"], raw: true, min_confidence: 0.5, pages: "3-5" }),
+  assert.deepEqual(ocrArgs({ paths: ["/tmp/r.pdf"], raw: true, min_confidence: 0.5, pages: "3-5" }, OPTED_IN),
     ["--json", "--raw", "--min-conf", "0.5", "--pages", "3-5", "/tmp/r.pdf"]);
 });
 
@@ -28,7 +31,7 @@ test("ocr: pages must look like N or N-M", () => {
 
 test("video: defaults and every flag", () => {
   assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }), ["--json", "--video", "/tmp/s.mp4"]);
-  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4", scene: 0.3, max_frames: 50, dedupe: 0.8, raw: true }),
+  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4", scene: 0.3, max_frames: 50, dedupe: 0.8, raw: true }, OPTED_IN),
     ["--json", "--raw", "--scene", "0.3", "--max-frames", "50", "--dedupe", "0.8", "--video", "/tmp/s.mp4"]);
 });
 
@@ -70,7 +73,34 @@ test("ocr: a newest dir that starts with a dash is refused", () => {
   assert.throws(() => ocrArgs({ newest: { dir: "--raw" } }), /must not start with "-"/);
 });
 
+// Fleet #15 review: the binary reads a bare integer as a count, so "2024" would scan the cwd
+// for the newest 2024 files instead of listing that directory.
+test("ocr: newest dir must be an absolute path", () => {
+  assert.throws(() => ocrArgs({ newest: { dir: "2024" } }), /must be an absolute path/);
+  assert.throws(() => ocrArgs({ newest: { dir: "shots", count: 2 } }), /must be an absolute path/);
+  assert.throws(() => ocrArgs({ newest: { dir: "." } }), /must be an absolute path/);
+  assert.throws(() => ocrArgs({ newest: { dir: "~" } }), /must be an absolute path/);
+  assert.deepEqual(ocrArgs({ newest: { dir: "/tmp/shots" } }), ["--json", "--newest", "/tmp/shots"]);
+});
+
 test("video: a path that starts with a dash is refused", () => {
   assert.throws(() => videoArgs({ path: "--raw" }), /must not start with "-"/);
   assert.throws(() => videoArgs({ path: "-x.mp4" }), /must not start with "-"/);
+});
+
+// Fleet #290 item 3: the model must not be able to switch redaction off on its own.
+test("raw: refused unless CHEAPSHOT_ALLOW_RAW=1 is in the server environment", () => {
+  assert.throws(() => ocrArgs({ paths: ["/tmp/a.png"], raw: true }, {}), /raw is off.*CHEAPSHOT_ALLOW_RAW=1/);
+  assert.throws(() => videoArgs({ path: "/tmp/s.mp4", raw: true }, {}), /raw is off/);
+  // Anything other than exactly "1" is not an opt-in.
+  for (const v of ["0", "true", "yes", ""]) {
+    assert.throws(() => ocrArgs({ paths: ["/tmp/a.png"], raw: true }, { CHEAPSHOT_ALLOW_RAW: v }), /raw is off/);
+  }
+  assert.equal(rawAllowed({ CHEAPSHOT_ALLOW_RAW: "1" }), true);
+  assert.equal(rawAllowed({}), false);
+});
+
+test("raw: false or absent never needs the opt-in", () => {
+  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png"], raw: false }, {}), ["--json", "/tmp/a.png"]);
+  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }, {}), ["--json", "--video", "/tmp/s.mp4"]);
 });

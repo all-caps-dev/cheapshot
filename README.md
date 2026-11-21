@@ -42,7 +42,7 @@ Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 us
 cheapshot --rules my-rules.json shot.png
 ```
 
-Fifteen built-in rules catch keys, tokens, cards, and contact details, ordered most specific first; your own rules run before them and are a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b", "caseInsensitive": true}]`.
+Thirty-seven built-in rules catch provider keys, passwords and other `KEY=value` secrets, credentials in URLs, cards, bank numbers, and contact details, ordered most specific first; your own rules run before them and are a JSON array: `[{"name": "TICKET", "pattern": "\\bINT-\\d{6}\\b", "caseInsensitive": true}]`.
 
 ## Video
 
@@ -78,14 +78,14 @@ claude plugin marketplace add all-caps-dev/cheapshot
 claude plugin install cheapshot@all-caps-dev
 ```
 
-The plugin's hook intercepts `Read` on images and PDFs and hands the agent redacted text plus one line saying what it saved. The agent gets the pixels back with `cheapshot allow <path>` when it needs layout. `CHEAPSHOT_PASSTHROUGH=1` turns the hook off for a session. The binary is not bundled; brew it first.
+The plugin's hook intercepts `Read` on images and PDFs and hands the agent redacted text plus one line saying what it saved. When the agent needs layout, you run `cheapshot allow <path>` in a terminal and it reads the pixels once (a speed bump that stops cheapshot offering the bypass, not a sandbox). `CHEAPSHOT_STRICT=1` denies the Read when cheapshot fails instead of passing the pixels through. `CHEAPSHOT_PASSTHROUGH=1` turns the hook off for a session. The binary is not bundled; brew it first.
 
 OCR text enters the agent's context as data. A screenshot of a web page containing "ignore previous instructions" is now text in context, the same risk as reading any file.
 
 ## MCP
 
 ```bash
-npx -y cheapshot-mcp@0.1.2
+npx -y cheapshot-mcp@0.1.3
 ```
 
 Stdio server for any MCP host. Tools `cheapshot_ocr`, `cheapshot_video`, `cheapshot_ledger`; resource `cheapshot://ledger`. It shells out to the same binary. Pin an exact version, as above.

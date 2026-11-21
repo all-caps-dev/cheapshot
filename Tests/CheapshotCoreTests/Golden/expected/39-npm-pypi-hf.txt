@@ -1,0 +1,3 @@
+//registry.npmjs.org/:_authToken=[NPM_TOKEN]
+twine [PYPI_TOKEN]
+HF [HF_TOKEN]

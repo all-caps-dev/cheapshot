@@ -94,7 +94,7 @@ export function createServer(): McpServer {
           dir: z.string().describe("Absolute path of the folder to scan. Required: the server's own working directory is arbitrary under an MCP host"),
           count: z.number().int().min(1).optional().describe("How many newest files, default 1"),
         }).optional().describe("Instead of paths: the newest image or PDF files in a folder"),
-        raw: z.boolean().optional().describe("Skip redaction"),
+        raw: z.boolean().optional().describe("Skip redaction. Refused unless a person set CHEAPSHOT_ALLOW_RAW=1 for this server"),
         min_confidence: z.number().min(0).max(1).optional().describe("Confidence floor, default 0.3"),
         pages: z.string().optional().describe('PDF page range, "N" or "N-M"'),
       },
@@ -138,10 +138,14 @@ export function createServer(): McpServer {
         scene: z.number().min(0).max(1).optional().describe("Scene change threshold, default 0.25"),
         max_frames: z.number().int().min(1).optional().describe("Frame cap, default 200"),
         dedupe: z.number().min(0).max(1).optional().describe("Drop a screen this similar to the last, default 0.90"),
-        raw: z.boolean().optional().describe("Skip redaction"),
+        raw: z.boolean().optional().describe("Skip redaction. Refused unless a person set CHEAPSHOT_ALLOW_RAW=1 for this server"),
       },
     },
-    async (input: VideoInput): Promise<ToolResult> => runTool(videoArgs(input)),
+    async (input: VideoInput): Promise<ToolResult> => {
+      let args: string[];
+      try { args = videoArgs(input); } catch (e) { return errorResult(e instanceof Error ? e.message : String(e)); }
+      return runTool(args);
+    },
   );
 
   server.registerTool(

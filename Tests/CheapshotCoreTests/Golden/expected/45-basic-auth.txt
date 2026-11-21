@@ -1,0 +1,2 @@
+Authorization: [BASIC_AUTH]
+Basic setup takes five minutes

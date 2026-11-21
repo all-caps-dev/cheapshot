@@ -16,15 +16,18 @@ public enum CLI {
         case .ledger(let json, let migrate, let days, let byMode):
             return runLedger(json: json, migrate: migrate, days: days, byMode: byMode, io: io)
         case .allow(let path): return runAllow(path: path, io: io)
+        case .notePassthrough(let reason):
+            record(.passthrough(reason: reason), opts, io)
+            return 0
         default: break
         }
 
         let redactor: Redactor?
-        do { redactor = try makeRedactor(opts) }
+        do { redactor = try makeRedactor(opts, io) }
         catch { io.err("cheapshot: \(error)\n"); return 2 }
 
         switch opts.command {
-        case .help, .version, .ledger, .allow: preconditionFailure("handled above")
+        case .help, .version, .ledger, .allow, .notePassthrough: preconditionFailure("handled above")
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
         case .video(let path): return await runVideo(opts, path: path, redactor: redactor, io: io)
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)
@@ -55,10 +58,29 @@ public enum CLI {
 
     // MARK: - Setup
 
-    static func makeRedactor(_ opts: Options) throws -> Redactor? {
+    /// Which rules file applies, first match wins: --rules, then $CHEAPSHOT_RULES, then rules.json
+    /// next to the ledger when it exists. Before #290 item 4 only --rules worked, so the Read hook
+    /// and the MCP server (which never pass --rules) ran built-in rules only. `named` is true for
+    /// the first two: a file someone named on purpose that is missing or bad is an error (exit 2).
+    static func rulesURL(_ opts: Options, _ io: CLIIO) -> (url: URL, named: Bool)? {
+        if let p = opts.rulesPath { return (URL(fileURLWithPath: p), true) }
+        if let p = io.environment["CHEAPSHOT_RULES"], !p.isEmpty { return (URL(fileURLWithPath: p), true) }
+        let fallback = Ledger.resolveURL(environment: io.environment, home: io.home)
+            .deletingLastPathComponent().appendingPathComponent("rules.json")
+        return FileManager.default.fileExists(atPath: fallback.path) ? (fallback, false) : nil
+    }
+
+    static func makeRedactor(_ opts: Options, _ io: CLIIO) throws -> Redactor? {
         guard opts.redact else { return nil }
-        guard let path = opts.rulesPath else { return Redactor() }
-        return Redactor(customRules: try RuleFile.load(URL(fileURLWithPath: path)))
+        guard let rules = rulesURL(opts, io) else { return Redactor() }
+        do {
+            return Redactor(customRules: try RuleFile.load(rules.url))
+        } catch where !rules.named {
+            // The default file broke (a typo, or the app mid-write). Keep the built-in redaction
+            // rather than failing every run, which would send the Read hook's pixels through.
+            io.err("cheapshot: warning: ignoring \(rules.url.path): \(error); using built-in rules only\n")
+            return Redactor()
+        }
     }
 
     static func apply(_ redactor: Redactor?, _ text: String) -> (text: String, report: RedactionReport) {
@@ -118,6 +140,8 @@ public enum CLI {
 
     static func record(_ entry: LedgerEntry, _ opts: Options, _ io: CLIIO) {
         guard !opts.noLedger else { return }
+        var entry = entry
+        if !opts.redact { entry.raw = true }   // #290 item 4: a raw run is visible in the ledger
         do { try ledger(io).append(entry) } catch { io.err("cheapshot: ledger not written: \(error)\n") }
     }
 
@@ -144,7 +168,8 @@ public enum CLI {
             if json {
                 var o: [String: Any] = ["days": s.days, "runs": s.runs, "inputs": s.inputs, "image_tokens": s.imageTokens,
                                         "text_tokens": s.textTokens, "saved": s.saved, "redactions": s.redactions,
-                                        "percent": s.percent, "path": l.url.path]
+                                        "percent": s.percent, "path": l.url.path,
+                                        "raw_runs": s.rawRuns, "passthroughs": s.passthroughs]
                 if let days = days { o["window_days"] = days }
                 if byMode {
                     o["modes"] = try l.summaryByMode(days: days).map { m in
@@ -177,6 +202,13 @@ public enum CLI {
     }
 
     static func runAllow(path: String, io: CLIIO) -> Int32 {
+        // #290 item 3: allow is a person's decision. An agent's shell tool has no terminal on stdin,
+        // so a model steered by text it read cannot approve its own raw access this way. Not a hard
+        // wall: anything running as the user can still fake a terminal (script(1)) or write the file.
+        guard io.isInteractive else {
+            io.err("cheapshot: allow must be run by a person in a terminal (needs a foreground terminal on stdin and stdout)\n")
+            return 2
+        }
         let cwd = FileManager.default.currentDirectoryPath
         let absolute = ((path.hasPrefix("/") ? path : cwd + "/" + path) as NSString).standardizingPath
         let expiry = Int(Date().timeIntervalSince1970) + allowSeconds

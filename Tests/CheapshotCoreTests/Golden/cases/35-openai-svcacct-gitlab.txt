@@ -1,0 +1,2 @@
+OPENAI_API_KEY=sk-svc⟦⟧acct-Abc123Def456Ghi⟦⟧789Jkl012Mno345Pqr678
+gitlab glp⟦⟧at-xY9zW8vU7tS6rQ5pO4nM

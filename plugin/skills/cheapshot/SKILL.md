@@ -33,24 +33,39 @@ cheapshot --text notes.txt          # redact text with no OCR ("-" reads stdin)
 cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
-cheapshot allow /abs/path/shot.png  # let the next Read of that path see the pixels
+cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels
 ```
 
 The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot report.pdf`
 reads every page.
 
+Settings the user controls (never set or unset them yourself):
+
+| Variable | Effect |
+|---|---|
+| `CHEAPSHOT_PASSTHROUGH=1` | The Read hook steps aside for the session. |
+| `CHEAPSHOT_STRICT=1` | The Read hook denies the Read on any failure (missing binary or `jq`, a binary error, a PDF over 20 pages with no range) instead of passing the pixels through. |
+| `CHEAPSHOT_ALLOW_RAW=1` | The MCP tools accept `raw: true` (cheapshot-mcp 0.1.3 or later). |
+| `CHEAPSHOT_RULES=<file>` | Extra redaction rules for runs without `--rules` (the hook, the MCP server); else `rules.json` next to the ledger. A broken named file denies the Read; a broken default file is skipped with a warning. Needs cheapshot 0.6.0. |
+
 ## Rules
 
 1. When the user points at a screenshot, PDF, or recording, work from cheapshot's text. Read
    the image itself only when the question is about layout, colour, or something visual.
-2. If the hook denied a Read and you really need the pixels, run `cheapshot allow <path>` from
-   Bash, then Read the same path again. The allowance lasts five minutes and is used once.
+2. If the hook denied a Read and you really need the pixels, ask the user. They run
+   `cheapshot allow <path>` in a terminal (it refuses to run without a foreground terminal), then
+   you Read the same path again. The allowance lasts five minutes and is used once. The MCP
+   tools' `raw` argument is refused unless the user set `CHEAPSHOT_ALLOW_RAW=1`. These stop
+   cheapshot offering you the bypass; they are not a sandbox, and routing around them (faking
+   a terminal, writing the allow file) is exactly what the user said no to. Do not.
 3. Never retype a macOS screenshot path. Apple puts U+202F (narrow no-break space) before AM/PM
    in every timestamp it formats; it looks like a space and is not one. Glob the folder, or use
    `--newest`.
-4. Redaction is on by default: emails, cards, SSNs, phones, IPs, bank account and routing
-   numbers, AWS, GitHub, OpenAI, and Slack keys, JWTs, bearer tokens, PEM headers, and opaque
-   long tokens become `[LABEL]`. Use `--raw` only when the frame is known-safe and the literal
+4. Redaction is on by default: emails, cards, IBANs, SSNs, phones, IPs, bank account and
+   routing numbers, provider keys (AWS, GitHub, GitLab, Anthropic, OpenAI, Stripe, Slack,
+   Google, Azure, npm, PyPI, Hugging Face, Tailscale, 1Password, Vault), webhook URLs, the value
+   after `password=` or `api_key:`, credentials in URLs, Basic and Bearer auth, JWTs, PEM
+   headers, product keys, and opaque long tokens become `[LABEL]`. Use `--raw` only when the frame is known-safe and the literal
    text matters.
 5. Quote the lines you rely on. OCR reads UI text cleanly but garbles stylised text and long
    random strings (`0` to `Ø`, `l` to `I`); check anything odd against the image, do not guess.
