@@ -1,0 +1,162 @@
+name: Claude PR Second Review
+
+# One follow-up review per pull request, on the first push that lands after
+# the first review (claude-review.yml) has finished. It checks whether the
+# first review's comments were addressed and whether the fixes broke anything.
+#
+# Why a separate file: claude-review.yml runs once, when a PR is opened, and
+# does not listen for pushes, so fixes made in response to it were never
+# looked at. Added 2026-11-13 (Ryan: "add second review").
+#
+# Why it cannot loop: the gate step below posts a marker comment before the
+# review starts and skips whenever that marker is already on the PR. A push
+# made in response to the second review therefore starts nothing. The
+# concurrency group makes the gates for one PR run one at a time, so two
+# pushes a few seconds apart cannot both read "no marker" and both proceed.
+#
+# If the review posts nothing, the last step rewrites the marker comment into
+# a note without the marker, so the next push tries again. That covers a
+# failed run, and also a run the action skips while reporting success: it
+# refuses to run on a PR that adds or edits this workflow file, because the
+# file differs from the default branch (seen on the PRs that introduced it).
+
+on:
+  pull_request:
+    types: [synchronize]
+
+jobs:
+  second-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    # Runs for the same PR queue up; a review already in progress is never
+    # cancelled. The run that waited then finds the marker and skips.
+    concurrency:
+      group: claude-second-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+      actions: read # the gate reads claude-review.yml's runs
+    steps:
+      - name: Decide whether a second review is due
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Every top-level comment on the PR, as one JSON array, kept in a
+          # file: passing JSON through echo can corrupt its escapes.
+          comments="$RUNNER_TEMP/pr-comments.json"
+          gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp | jq 'add // []' > "$comments"
+
+          # 1. Already done once on this PR: stop.
+          if jq -e 'any(.[]; .body | contains("<!-- claude-second-review -->"))' "$comments" > /dev/null; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "A second review has already run on this PR."
+            exit 0
+          fi
+
+          # 2. No finished first review yet: a push before or during the first
+          #    review is not a response to it, so it does not use up the one
+          #    second review. Read from claude-review.yml's own runs on this
+          #    branch, not from comment text: the @claude workflow posts as
+          #    the same bot with the same wording. A run that ended in
+          #    failure counts, because the bot can error after posting its
+          #    comments; a skipped run (a draft) does not.
+          finished=$(gh api -X GET "repos/$REPO/actions/workflows/claude-review.yml/runs" \
+            -f event=pull_request -f branch="$HEAD_REF" -f status=completed -f per_page=50 \
+            --jq '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure")] | length')
+          if [ "${finished:-0}" -eq 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "The first review has not finished on this PR."
+            exit 0
+          fi
+
+          # 3. Due. Leave the marker first, so a second push that arrives while
+          #    this review is running is skipped by check 1.
+          marker_id=$(gh api "repos/$REPO/issues/$PR/comments" \
+            -f body="<!-- claude-second-review -->
+          Second review started for \`${SHA:0:9}\`. One follow-up review runs per pull request; later pushes are not reviewed." \
+            --jq '"\(.id) \(.created_at)"')
+          echo "marker_id=${marker_id%% *}" >> "$GITHUB_OUTPUT"
+          echo "marker_at=${marker_id##* }" >> "$GITHUB_OUTPUT"
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Review the fixes
+        if: steps.gate.outputs.run == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            About this repo: cheapshot is a macOS Swift CLI (Sources/, Tests/,
+            Package.swift, Makefile), a TypeScript MCP server (mcp/), a Claude Code
+            plugin with a POSIX sh hook and status line, and an Astro site (site/).
+            Its job is to read text out of images and redact secrets and personal
+            data before that text reaches a model, so treat any change under
+            Sources/CheapshotCore/Redaction/, the golden cases in
+            Tests/CheapshotCoreTests/Golden/, plugin/hooks/, plugin/scripts/,
+            or the MCP tool handlers in mcp/ as security-sensitive. Flag
+            anything that could let unredacted text through:
+            a weakened or reordered rule, a regex that no longer matches its golden
+            case, a raw or bypass path that skips redaction, logging of raw OCR text,
+            or a shell hook that breaks under plain sh or mishandles quoting.
+            Hooks and scripts must stay POSIX sh, not bash.
+
+            This is the second and final review of this pull request. A
+            first review already ran and its comments are on the PR. Commits
+            pushed since then are meant to address them.
+
+            Read the first review's comments and the current diff. For each
+            earlier comment, say whether it is resolved, partly resolved or
+            still open. Then report any correctness bug, security problem or
+            broken behavior that the new commits introduced. Do not repeat
+            points that are resolved, and do not raise style remarks unless
+            they hide a bug. Lead with the weakest point. Use inline
+            comments for specific lines and one top-level comment for the
+            verdict, headed "Second review". Plain prose, no em dashes.
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 20
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      # Did the review leave anything on the PR? Counts what the bot wrote or
+      # updated after the marker went up: top-level comments, and reviews
+      # (which carry its inline comments). Nothing means the review failed or
+      # was skipped, so it should not count as the PR's one second review and
+      # should not look like one that finished. Rewriting the comment removes
+      # the marker, so the next push passes the gate again.
+      - name: Release the marker if the review posted nothing
+        if: always() && steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          MARKER_ID: ${{ steps.gate.outputs.marker_id }}
+          MARKER_AT: ${{ steps.gate.outputs.marker_at }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          is_bot='(.user.type == "Bot") and (.user.login | startswith("claude"))'
+          comments=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
+            | jq --arg t "$MARKER_AT" "[add[]? | select($is_bot and (.updated_at > \$t))] | length")
+          reviews=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate --slurp \
+            | jq --arg t "$MARKER_AT" "[add[]? | select($is_bot and ((.submitted_at // \"\") > \$t))] | length")
+          echo "Bot comments since the marker: $comments. Bot reviews since the marker: $reviews."
+          if [ "$((comments + reviews))" -eq 0 ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$MARKER_ID" \
+              -f body="Second review did not run for \`${SHA:0:9}\`: it failed, or the action skipped it. The next push to this pull request will start it again."
+            echo "Marker released."
+          fi
