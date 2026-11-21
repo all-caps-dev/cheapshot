@@ -5,8 +5,8 @@ name: Claude PR Second Review
 # first review's comments were addressed and whether the fixes broke anything.
 #
 # Why a separate file: claude-review.yml runs once, when a PR is opened, and
-# does not listen for pushes, so fixes made in response to it were never
-# looked at. Added 2026-11-13 (Ryan: "add second review").
+# does not listen for pushes, so fixes made in response to it would never be
+# looked at.
 #
 # Why it cannot loop: the gate step below posts a marker comment before the
 # review starts and skips whenever that marker is already on the PR. A push
@@ -18,7 +18,10 @@ name: Claude PR Second Review
 # a note without the marker, so the next push tries again. That covers a
 # failed run, and also a run the action skips while reporting success: it
 # refuses to run on a PR that adds or edits this workflow file, because the
-# file differs from the default branch (seen on the PRs that introduced it).
+# file differs from the default branch (expected on the PR that adds it).
+#
+# Pull requests from forks are skipped: they get no secrets and a read-only
+# token, so neither the review nor the marker could work.
 
 on:
   pull_request:
@@ -26,10 +29,14 @@ on:
 
 jobs:
   second-review:
-    if: github.event.pull_request.draft == false
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    # Runs for the same PR queue up; a review already in progress is never
-    # cancelled. The run that waited then finds the marker and skips.
+    # One gate at a time per PR; a review already in progress is never
+    # cancelled. GitHub keeps only one pending run per group: a newer pending
+    # run cancels an older pending one, which then shows as a cancelled
+    # check. The run that waited finds the marker and skips.
     concurrency:
       group: claude-second-review-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -41,6 +48,9 @@ jobs:
     steps:
       - name: Decide whether a second review is due
         id: gate
+        # bash -eo pipefail: a failed gh call fails the step instead of
+        # handing jq empty input that reads as "no marker" or zero.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -53,8 +63,10 @@ jobs:
           comments="$RUNNER_TEMP/pr-comments.json"
           gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp | jq 'add // []' > "$comments"
 
-          # 1. Already done once on this PR: stop.
-          if jq -e 'any(.[]; .body | contains("<!-- claude-second-review -->"))' "$comments" > /dev/null; then
+          # 1. Already done once on this PR: stop. Only the marker this gate
+          #    posts counts, so quoting the marker text in a comment cannot
+          #    switch the second review off.
+          if jq -e 'any(.[]; .user.login == "github-actions[bot]" and (.body | contains("<!-- claude-second-review -->")))' "$comments" > /dev/null; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "A second review has already run on this PR."
             exit 0
@@ -62,21 +74,43 @@ jobs:
 
           # 2. No finished first review yet: a push before or during the first
           #    review is not a response to it, so it does not use up the one
-          #    second review. Read from claude-review.yml's own runs on this
-          #    branch, not from comment text: the @claude workflow posts as
-          #    the same bot with the same wording. A run that ended in
-          #    failure counts, because the bot can error after posting its
+          #    second review. Read from claude-review.yml's own runs, kept
+          #    only when they belong to this PR (by PR number, or by a head
+          #    commit that is one of this PR's commits), so an older PR from
+          #    a branch with the same name does not count. A run that ended
+          #    in failure counts, because the bot can error after posting its
           #    comments; a skipped run (a draft) does not.
+          shas=$(gh api "repos/$REPO/pulls/$PR/commits" --paginate --jq '.[].sha' | jq -R . | jq -s -c .)
           finished=$(gh api -X GET "repos/$REPO/actions/workflows/claude-review.yml/runs" \
-            -f event=pull_request -f branch="$HEAD_REF" -f status=completed -f per_page=50 \
-            --jq '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure")] | length')
-          if [ "${finished:-0}" -eq 0 ]; then
+            -f event=pull_request -f branch="$HEAD_REF" -f status=completed -f per_page=100 \
+            | jq --argjson pr "$PR" --argjson shas "$shas" \
+              '[.workflow_runs[]
+                | select(.conclusion == "success" or .conclusion == "failure")
+                | select(any(.pull_requests[]?; .number == $pr) or (.head_sha as $s | $shas | index($s)))]
+               | length')
+          if [ "$finished" -eq 0 ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "The first review has not finished on this PR."
             exit 0
           fi
 
-          # 3. Due. Leave the marker first, so a second push that arrives while
+          # 3. A finished run is not enough: it may have failed before
+          #    posting, or been skipped while reporting success. Require
+          #    output from the bot already on the PR: a review (which carries
+          #    its inline comments), or a top-level comment that is not the
+          #    action's own progress or error note.
+          is_bot='(.user.type == "Bot") and (.user.login | startswith("claude"))'
+          first_comments=$(jq "[.[] | select($is_bot)
+            | select(.body | test(\"Claude Code is working|Claude encountered an error\") | not)] | length" "$comments")
+          first_reviews=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate --slurp \
+            | jq "[add[]? | select($is_bot)] | length")
+          if [ "$((first_comments + first_reviews))" -eq 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "The first review finished but left nothing on this PR."
+            exit 0
+          fi
+
+          # 4. Due. Leave the marker first, so a second push that arrives while
           #    this review is running is skipped by check 1.
           marker_id=$(gh api "repos/$REPO/issues/$PR/comments" \
             -f body="<!-- claude-second-review -->
@@ -92,12 +126,14 @@ jobs:
         with:
           fetch-depth: 1
 
+      # track_progress is off here on purpose: its progress comment would be
+      # posted even by a run that fails, and the release step below must see
+      # only real review output.
       - name: Review the fixes
         if: steps.gate.outputs.run == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -133,14 +169,17 @@ jobs:
             --max-turns 20
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
-      # Did the review leave anything on the PR? Counts what the bot wrote or
-      # updated after the marker went up: top-level comments, and reviews
-      # (which carry its inline comments). Nothing means the review failed or
-      # was skipped, so it should not count as the PR's one second review and
-      # should not look like one that finished. Rewriting the comment removes
-      # the marker, so the next push passes the gate again.
+      # Did the review leave anything on the PR? Counts what the bot wrote
+      # after the marker went up: its top-level verdict (a comment headed
+      # "Second review") and reviews (which carry its inline comments).
+      # Nothing means the review failed or was skipped, so it should not
+      # count as the PR's one second review and should not look like one
+      # that finished. Rewriting the comment removes the marker, so the next
+      # push passes the gate again. If a gh call fails, this step fails and
+      # the marker stays: a missed review, never a repeated one.
       - name: Release the marker if the review posted nothing
         if: always() && steps.gate.outputs.run == 'true'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -151,10 +190,11 @@ jobs:
         run: |
           is_bot='(.user.type == "Bot") and (.user.login | startswith("claude"))'
           comments=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --slurp \
-            | jq --arg t "$MARKER_AT" "[add[]? | select($is_bot and (.updated_at > \$t))] | length")
+            | jq --arg t "$MARKER_AT" "[add[]? | select($is_bot and (.updated_at > \$t))
+                | select(.body | test(\"^[\\\\s#*_]*Second review\"; \"i\"))] | length")
           reviews=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate --slurp \
             | jq --arg t "$MARKER_AT" "[add[]? | select($is_bot and ((.submitted_at // \"\") > \$t))] | length")
-          echo "Bot comments since the marker: $comments. Bot reviews since the marker: $reviews."
+          echo "Second review comments since the marker: $comments. Bot reviews since the marker: $reviews."
           if [ "$((comments + reviews))" -eq 0 ]; then
             gh api -X PATCH "repos/$REPO/issues/comments/$MARKER_ID" \
               -f body="Second review did not run for \`${SHA:0:9}\`: it failed, or the action skipped it. The next push to this pull request will start it again."

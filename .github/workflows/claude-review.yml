@@ -6,7 +6,11 @@ on:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    # Pull requests from forks are skipped: they get no secrets, so the
+    # review could only fail.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
