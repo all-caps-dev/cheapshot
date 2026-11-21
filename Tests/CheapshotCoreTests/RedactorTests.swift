@@ -147,6 +147,21 @@ final class RedactorTests: XCTestCase {
             "+44" + String(repeating: " 1", count: n / 2),
             String(repeating: "a.", count: n / 2) + "@",
             String(repeating: "1 ", count: n / 2),
+            // Post-merge review F3: these four were quadratic (10 to 16 s at 100,000 characters).
+            String(repeating: "eyJaaaaaaaa-", count: n / 12),
+            String(repeating: "://a:b", count: n / 6),
+            String(repeating: "x://a:bb,", count: n / 9),
+            String(repeating: "://a:b@_", count: n / 8),
+            String(repeating: "pass_", count: n / 5),
+            // Shapes for the 0.6.0 flag, header and cookie rules.
+            String(repeating: "--password x ", count: n / 13),
+            String(repeating: "sshpass -a ", count: n / 11),
+            String(repeating: "mysql -u r ", count: n / 11),
+            String(repeating: "curl -u a:b ", count: n / 12),
+            String(repeating: "Authorization: ", count: n / 15),
+            "Cookie: " + String(repeating: "a=b; ", count: n / 5),
+            "password" + String(repeating: "\t", count: n),
+            String(repeating: "password\t \t", count: n / 11),
         ]
         let redactor = Redactor()
         for shape in shapes {

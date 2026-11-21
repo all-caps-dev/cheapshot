@@ -130,6 +130,10 @@ public enum Validators {
         if (t.hasPrefix("/") || t.hasPrefix("~/")) && t.dropFirst(2).contains("/") { return false }
         if codeReferencePrefixes.contains(where: { lower.hasPrefix($0) }) { return false }
         if fullMatch(#"your[a-z0-9_\-]*"#, lower) { return false }    // your_api_key_here
+        // A dotted code path with no digit reads the secret from elsewhere: `response.data.token`.
+        if fullMatch(#"[a-z_][A-Za-z_]*(?:\.[A-Za-z_][A-Za-z_]*)+"#, t) { return false }
+        // A fraction or ratio is a count, not a PIN: `tests pass: 142/150`, `tokens: 123.4k/200k`.
+        if fullMatch(#"\d+(?:\.\d+)?[kKmM]?/\d+(?:\.\d+)?[kKmM]?"#, t) { return false }
         // A quoted value may hold spaces; words of letters only are prose ("is required").
         if t.contains(" ") && t.split(separator: " ").allSatisfy({ $0.allSatisfy(\.isLetter) }) { return false }
         if t.allSatisfy({ $0.isLetter }) { return t.count >= 10 }
@@ -151,10 +155,46 @@ public enum Validators {
     /// TOKEN is the catch-all for secrets with no recognizable prefix. Its character class
     /// contains "/" and ".", so without a gate it swallows every absolute path and screenshot
     /// filename. Measured on real input: paths and CleanShot filenames top out at 4.14 bits/char,
-    /// prefix-less secrets start at 4.66. 4.4 sits in the gap.
+    /// prefix-less secrets start at 4.66. 4.4 sits in the gap for 32 characters and up.
+    ///
+    /// Below 32 characters a fixed 4.4 is unreachable or nearly so (n characters carry at most
+    /// log2(n) bits each: 4.32 at 20), so a 24-character random secret was caught 16% of the time.
+    /// Short runs use ``looksLikeShortSecret`` instead.
     public static func looksLikeSecret(_ s: String) -> Bool {
         if s.contains("://") { return false }   // URL
         if s.hasPrefix("/")  { return false }   // absolute path
+        if s.count < 32 { return looksLikeShortSecret(s) }
         return entropy(s) >= 4.4
+    }
+
+    /// Base64 starts of image and key files. A short fragment of one in source code is data, not
+    /// a credential: PNG, GIF, WebP, SVG, and the OpenSSH public key blob.
+    private static let base64FilePrefixes = ["iVBORw0KGgo", "R0lGOD", "UklGR", "PHN2Zy", "AAAAC3NzaC1", "AAAAB3NzaC1"]
+
+    /// The 20 to 31 character gate. The bar scales with length (0.84 of the log2(n) ceiling) and
+    /// four shape checks keep code out. Calibrated with seeded random strings: about 91% of
+    /// base62, base64 and base64url secrets at every length from 20 to 31 pass (was 0% at 20,
+    /// 16% at 24), and none of a 50-item corpus of identifiers, filenames, versions and paths does.
+    /// - a digit: camelCase identifiers rarely have one, random base62 of 20 almost always does
+    /// - no ".": dotted names, filenames and versions (`com.apple.Safari.v17`, `Ubuntu-22.04`)
+    /// - no lowercase run longer than 5: words (`iPhone15ProMaxSimulator` has "imulator")
+    /// - no all-digit segment of 3+ between separators: dates and numbers (`CVE-2024-3094-x`)
+    /// - the character class (lower, upper, digit, other) changes at 40% or more of positions:
+    ///   random text changes about 62% of the time, camelCase about 20%
+    static func looksLikeShortSecret(_ s: String) -> Bool {
+        let chars = Array(s)
+        guard chars.count >= 2, chars.contains(where: \.isNumber), !chars.contains(".") else { return false }
+        if base64FilePrefixes.contains(where: { s.hasPrefix($0) }) { return false }
+        // Longest run of lowercase ASCII letters.
+        var run = 0, longest = 0
+        for c in chars { run = (c.isASCII && c.isLowercase) ? run + 1 : 0; longest = max(longest, run) }
+        if longest > 5 { return false }
+        let segments = s.split(whereSeparator: { "-_/+=".contains($0) })
+        if segments.contains(where: { $0.count >= 3 && $0.allSatisfy(\.isNumber) }) { return false }
+        // Share of adjacent pairs whose character class differs.
+        func kind(_ c: Character) -> Int { c.isLowercase ? 0 : c.isUppercase ? 1 : c.isNumber ? 2 : 3 }
+        let changes = zip(chars, chars.dropFirst()).filter { kind($0) != kind($1) }.count
+        if Double(changes) / Double(chars.count - 1) < 0.4 { return false }
+        return entropy(s) >= 0.84 * log2(Double(chars.count))
     }
 }

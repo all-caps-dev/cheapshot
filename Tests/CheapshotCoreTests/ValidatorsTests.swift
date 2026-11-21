@@ -98,4 +98,45 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertFalse(Validators.internationalPhone("+2026-11-20"))
         XCTAssertFalse(Validators.internationalPhone("+44 7911 123456 2024"))   // 16 digits
     }
+
+    /// F1 (post-merge review): 20 to 31 character secrets used to need 4.4 bits/char, which is
+    /// out of reach at 20 and rare below 32. Seeded random base62 strings, so no secret-shaped
+    /// literal sits in the source: at least 85% of each length must pass now (measured ~91%).
+    func testShortRandomSecretsPassTheScaledGate() {
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        var state: UInt64 = 0x5EED_CAFE
+        // Swift: a tiny xorshift generator, deterministic across runs and platforms.
+        func next() -> Int {
+            state ^= state << 13; state ^= state >> 7; state ^= state << 17
+            return Int(state % UInt64(alphabet.count))
+        }
+        for length in 20...31 {
+            var caught = 0
+            for _ in 0..<400 {
+                let s = String((0..<length).map { _ in alphabet[next()] })
+                if Validators.looksLikeSecret(s) { caught += 1 }
+            }
+            XCTAssertGreaterThanOrEqual(caught, 340, "length \(length): \(caught)/400")
+        }
+    }
+
+    /// The shape checks that keep code out of the short gate.
+    func testShortGateRefusesCodeShapes() {
+        for s in ["getElementsByClassName", "testUTF8Decoding2Bytes", "iPhone15ProMaxSimulator",
+                  "x86_64-apple-macOS14.0", "SHA256DigestComputer", "com.apple.Safari.v17",
+                  "Ubuntu-22.04-LTS-arm64", "k8sApiServerEndpoint3", "CVE-2024-3094-xzUtils",
+                  "HTTP2ServerConnection", "IMG_20231105_143022.jpg",
+                  "iVBORw0KGgo" + "AAAANSUhEUgAA",   // PNG header, split for secret scanners
+                  "src/components/Button2.tsx", "WKWebView.loadHTMLString2"] {
+            XCTAssertFalse(Validators.looksLikeSecret(s), s)
+        }
+    }
+
+    func testSecretValueVetoesCodePathsAndFractions() {
+        XCTAssertFalse(Validators.secretValue("response.data.token"))
+        XCTAssertFalse(Validators.secretValue("req.body.password"))
+        XCTAssertFalse(Validators.secretValue("142/150"))
+        XCTAssertFalse(Validators.secretValue("123.4k/200k"))
+        XCTAssertTrue(Validators.secretValue("my.s3cret.pass"))   // a digit: not a code path
+    }
 }

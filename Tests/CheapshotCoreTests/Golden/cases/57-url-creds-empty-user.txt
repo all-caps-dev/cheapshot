@@ -1,0 +1,4 @@
+redis://:Sup3rS⟦⟧3cret9@10.0.0.5:6379
+redis://:Sup3r$ec⟦⟧ret!9@cache.internal.test:6379/0
+amqps://:Sup3rS⟦⟧3cret9@mq:5671
+https://localhost:8080/x

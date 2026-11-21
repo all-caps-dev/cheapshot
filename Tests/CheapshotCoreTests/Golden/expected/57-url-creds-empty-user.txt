@@ -1,0 +1,4 @@
+redis://[URL_CREDS]@[IPV4]:6379
+redis://[URL_CREDS]@cache.internal.test:6379/0
+amqps://[URL_CREDS]@mq:5671
+https://localhost:8080/x

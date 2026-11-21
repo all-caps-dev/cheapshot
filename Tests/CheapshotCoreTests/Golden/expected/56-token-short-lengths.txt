@@ -1,0 +1,11 @@
+[TOKEN]
+[TOKEN]
+key [TOKEN]
+Sources/CheapshotCore/Redaction/Validators.swift
+UIApplicationDidBecomeActiveNotification
+Python-3.12.1-macOS-arm64-Darwin.tar.gz
+iPhone15ProMaxSimulator x86_64-apple-macOS14.0
+k8sApiServerEndpoint3 useEffectCleanup2Hook
+CVE-2024-3094-xzUtils Ubuntu-22.04-LTS-arm64
+SHA256DigestComputer OAuth2ClientCredentials
+iVBORw0KGgoAAAANSUhEUgAA

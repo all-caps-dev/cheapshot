@@ -1,0 +1,4 @@
+Cookie: session=[SECRET]; sid=[SECRET]; theme=dark
+Cookie: _gh_sess=[SECRET]; auth=[SECRET]
+Set-Cookie: connect.sid=[SECRET]; Path=/; HttpOnly
+Cookie: sessionid=[SECRET]

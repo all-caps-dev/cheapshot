@@ -1,0 +1,14 @@
+mysql -u root --password Sup3rS⟦⟧3cret! db
+docker login -u me -p Sup3rS⟦⟧3cret9
+curl -u admin:Sup3rS⟦⟧3cret! https://x.test/
+sshpass -p 'hunt⟦⟧er2abc' ssh x
+mysql -u root -pSup3rS⟦⟧3cret db
+password:      Sup3rS⟦⟧3cret!
+password	hunt⟦⟧er2abc
+Authorization: token 64f9572b85a8e48f⟦⟧687ab165c58ac5831be38cb8
+Authorization: 64f9572b85a8e48f⟦⟧687ab165c58ac5831be38cb8
+--password=hunt⟦⟧er2abc
+mysql -u root -p mydb
+mkdir -p some/dir && ssh -p 2222 host
+docker login --password-stdin
+deploy --token $DEPLOY_TOKEN --verbose

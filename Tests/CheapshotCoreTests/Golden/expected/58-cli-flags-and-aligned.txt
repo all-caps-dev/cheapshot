@@ -1,0 +1,14 @@
+mysql -u root --password [SECRET] db
+docker login -u me -p [SECRET]
+curl -u admin:[SECRET] https://x.test/
+sshpass -p '[SECRET]' ssh x
+mysql -u root -p[SECRET] db
+password:      [SECRET]
+password	[SECRET]
+Authorization: token [SECRET]
+Authorization: [SECRET]
+--password=[SECRET]
+mysql -u root -p mydb
+mkdir -p some/dir && ssh -p 2222 host
+docker login --password-stdin
+deploy --token $DEPLOY_TOKEN --verbose
