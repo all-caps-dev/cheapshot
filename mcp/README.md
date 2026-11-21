@@ -13,8 +13,10 @@ brew install all-caps-dev/tap/cheapshot
 Then point your host at the server:
 
 ```json
-{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp"] } } }
+{ "mcpServers": { "cheapshot": { "command": "npx", "args": ["-y", "cheapshot-mcp@0.1.2"] } } }
 ```
+
+Pin an exact version, as above. A bare `cheapshot-mcp` runs whatever is newest on npm at every launch.
 
 Claude Code users get this for free from the cheapshot plugin (`claude plugin install cheapshot@all-caps-dev`). This package is for every other host: Cursor, Cline, Codex CLI, OpenCode, pi, oh-my-pi, Claude Desktop, and anything else that speaks MCP over stdio. The [MCP page](https://all-caps.dev/cheapshot/mcp/) has the file and key for each.
 

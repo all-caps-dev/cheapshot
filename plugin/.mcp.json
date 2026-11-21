@@ -2,7 +2,7 @@
   "mcpServers": {
     "cheapshot": {
       "command": "npx",
-      "args": ["-y", "cheapshot-mcp"]
+      "args": ["-y", "cheapshot-mcp@0.1.2"]
     }
   }
 }

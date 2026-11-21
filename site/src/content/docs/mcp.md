@@ -21,7 +21,7 @@ brew install all-caps-dev/tap/cheapshot
 ```
 
 Then one entry in the host's MCP config. Every host runs the same
-`npx -y cheapshot-mcp` command; only the file and the key differ.
+`npx -y cheapshot-mcp@0.1.2` command; only the file and the key differ.
 
 ### Cursor and Claude Desktop
 
@@ -32,7 +32,7 @@ Then one entry in the host's MCP config. Every host runs the same
   "mcpServers": {
     "cheapshot": {
       "command": "npx",
-      "args": ["-y", "cheapshot-mcp"]
+      "args": ["-y", "cheapshot-mcp@0.1.2"]
     }
   }
 }
@@ -43,13 +43,13 @@ Then one entry in the host's MCP config. Every host runs the same
 The [plugin](/cheapshot/claude-code/) already carries this entry. Without the plugin:
 
 ```sh
-claude mcp add cheapshot -- npx -y cheapshot-mcp
+claude mcp add cheapshot -- npx -y cheapshot-mcp@0.1.2
 ```
 
 ### Cline
 
 ```sh
-cline mcp add cheapshot --yes -- npx -y cheapshot-mcp
+cline mcp add cheapshot --yes -- npx -y cheapshot-mcp@0.1.2
 ```
 
 Or the Configure tab in the extension. The file is the Cursor shape plus two keys:
@@ -59,7 +59,7 @@ Or the Configure tab in the extension. The file is the Cursor shape plus two key
   "mcpServers": {
     "cheapshot": {
       "command": "npx",
-      "args": ["-y", "cheapshot-mcp"],
+      "args": ["-y", "cheapshot-mcp@0.1.2"],
       "disabled": false,
       "autoApprove": []
     }
@@ -74,7 +74,7 @@ Or the Configure tab in the extension. The file is the Cursor shape plus two key
 ```toml
 [mcp_servers.cheapshot]
 command = "npx"
-args = ["-y", "cheapshot-mcp"]
+args = ["-y", "cheapshot-mcp@0.1.2"]
 ```
 
 ### OpenCode
@@ -86,7 +86,7 @@ args = ["-y", "cheapshot-mcp"]
   "mcp": {
     "cheapshot": {
       "type": "local",
-      "command": ["npx", "-y", "cheapshot-mcp"],
+      "command": ["npx", "-y", "cheapshot-mcp@0.1.2"],
       "enabled": true
     }
   }
@@ -96,7 +96,7 @@ args = ["-y", "cheapshot-mcp"]
 ### pi
 
 ```sh
-pi mcp add cheapshot -- npx -y cheapshot-mcp
+pi mcp add cheapshot -- npx -y cheapshot-mcp@0.1.2
 ```
 
 Or the Cursor shape in `~/.pi/agent/mcp.json`. pi gives MCP tools codemode

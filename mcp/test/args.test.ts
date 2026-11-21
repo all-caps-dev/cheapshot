@@ -46,3 +46,31 @@ test("ledger: by_mode adds the flag, and only when true", () => {
 test("page cap is 20", () => {
   assert.equal(PAGE_CAP, 20);
 });
+
+// Fleet #290: a paths entry that looks like a flag must never reach the binary as a flag.
+// The caller of cheapshot_ocr is the model, so ["--raw", "--text", "/etc/hosts"] would read
+// any file with redaction off.
+test("ocr: a path that starts with a dash is refused", () => {
+  assert.throws(() => ocrArgs({ paths: ["--raw", "/tmp/a.png"] }), /must not start with "-"/);
+  assert.throws(() => ocrArgs({ paths: ["--raw", "--text", "/etc/hosts"] }), /must not start with "-"/);
+  assert.throws(() => ocrArgs({ paths: ["/tmp/a.png", "-"] }), /must not start with "-"/);
+  assert.throws(() => ocrArgs({ paths: ["--rules=/tmp/x.json"] }), /must not start with "-"/);
+});
+
+// No "--" marker: binaries older than #290 reject it, and assertNotOption already keeps every
+// path from parsing as a flag.
+test("ocr: paths are sent without an end-of-options marker", () => {
+  const args = ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] });
+  assert.deepEqual(args, ["--json", "/tmp/a.png", "/tmp/b.jpg"]);
+  assert.ok(!args.includes("--"), "older binaries reject --");
+  assert.ok(!args.includes("--raw"), "redaction stays on by default");
+});
+
+test("ocr: a newest dir that starts with a dash is refused", () => {
+  assert.throws(() => ocrArgs({ newest: { dir: "--raw" } }), /must not start with "-"/);
+});
+
+test("video: a path that starts with a dash is refused", () => {
+  assert.throws(() => videoArgs({ path: "--raw" }), /must not start with "-"/);
+  assert.throws(() => videoArgs({ path: "-x.mp4" }), /must not start with "-"/);
+});

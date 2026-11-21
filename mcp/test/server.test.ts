@@ -28,6 +28,13 @@ before(() => {
   delete process.env.CHEAPSHOT_BIN;
 });
 
+// The handshake reports the package version, so a host can tell which build (and which #290 fix) runs.
+test("serverInfo.version matches package.json", async () => {
+  const c = await connected();
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(here, "..", "..", "package.json"), "utf8")) as { version: string };
+  assert.equal(c.getServerVersion()?.version, pkg.version);
+});
+
 test("lists the three tools and the ledger resource", async () => {
   const c = await connected();
   const tools = (await c.listTools()).tools.map((t) => t.name).sort();
@@ -232,5 +239,36 @@ test("cheapshot://ledger resource reports non-JSON stdout as an error object", a
     assert.equal(JSON.parse(item.text ?? "{}").error, "cheapshot printed no JSON");
   } finally {
     delete process.env.FAKE_RAW;
+  }
+});
+
+// Fleet #290: the exploit from the card. The binary must never run, so nothing is read raw.
+test("cheapshot_ocr: flag-shaped paths are an error result and the binary never runs", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_LOG = log;
+  try {
+    const c = await connected();
+    const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["--raw", "--text", "/etc/hosts"] } })) as ToolResult;
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text ?? "", /must not start with "-"/);
+    assert.equal(fs.existsSync(log), false, "the binary was called");
+  } finally {
+    delete process.env.FAKE_LOG;
+  }
+});
+
+test("cheapshot_ocr: a pdf probe sends no -- marker, so older binaries still work", async () => {
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cheapshot-mcp-")), "argv.log");
+  process.env.FAKE_PAGES = "3";
+  process.env.FAKE_LOG = log;
+  try {
+    const c = await connected();
+    await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/report.pdf"] } });
+    const calls = fs.readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(calls[0], "--json --no-ledger --pages 1-1 /tmp/report.pdf");
+    assert.equal(calls[1], "--json /tmp/report.pdf");
+  } finally {
+    delete process.env.FAKE_PAGES;
+    delete process.env.FAKE_LOG;
   }
 });
