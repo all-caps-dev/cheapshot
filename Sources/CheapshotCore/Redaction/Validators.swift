@@ -46,13 +46,35 @@ public enum Validators {
         guard let data = Data(base64Encoded: b64), let decoded = String(data: data, encoding: .utf8)
         else { return false }
         guard let colon = decoded.firstIndex(of: ":"), colon != decoded.startIndex else { return false }
-        // Printable ASCII only: random base64 that happens to decode is mostly control bytes.
-        return decoded.unicodeScalars.allSatisfy { $0.value >= 0x20 && $0.value < 0x7F }
+        // No control characters (C0, DEL, C1): random base64 that happens to decode is mostly
+        // control bytes. Any other UTF-8 is fine, so "jose:contraña" is caught.
+        return decoded.unicodeScalars.allSatisfy { v in
+            v.value >= 0x20 && v.value != 0x7F && !(0x80...0x9F).contains(v.value)
+        }
     }
 
-    /// True when the number of digits in `s` is inside `range`. Used for international phones.
+    /// True when the number of digits in `s` is inside `range`.
     public static func digitCount(_ s: String, in range: ClosedRange<Int>) -> Bool {
         range.contains(s.filter(\.isNumber).count)
+    }
+
+    /// International PHONE's veto: 8 to 15 digits, at least one separator after the "+", and
+    /// not a date ("+2026-11-20") or a thousands-grouped number ("+12.345.678"). A bare "+"
+    /// run ("+12345678") is a diff stat or a follower delta far more often than a phone.
+    public static func internationalPhone(_ s: String) -> Bool {
+        guard digitCount(s, in: 8...15) else { return false }
+        guard s.dropFirst().contains(where: { " -.()".contains($0) }) else { return false }
+        if fullMatch(#"\+\d{4}[\-./]\d{1,2}[\-./]\d{1,2}"#, s) { return false }
+        if fullMatch(#"\+\d{1,3}(?:[.,]\d{3})+"#, s) { return false }
+        return true
+    }
+
+    /// True when the whole of `s` matches `pattern`.
+    static func fullMatch(_ pattern: String, _ s: String, caseInsensitive: Bool = false) -> Bool {
+        var options: String.CompareOptions = [.regularExpression, .anchored]
+        if caseInsensitive { options.insert(.caseInsensitive) }
+        guard let r = s.range(of: pattern, options: options) else { return false }
+        return r.upperBound == s.endIndex
     }
 
     /// Values that sit after a secret keyword but are not secrets: placeholders, masks, booleans,
@@ -67,22 +89,50 @@ public enum Validators {
         "self.", "this.", "secrets.", "vars.", "inputs.", "import.meta",
     ]
 
+    /// Whole-value shapes that point at a secret instead of being one. Each is a full match,
+    /// so a real password that merely starts with "$" or "#", or holds "(", is still caught.
+    private static let referenceShapes = [
+        #"\[[A-Z0-9_]+\].*"#,                  // already replaced by a more specific rule
+        #"\$\{[^}]*\}"#,                       // ${DB_PASSWORD}
+        #"\{\{.*\}\}"#,                        // {{ secrets.TOKEN }}
+        #"\$[A-Z_][A-Z0-9_]*"#,                // $DB_PASSWORD
+        #"%[A-Z_][A-Z0-9_]*%"#,                 // %DB_PASSWORD% (Windows)
+        #"%\([A-Za-z_]\w*\)s"#,                // %(password)s (Python format)
+        #"<[^<>]+>"#,                           // <your-token>
+        #"[*\u{2022}\u{25CF}xX#.\-_]+"#,         // masks: ****, ••••, xxxx, ####
+    ]
+
+    /// `name(...)` call syntax in code: `getToken()`, `os.getenv("X")`, `getSecret(name)`. The
+    /// arguments must be empty or quoted, or the name must read as code (a ".", a "_" or a
+    /// camelCase hump), so a password such as "Hunter2(prod)" is not taken for a call.
+    static func looksLikeCall(_ t: String) -> Bool {
+        guard fullMatch(#"[A-Za-z_][\w.:]*\(.*\)"#, t), let open = t.firstIndex(of: "(") else { return false }
+        let name = t[..<open]
+        let args = t[t.index(after: open)..<t.index(before: t.endIndex)]
+        if args.isEmpty || args.first == "\"" || args.first == "'" { return true }
+        return name.contains(".") || name.contains("_") || fullMatch(#".*[a-z][A-Z].*"#, String(name))
+    }
+
     /// SECRET's veto. A keyword cue (`password=`) is strong evidence by itself, so the bar is
     /// low: at least 6 characters, and a letters-only value needs 10 so prose such as
     /// "password: forgotten" survives. gitleaks' generic-api-key uses the same idea, a keyword
     /// plus a minimum length plus a letters-only allowlist.
     public static func secretValue(_ s: String) -> Bool {
-        guard s.count >= 6 else { return false }
-        let lower = s.lowercased()
-        // Already replaced by a more specific rule, an environment or template reference, or a mask.
-        if let first = s.first, "[$<{%*#\u{2022}\u{25CF}".contains(first) { return false }
-        if Set(s).count == 1 { return false }                         // xxxxxx, ------
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard t.count >= 6 else { return false }
+        let lower = t.lowercased()
+        if Set(t).count == 1 { return false }                         // xxxxxx, ------
         if placeholderValues.contains(lower) { return false }
-        if s.contains("://") || s.hasPrefix("/") || s.hasPrefix("~/") { return false }   // URL or path
-        if s.contains("(") || s.contains(")") { return false }        // function call in code
+        if referenceShapes.contains(where: { fullMatch($0, t) }) { return false }
+        if looksLikeCall(t) { return false }
+        if t.contains("://") { return false }                         // URL
+        // A path has a second "/" (/etc/secrets, ~/.ssh/key); "/x9Kq2..." alone is a password.
+        if (t.hasPrefix("/") || t.hasPrefix("~/")) && t.dropFirst(2).contains("/") { return false }
         if codeReferencePrefixes.contains(where: { lower.hasPrefix($0) }) { return false }
-        if lower.hasPrefix("your") || lower.hasPrefix("<your") { return false }   // your_api_key_here
-        if s.allSatisfy({ $0.isLetter }) { return s.count >= 10 }
+        if fullMatch(#"your[a-z0-9_\-]*"#, lower) { return false }    // your_api_key_here
+        // A quoted value may hold spaces; words of letters only are prose ("is required").
+        if t.contains(" ") && t.split(separator: " ").allSatisfy({ $0.allSatisfy(\.isLetter) }) { return false }
+        if t.allSatisfy({ $0.isLetter }) { return t.count >= 10 }
         return true
     }
 

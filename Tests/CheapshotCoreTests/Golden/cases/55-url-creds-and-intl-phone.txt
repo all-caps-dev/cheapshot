@@ -1,0 +1,8 @@
+postgres://app:ab/cd⟦⟧+ef@db.internal:5432/app
+redis://u:p@s⟦⟧s99@cache.example.com:6379
+http://localhost:3000?next=a@b.com
+http://localhost:3000/x@b.com
+call +44 7911 123456 2024
+stat +12345678
+grouped +12.345.678
+date +2026-11-20

@@ -113,4 +113,47 @@ final class RedactorTests: XCTestCase {
     func testVersionConstant() {
         XCTAssertEqual(cheapshotVersion, "0.6.0")
     }
+
+    // Review finding 3: retryShorter takes the longest valid prefix at a separator; a rule
+    // without it still drops the whole hit.
+    func testRetryShorterKeepsLongestValidPrefix() {
+        let even: @Sendable (String) -> Bool = { $0.filter(\.isNumber).count % 2 == 0 }
+        let retry = Rule(name: "N", pattern: #"\d+(?: \d+)*"#, options: [], validator: even, retryShorter: true)
+        let plain = Rule(name: "N", pattern: #"\d+(?: \d+)*"#, options: [], validator: even)
+        XCTAssertEqual(Redactor(rules: [retry]).redact("12 34 5").text, "[N] 5")
+        XCTAssertEqual(Redactor(rules: [plain]).redact("12 34 5").text, "12 34 5")
+    }
+
+    // Review findings 1 and 5 at the redactor level, on one JSON line as the API returns it.
+    func testUsageCountsSurviveOnOneLine() {
+        let line = #"{"input_tokens": 123456, "cache_creation_input_tokens": 2048000, "max_tokens": 100000}"#
+        XCTAssertEqual(Redactor().redact(line).text, line)
+    }
+
+    // Every builtin must stay linear on long input: no catastrophic backtracking. Each shape
+    // targets one rule's repeats (TOKEN, SECRET, URL_CREDS, IBAN, PHONE, EMAIL).
+    func testBuiltinsFinishFastOnHundredThousandCharacterLines() {
+        let n = 100_000
+        let shapes: [String] = [
+            String(repeating: "a", count: n),
+            String(repeating: "A", count: n),
+            String(repeating: "aB3", count: n / 3),
+            "password=" + String(repeating: "x", count: n),
+            "password=\"" + String(repeating: "a,", count: n / 2),
+            "token_count: " + String(repeating: "1", count: n),
+            "postgres://u:" + String(repeating: "a@b", count: n / 3),
+            "postgres://u:" + String(repeating: "a", count: n),
+            "BE68" + String(repeating: " 1234", count: n / 5),
+            "+44" + String(repeating: " 1", count: n / 2),
+            String(repeating: "a.", count: n / 2) + "@",
+            String(repeating: "1 ", count: n / 2),
+        ]
+        let redactor = Redactor()
+        for shape in shapes {
+            let start = Date()
+            _ = redactor.redact(shape)
+            let elapsed = Date().timeIntervalSince(start)
+            XCTAssertLessThan(elapsed, 1.0, "\(shape.prefix(16))... took \(elapsed)s")
+        }
+    }
 }
