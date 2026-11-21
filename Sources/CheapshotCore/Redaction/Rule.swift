@@ -111,8 +111,9 @@ public struct Rule: Sendable {
         // extensions: me@2x.io and me@2.5x.io are addresses. Digit-only local parts are still addresses.
         Rule(name: "EMAIL",       pattern: #"\b[A-Za-z0-9._%+\-]+@(?!\d+(?:\.\d+)?x\.(?:png|jpe?g|gif|webp|heic|tiff?)\b)[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"#),
         Rule(name: "SSN",         pattern: #"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"#, options: []),
-        // Windows and Office product keys: five groups of five from the 24-character alphabet
-        // Microsoft uses (no vowels, no 0, 1 or 5), which keeps UUID fragments and words out.
+        // Windows and Office product keys: five groups of five from the product-key alphabet
+        // (no vowels, no 0, 1 or 5; N is allowed since Windows 8), which keeps UUID fragments
+        // and words out.
         Rule(name: "PRODUCT_KEY", pattern: #"\b[BCDFGHJKMNPQRTVWXY2346789]{5}(?:-[BCDFGHJKMNPQRTVWXY2346789]{5}){4}\b"#, options: []),
         // IBAN: country, two check digits, then the BBAN in optional groups of four. The tail
         // after a space must be digits, so a currency code after the number ("... 00 USD") is
