@@ -149,8 +149,8 @@ block. The model cannot change them mid-session.
 
 | Variable | Effect |
 |---|---|
-| `CHEAPSHOT_ALLOW_RAW=1` | Lets `raw: true` through on `cheapshot_ocr` and `cheapshot_video`. Without it, `raw` is refused before the binary runs. Only the exact value `1` counts. |
-| `CHEAPSHOT_RULES=/abs/rules.json` | Extra redaction rules for every call. Without it, `rules.json` next to the ledger is used if present. A named file that is missing or broken fails the call. |
+| `CHEAPSHOT_ALLOW_RAW=1` | Lets `raw: true` through on `cheapshot_ocr` and `cheapshot_video`. Without it, `raw` is refused before the binary runs. Only the exact value `1` counts. Enforced by cheapshot-mcp 0.1.3 or later, with any binary. |
+| `CHEAPSHOT_RULES=/abs/rules.json` | Extra redaction rules for every call. Without it, `rules.json` next to the ledger is used if present. A named file that is missing or broken fails the call; a broken default file is skipped with a warning. Needs the cheapshot binary 0.6.0 or later. |
 | `CHEAPSHOT_BIN` | Path to the binary, if it is not on `PATH`. |
 
 `CHEAPSHOT_STRICT` belongs to the [Claude Code hook](/cheapshot/claude-code/#strict-mode).

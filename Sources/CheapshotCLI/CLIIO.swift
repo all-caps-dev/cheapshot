@@ -8,9 +8,12 @@ public struct CLIIO {
     public var readStdin: () -> String
     public var environment: [String: String]
     public var home: String
-    /// True when stdin is a terminal. `cheapshot allow` needs one (#290 item 3): an agent's shell
-    /// tool runs commands with no terminal, so the model cannot approve its own raw access by
-    /// running `allow`. Defaults to false so a test or embedder has to opt in on purpose.
+    /// True when stdin and stdout are both a terminal and this process is in that terminal's
+    /// foreground process group. `cheapshot allow` needs it (#290 item 3): an agent's shell tool
+    /// runs commands with no terminal, or in a background group, so `allow < /dev/tty` from the
+    /// Bash tool is refused too. A speed bump, not a sandbox: anything running as the user can
+    /// still fake a terminal (script(1)) or write the allow file. Defaults to false so a test or
+    /// embedder has to opt in on purpose.
     public var isInteractive: Bool
 
     public init(out: @escaping (String) -> Void, err: @escaping (String) -> Void,
@@ -26,6 +29,13 @@ public struct CLIIO {
               readStdin: { String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? "" },
               environment: ProcessInfo.processInfo.environment,
               home: NSHomeDirectory(),
-              isInteractive: isatty(STDIN_FILENO) == 1)
+              isInteractive: foregroundTerminal())
+    }
+
+    /// See ``isInteractive``.
+    static func foregroundTerminal() -> Bool {
+        guard isatty(STDIN_FILENO) == 1, isatty(STDOUT_FILENO) == 1 else { return false }
+        let fg = tcgetpgrp(STDIN_FILENO)
+        return fg != -1 && fg == getpgrp()
     }
 }

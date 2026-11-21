@@ -60,20 +60,27 @@ public enum CLI {
 
     /// Which rules file applies, first match wins: --rules, then $CHEAPSHOT_RULES, then rules.json
     /// next to the ledger when it exists. Before #290 item 4 only --rules worked, so the Read hook
-    /// and the MCP server (which never pass --rules) ran built-in rules only. A named file that is
-    /// missing or bad is an error (exit 2); the default file is used only if it is there.
-    static func rulesURL(_ opts: Options, _ io: CLIIO) -> URL? {
-        if let p = opts.rulesPath { return URL(fileURLWithPath: p) }
-        if let p = io.environment["CHEAPSHOT_RULES"], !p.isEmpty { return URL(fileURLWithPath: p) }
+    /// and the MCP server (which never pass --rules) ran built-in rules only. `named` is true for
+    /// the first two: a file someone named on purpose that is missing or bad is an error (exit 2).
+    static func rulesURL(_ opts: Options, _ io: CLIIO) -> (url: URL, named: Bool)? {
+        if let p = opts.rulesPath { return (URL(fileURLWithPath: p), true) }
+        if let p = io.environment["CHEAPSHOT_RULES"], !p.isEmpty { return (URL(fileURLWithPath: p), true) }
         let fallback = Ledger.resolveURL(environment: io.environment, home: io.home)
             .deletingLastPathComponent().appendingPathComponent("rules.json")
-        return FileManager.default.fileExists(atPath: fallback.path) ? fallback : nil
+        return FileManager.default.fileExists(atPath: fallback.path) ? (fallback, false) : nil
     }
 
     static func makeRedactor(_ opts: Options, _ io: CLIIO) throws -> Redactor? {
         guard opts.redact else { return nil }
-        guard let url = rulesURL(opts, io) else { return Redactor() }
-        return Redactor(customRules: try RuleFile.load(url))
+        guard let rules = rulesURL(opts, io) else { return Redactor() }
+        do {
+            return Redactor(customRules: try RuleFile.load(rules.url))
+        } catch where !rules.named {
+            // The default file broke (a typo, or the app mid-write). Keep the built-in redaction
+            // rather than failing every run, which would send the Read hook's pixels through.
+            io.err("cheapshot: warning: ignoring \(rules.url.path): \(error); using built-in rules only\n")
+            return Redactor()
+        }
     }
 
     static func apply(_ redactor: Redactor?, _ text: String) -> (text: String, report: RedactionReport) {
@@ -199,7 +206,7 @@ public enum CLI {
         // so a model steered by text it read cannot approve its own raw access this way. Not a hard
         // wall: anything running as the user can still fake a terminal (script(1)) or write the file.
         guard io.isInteractive else {
-            io.err("cheapshot: allow must be run by a person in a terminal (stdin is not a terminal)\n")
+            io.err("cheapshot: allow must be run by a person in a terminal (needs a foreground terminal on stdin and stdout)\n")
             return 2
         }
         let cwd = FileManager.default.currentDirectoryPath

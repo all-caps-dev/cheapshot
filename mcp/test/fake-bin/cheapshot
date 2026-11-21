@@ -3,12 +3,12 @@
 # Never runs OCR. Env: FAKE_PAGES (PDF page count, default 5), FAKE_EXIT (exit code, default 0),
 # FAKE_LOG (append argv here, one line per call), FAKE_RAW (print this on stdout verbatim, nothing if empty,
 # and exit 0, for malformed-output tests), FAKE_EMPTY_TEXT=1 (every result has text ""),
-# FAKE_PARTIAL=1 (one good result plus one {"file","error"} entry, exit 1). A --newest run answers
+# FAKE_PARTIAL=1 (one good result plus one {"file","error"} entry, exit 1), FAKE_STDERR (stderr line on failure). A --newest run answers
 # with the PDF result when FAKE_PAGES is set, else the image result.
 [ -n "$FAKE_LOG" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
 exit_code="${FAKE_EXIT:-0}"
 if [ "$exit_code" != "0" ]; then
-  echo "cheapshot: fake failure" >&2
+  echo "${FAKE_STDERR:-cheapshot: fake failure}" >&2
   exit "$exit_code"
 fi
 if [ -n "${FAKE_RAW+set}" ]; then

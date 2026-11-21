@@ -40,8 +40,11 @@ command to approve the pixels yourself, and every run adds a line to the
 [ledger](/cheapshot/ledger/):
 
 ```text wrap
-cheapshot: 1018 image tokens -> 37 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow /path/shot.png
+cheapshot: 1018 image tokens -> 37 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow '/path/shot.png'
 ```
+
+The path is shell-quoted, so a macOS screenshot name with spaces pastes as one
+argument.
 
 The Read goes ahead with the pixels when any of these hold. Each one except a
 missing binary or `jq` adds a zero-token `passthrough` line with its reason to
@@ -55,6 +58,10 @@ the ledger, and `cheapshot --ledger` counts them:
 - The path is on the one-shot allowlist (below).
 - The binary fails on the file. The hook says so in a system message and lets
   the pixels through rather than blocking the agent.
+- The path starts with `-`, so it would parse as a flag. The hook never hands
+  it to the binary and says so in a system message.
+- OCR finds no text in the image. There is nothing to redact, so the pixels are
+  the content.
 
 ## Strict mode
 
@@ -62,7 +69,9 @@ Set `CHEAPSHOT_STRICT=1` and every failure above (missing binary, missing `jq`,
 a binary error, unreadable output, a PDF over 20 pages with no range, a path
 that starts with `-`) denies the Read instead of passing the pixels through.
 `CHEAPSHOT_PASSTHROUGH=1` and `cheapshot allow` still work, because those are
-your decisions.
+your decisions. Strict mode still lets an image with no recognised text through:
+that is not a failure, and there is no text to redact. It is recorded in the
+ledger as a `no_text` pass-through.
 
 The plugin's MCP tools refuse `raw: true` unless `CHEAPSHOT_ALLOW_RAW=1` is set
 in the environment that starts Claude Code; see the [MCP page](/cheapshot/mcp/#environment).
@@ -72,7 +81,11 @@ in the environment that starts Claude Code; see the [MCP page](/cheapshot/mcp/#e
 The hook and the MCP server never pass `--rules`, so cheapshot looks for rules
 itself: `$CHEAPSHOT_RULES` if set, else `rules.json` next to the ledger
 (`~/Library/Application Support/cheapshot/rules.json`, or `$CHEAPSHOT_HOME`).
-A named file that is missing or broken counts as a failure.
+A file you name with `--rules` or `$CHEAPSHOT_RULES` that is missing or broken
+stops the run, and the hook denies the Read in every mode, since passing the
+pixels would skip the built-in redaction too. A broken default `rules.json` is
+skipped with a warning and the built-in rules still run. Both lookups need
+cheapshot 0.6.0 or later; older binaries read `--rules` only.
 
 ## PDFs
 
@@ -91,9 +104,10 @@ cheapshot allow /absolute/path/shot.png
 
 That appends the path to `$TMPDIR/cheapshot-allow` with a five minute expiry.
 The next Read of that exact path passes through and the entry is consumed.
-`allow` refuses to run without a terminal on stdin, so the agent cannot approve
-itself from its Bash tool. This is a speed bump, not a wall: a program running
-as you can still fake a terminal or write the file.
+`allow` (0.6.0 or later) refuses to run unless stdin and stdout are a terminal
+and it is in that terminal's foreground process group, so cheapshot stops
+offering the agent the bypass. It is not a sandbox: a model with a free Bash
+tool runs as you and can still fake a terminal (`script`) or write the file.
 
 ## Pasted images
 

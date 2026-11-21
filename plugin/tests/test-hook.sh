@@ -44,7 +44,7 @@ reason=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReaso
 [ "$code" = 0 ] && [ "$dec" = deny ] && pass "png is denied" || fail "png is denied (code=$code dec=$dec)"
 case "$reason" in *"hello world"*"key [AWS_KEY]"*) pass "reason carries the redacted text";; *) fail "reason carries the redacted text";; esac
 line='cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, ask the user to approve it.'
-user_line='cheapshot: 1018 image tokens -> 37 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow /tmp/shot.png'
+user_line="cheapshot: 1018 image tokens -> 37 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow '/tmp/shot.png'"
 case "$reason" in *"$line") pass "reason ends with the savings line";; *) fail "reason ends with the savings line: $reason";; esac
 # Fleet #290 item 3: the model is never told how to approve its own raw access.
 case "$reason" in *"cheapshot allow"*) fail "reason must not name cheapshot allow";; *) pass "reason does not name cheapshot allow";; esac
@@ -186,7 +186,9 @@ out=$(input "-dash.png" | run_hook 2>"$err"); code=$?
 dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')
 [ "$code" = 0 ] && [ -z "$dec" ] && pass "dash path passes through" || fail "dash path passes through (code=$code out=$out)"
 grep -q 'starts with "-"' "$err" && pass "dash path reported on stderr" || fail "dash path reported on stderr: $(cat "$err")"
-[ ! -s "$FAKE_LOG" ] && pass "dash path never reaches the binary" || fail "dash path never reaches the binary: $(cat "$FAKE_LOG")"
+case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *'starts with "-"'*) pass "dash path is a visible systemMessage";; *) fail "dash path systemMessage: $out";; esac
+# The binary is called once, to record the pass-through, and never with the path.
+[ "$(cat "$FAKE_LOG")" = "--note-passthrough error" ] && pass "dash path recorded, never handed to the binary" || fail "dash path binary calls: $(cat "$FAKE_LOG")"
 
 # 11. Ruling 3: the hook runs as an executable (no leading sh) from a plugin root that has a space,
 # invoked the way hooks.json may spell it: "${CLAUDE_PLUGIN_ROOT}"/hooks/cheapshot-read.sh and unquoted.
@@ -217,13 +219,20 @@ fresh
 input /tmp/shot.png | CHEAPSHOT_STRICT=1 PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null | strict_denies "missing binary"
 fresh
 # No jq on PATH (/bin has cat but no jq): strict still denies an image Read and leaves a source file alone.
+# A PATH holding only symlinks to the tools the hook needs, so no jq is reachable even where /bin
+# is /usr/bin (Ubuntu) and jq is installed there.
 nojq=$(mktemp -d "$ROOT/nojq.XXXXXX")
-o=$(input /tmp/shot.PNG | CHEAPSHOT_STRICT=1 PATH="$nojq:/bin" /bin/sh "$hook" 2>/dev/null)
+for t in cat tr date mktemp mv rm cut; do ln -s "$(command -v "$t")" "$nojq/$t"; done
+o=$(input /tmp/shot.PNG | CHEAPSHOT_STRICT=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
 case "$o" in *'"permissionDecision":"deny"'*) pass "strict: missing jq denies an image";; *) fail "strict: missing jq denies an image: $o";; esac
-o=$(input /tmp/main.swift | CHEAPSHOT_STRICT=1 PATH="$nojq:/bin" /bin/sh "$hook" 2>/dev/null)
+o=$(input /tmp/main.swift | CHEAPSHOT_STRICT=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
 [ -z "$o" ] && pass "strict: missing jq leaves a source file alone" || fail "strict: missing jq leaves a source file alone: $o"
-o=$(input /tmp/shot.png | PATH="$nojq:/bin" /bin/sh "$hook" 2>/dev/null)
+o=$(input /tmp/shot.png | PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
 [ -z "$o" ] && pass "default: missing jq still passes through" || fail "default: missing jq still passes through: $o"
+o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 CHEAPSHOT_PASSTHROUGH=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
+[ -z "$o" ] && pass "strict: missing jq still honours CHEAPSHOT_PASSTHROUGH=1" || fail "strict: missing jq ignored passthrough: $o"
+o=$(printf '%s' '{"session_id":"s1","tool_name":"Read","tool_input":{"file_path":"/tmp/a\"b.png"}}' | CHEAPSHOT_STRICT=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
+case "$o" in *'"permissionDecision":"deny"'*) pass "strict: missing jq denies a name with a quote";; *) fail "strict: missing jq, quoted name: $o";; esac
 fresh
 # The human overrides still work in strict mode.
 o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 CHEAPSHOT_PASSTHROUGH=1 run_hook 2>/dev/null)
@@ -241,6 +250,21 @@ fresh
 # A good read is unchanged by strict mode.
 dec=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason')
 case "$dec" in *"hello world"*) pass "strict: a good read still returns the text";; *) fail "strict: good read: $dec";; esac
+
+# 13. The allow command in the user's message is shell-quoted: spaces and U+202F survive a paste.
+fresh
+shot="/tmp/Screenshot 2026-11-20 at 10.00.00$(printf '\342\200\257')AM.png"
+msg=$(input "$shot" | run_hook 2>/dev/null | jq -r '.systemMessage')
+q=${msg#*cheapshot allow }
+eval "set -- $q"
+[ "$#" = 1 ] && [ "$1" = "$shot" ] && pass "allow command is shell-quoted (space, U+202F)" || fail "allow command quoting: $msg"
+
+# 14. A broken rules file named by CHEAPSHOT_RULES denies even in default mode.
+fresh
+o=$(input /tmp/shot.png | FAKE_EXIT=2 FAKE_STDERR='cheapshot: cannot read rules file /x.json: missing' run_hook 2>/dev/null)
+[ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "broken named rules file denies in default mode" || fail "broken rules: $o"
+o=$(input /tmp/shot.png | FAKE_EXIT=2 run_hook 2>/dev/null)
+[ -z "$(printf '%s' "$o" | jq -r '.hookSpecificOutput // empty')" ] && pass "other exit 2 still fails open in default mode" || fail "other exit 2: $o"
 
 echo "$fails failure(s)"
 [ "$fails" = 0 ]

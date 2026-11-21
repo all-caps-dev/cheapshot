@@ -78,7 +78,7 @@ claude plugin marketplace add all-caps-dev/cheapshot
 claude plugin install cheapshot@all-caps-dev
 ```
 
-The plugin's hook intercepts `Read` on images and PDFs and hands the agent redacted text plus one line saying what it saved. When the agent needs layout, you run `cheapshot allow <path>` in a terminal and it reads the pixels once. `CHEAPSHOT_STRICT=1` denies the Read when cheapshot fails instead of passing the pixels through. `CHEAPSHOT_PASSTHROUGH=1` turns the hook off for a session. The binary is not bundled; brew it first.
+The plugin's hook intercepts `Read` on images and PDFs and hands the agent redacted text plus one line saying what it saved. When the agent needs layout, you run `cheapshot allow <path>` in a terminal and it reads the pixels once (a speed bump that stops cheapshot offering the bypass, not a sandbox). `CHEAPSHOT_STRICT=1` denies the Read when cheapshot fails instead of passing the pixels through. `CHEAPSHOT_PASSTHROUGH=1` turns the hook off for a session. The binary is not bundled; brew it first.
 
 OCR text enters the agent's context as data. A screenshot of a web page containing "ignore previous instructions" is now text in context, the same risk as reading any file.
 

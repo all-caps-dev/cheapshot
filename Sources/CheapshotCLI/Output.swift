@@ -15,13 +15,13 @@ public enum Output {
         USAGE
           cheapshot <file.png|file.pdf> [more ...]
           cheapshot [options] -- <file> ...  everything after -- is a file, even one starting with -
-          cheapshot --newest [dir] [n]     dir must be absolute; a bare number is a count
+          cheapshot --newest [dir] [n]     a bare number is a count, not a dir (the MCP tool needs an absolute dir)
           cheapshot --cleanshot [n]
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes;
-                                           needs a terminal, so an agent cannot run it for itself)
+                                           needs a foreground terminal; a speed bump, not a sandbox)
 
         OPTIONS
           --raw             do not redact (redaction is ON by default)
@@ -30,6 +30,7 @@ public enum Output {
           --min-conf <f>    confidence floor, default 0.3
           --rules <file>    extra redaction rules, JSON [{name, pattern, caseInsensitive}]. Without
                             it: $CHEAPSHOT_RULES, else rules.json next to the ledger if present
+                            (a broken default file is skipped with a warning)
           --pages <N|N-M>   PDF page range, default all
           --force-ocr       OCR every PDF page, even one whose text layer checks out
           --scene <f>       video scene-change threshold, default 0.25

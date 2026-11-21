@@ -764,6 +764,21 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(r2.out, "[OTHER]-123456\n")
     }
 
+    /// A broken default rules.json warns and keeps the built-in rules; it never fails the run.
+    func testBrokenDefaultRulesFileFallsBackToBuiltIns() async throws {
+        let home = tmp.appendingPathComponent("home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try "not json".write(to: home.appendingPathComponent("rules.json"), atomically: true, encoding: .utf8)
+        let r = await run(["--text", "-"], stdin: "mail me at a@b.co", env: ["CHEAPSHOT_HOME": home.path])
+        XCTAssertEqual(r.code, 0)
+        XCTAssertEqual(r.out, "mail me at [EMAIL]\n")
+        XCTAssertTrue(r.err.contains("warning: ignoring"), r.err)
+        // A file named on purpose stays fatal.
+        let named = await run(["--text", "-"], stdin: "x", env: ["CHEAPSHOT_HOME": home.path,
+                                                                 "CHEAPSHOT_RULES": home.appendingPathComponent("rules.json").path])
+        XCTAssertEqual(named.code, 2)
+    }
+
     func testNamedRulesFileThatIsMissingIsAUsageError() async {
         let r = await run(["--text", "-"], stdin: "x", env: ["CHEAPSHOT_RULES": "/nonexistent-cheapshot-rules.json"])
         XCTAssertEqual(r.code, 2)
