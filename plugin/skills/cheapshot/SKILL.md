@@ -34,7 +34,7 @@ cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
 cheapshot mask shot.png             # a copy with redacted and low-confidence lines painted black, allowed for one Read
-cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels
+cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels (an image arrives as a metadata-free copy)
 ```
 
 The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot report.pdf`
@@ -60,7 +60,10 @@ Settings the user controls (never set or unset them yourself):
    is not masked, so treat the copy as layout, not as proof nothing sensitive is on screen.
    If you really need the raw pixels, ask the user. They run
    `cheapshot allow <path>` in a terminal (it refuses to run without a foreground terminal), then
-   you Read the same path again. The allowance lasts five minutes and is used once. The MCP
+   you Read the same path again. For an image, that Read returns a copy: the pixels re-encoded as
+   an 8-bit sRGB PNG, first frame only (an animated GIF or multi-page TIFF loses the rest), turned
+   upright, with no GPS position, camera make or model, capture date, IPTC or XMP. A PDF arrives
+   as the file itself. The allowance lasts five minutes and is used once. The MCP
    tools' `raw` argument is refused unless the user set `CHEAPSHOT_ALLOW_RAW=1`. These stop
    cheapshot offering you the bypass; they are not a sandbox, and routing around them (faking
    a terminal, writing the allow file) is exactly what the user said no to. Do not.
@@ -85,15 +88,60 @@ Settings the user controls (never set or unset them yourself):
 The threat model is a cooperating agent. The checks below stop accidents and casual misuse,
 not a hostile agent.
 
-- The allow entry for a masked copy carries its SHA-256, and the hook refuses a symlink or a
-  changed file. A gap remains between the hook's hash check and the Read itself; a hostile
-  agent could swap the file inside it. Planned follow-up: the hook copies the file to a fresh
-  temp name, hashes that copy, and points the Read at it (`updatedInput`), so the hashed bytes
-  are the bytes read.
+- The allow entry for a masked copy carries its SHA-256. The hook refuses a symlink, copies the
+  file into a fresh private folder (`$TMPDIR/cheapshot-read.*`, 0700), hashes that copy, and
+  points the Read at it (`updatedInput`), so the hashed bytes are the bytes read (NOV-117). A
+  hostile agent could still read the fresh copy's folder, but it holds only the masked pixels.
+- Location and device metadata never come along (NOV-117). The masked copy, and the copy
+  `cheapshot allow` makes of an image, are re-encoded PNGs with no EXIF, GPS, TIFF Make, Model
+  or Software, IPTC, XMP, MakerNote or orientation tag: ImageIO's own eXIf chunk (colour space
+  and size) is dropped too. EXIF-rotated photos (iPhone JPEG and HEIC) are turned upright first.
+- The hook intercepts png, jpg, jpeg, webp, gif, heic, heif, tif, tiff, bmp and pdf Reads, the
+  same image types `allow` strips, so a Read of an allowed HEIC is rewritten to its copy.
+- The copies are private: `$TMPDIR/cheapshot-allowed` must be a 0700 directory owned by the user
+  (`allow` refuses anything else, symlinks included) and each copy is 0600. The hook deletes an
+  allow copy as soon as its entry is used or expires, and every hook run removes its own
+  `cheapshot-read.*` copies once they are over 2 minutes old (the Read happens straight after
+  the hook).
+- `allow` of a PDF still passes the file itself, including its document metadata and any EXIF
+  inside embedded photos.
+- An older cheapshot binary writes a plain allow line for images. This hook refuses a plain
+  line for anything but a PDF, so that Read gets the normal redacted deny (fails closed).
+  Install the binary and the plugin together.
+- An older hook does not understand the new image entry. For png, jpg, jpeg, webp and gif it
+  denies the Read (fails closed), but it does not intercept heic, heif, tif, tiff or bmp at all,
+  so on an old plugin those Reads go to the raw file, metadata included.
 - Content OCR cannot read (QR codes, faces, other images) is never masked, and a secret OCR
   reads only partly can slip through. The copy is layout, not proof the screen is clean.
 - `mask` and the hook each find the allow file through their own `TMPDIR`. If the two differ,
   the Read of the copy fails closed (it is denied, never passed raw).
+
+## Who approves the Read of a copy
+
+When an allow or mask entry checks out, the hook auto-approves the Read of the fresh copy: its
+reply sets `permissionDecision: "allow"` and points the Read at the copy with `updatedInput`.
+That skips Claude Code's permission prompt and your Read rules for that one Read. It is the
+default on purpose (chosen 2026-11-24): the copy is masked or stripped pixels in a private
+`$TMPDIR` folder, and an extra prompt per Read buys little. An agent can make a mask entry
+itself with `cheapshot mask`, so a masked copy is the one Read that needs no person at all.
+
+To change it, edit `hooks/cheapshot-read.sh`, the `jq` reply under `if [ -n "$fresh" ]`:
+
+- **Always prompt (B).** Delete `permissionDecision: "allow",` and the `permissionDecisionReason`
+  line, and keep `updatedInput`. The Read then goes through the normal permission flow at the
+  copy's path. This relies on Claude Code honouring `updatedInput` with no decision, which newer
+  versions do (not checked against a version number); on an older one, use
+  `permissionDecision: "ask"` instead, which shows the prompt with the rewrite applied.
+- **Prompt for mask only (C).** The two entry kinds differ in the allow file: a `cheapshot allow`
+  entry has four fields (`<expiry> <original> <sha256> <copy>`, the copy inside
+  `$TMPDIR/cheapshot-allowed/`), and a `cheapshot mask` entry has three (`<expiry> <masked copy>
+  <sha256>`, no fourth field). In the read loop, `$copy` is set only for an allow entry, so record
+  it on a hit (for example `kind=allow` when `[ -n "$copy" ]`, else `kind=mask`), then in the
+  reply pass `--arg d "$( [ "$kind" = allow ] && echo allow || echo ask )"` and write
+  `permissionDecision: $d`.
+
+Run `sh plugin/tests/test-hook.sh` after either change; the image-allow and mask-entry cases
+assert on the decision.
 
 ## Injection note
 

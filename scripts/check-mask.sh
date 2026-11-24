@@ -3,16 +3,20 @@
 # fake token and phone number in headless Chrome at 2x, masks the screenshot with the binary given,
 # checks by pixel sampling (never by looking) that the secret lines are fully black and normal
 # lines are untouched, then runs the plugin's Read hook against the real binary: the original is
-# denied with a pointer to mask, the masked copy passes once, and a second Read is denied again.
+# denied with a pointer to mask, the masked copy is allowed once through a fresh checked copy
+# (`updatedInput`), and a second Read is denied again. NOV-117: a JPEG of the same page tagged with
+# a fake GPS position, camera, date, IPTC and XMP is masked, and exiftool must find none of it in
+# the copy.
 #
 # Usage: scripts/check-mask.sh <path to a cheapshot binary>   (default ./cheapshot)
-# Needs: Google Chrome, jq, swift. Writes only to a temp dir it removes on exit.
+# Needs: Google Chrome, jq, swift, exiftool. Writes only to a temp dir it removes on exit.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 bin=$(cd "$(dirname "${1:-./cheapshot}")" && pwd)/$(basename "${1:-./cheapshot}")
 chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 [ -x "$bin" ] || { echo "no binary at $bin"; exit 2; }
 [ -x "$chrome" ] || { echo "Google Chrome not found"; exit 2; }
+command -v exiftool >/dev/null 2>&1 || { echo "exiftool not found (brew install exiftool)"; exit 2; }
 W=$(mktemp -d)
 trap 'rm -rf "${W:?}"' EXIT
 fails=0
@@ -79,9 +83,24 @@ run_hook() { read_json "$1" | PATH="$(dirname "$bin"):$PATH" sh "$hook" 2>/dev/n
 r=$(run_hook "$W/page.png" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
 case "$r" in *"cheapshot mask "*) pass "hook denies the original and points at cheapshot mask";; *) fail "hook reason: $r";; esac
 o=$(run_hook "$masked")
-[ -z "$o" ] && pass "hook lets the masked copy through once" || fail "hook on masked copy: $o"
+f=$(printf '%s' "$o" | jq -r 'select(.hookSpecificOutput.permissionDecision == "allow") | .hookSpecificOutput.updatedInput.file_path // empty')
+[ -n "$f" ] && [ "$f" != "$masked" ] && cmp -s "$f" "$masked" && pass "hook allows the masked copy once, via a fresh copy with the same bytes" || fail "hook on masked copy: $o"
 d=$(run_hook "$masked" | jq -r '.hookSpecificOutput.permissionDecision // empty')
 [ "$d" = deny ] && pass "second Read of the masked copy is denied (one-shot)" || fail "second Read: $d"
+
+# NOV-117: location and device metadata. A JPEG of the page, tagged with fake values, then masked.
+sips -s format jpeg "$W/page.png" --out "$W/photo.jpg" >/dev/null 2>&1 || fail "sips could not make a JPEG"
+exiftool -q -overwrite_original -GPSLatitude=40.7557 -GPSLatitudeRef=N -GPSLongitude=73.8831 -GPSLongitudeRef=W \
+  -Make=FakeCamMake -Model=FakeCamModel9 -Software=FakeCamOS -DateTimeOriginal='2026:11:24 01:03:00' \
+  -IPTC:City=FakeTownIPTC -XMP-photoshop:City=FakeTownXMP "$W/photo.jpg"
+tags() { exiftool -s -s -s -a -G1 -GPS:all -Make -Model -Software -DateTimeOriginal -IPTC:all -XMP:all -MakerNotes:all "$1" 2>/dev/null; }
+[ "$(tags "$W/photo.jpg" | /usr/bin/grep -c .)" -ge 8 ] && pass "tagged JPEG carries GPS, camera, date, IPTC and XMP" || fail "tagging the JPEG failed: $(tags "$W/photo.jpg")"
+pm=$("$bin" mask --json "$W/photo.jpg" | jq -r '.masked // empty')
+[ -s "$pm" ] && pass "mask of the tagged JPEG wrote a copy" || fail "mask of the tagged JPEG failed"
+left=$(tags "$pm")
+[ -z "$left" ] && pass "exiftool finds no GPS, camera, date, IPTC, XMP or MakerNote in the masked copy" || fail "metadata in the masked copy: $left"
+chunks=$(exiftool -s -s -s -PNG:all -EXIF:all "$pm" 2>/dev/null | /usr/bin/grep -c .)
+echo "masked copy PNG/EXIF tags exiftool lists: $chunks ($(exiftool -s -PNG:all -EXIF:all "$pm" 2>/dev/null | cut -d: -f1 | tr -s ' ' | tr '\n' ' '))"
 
 echo "$fails failure(s)"
 echo "rerun: sh scripts/check-mask.sh $bin"

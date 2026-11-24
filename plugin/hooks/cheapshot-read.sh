@@ -1,8 +1,10 @@
 #!/bin/sh
 # cheapshot PreToolUse hook for Read (POSIX sh). Input: the hook JSON on stdin. Output: nothing
 # (let the Read proceed), a {"systemMessage": ...} hint with no decision (still proceeds), or a
-# deny decision whose reason is the redacted text plus one savings line. The savings line also
-# goes out as a top-level systemMessage, since stderr on exit 0 is not shown to the user.
+# deny decision whose reason is the redacted text plus one savings line, or (for a one-shot allow
+# entry with a hash) an allow decision with `updatedInput` pointing the Read at a checked copy.
+# The savings line also goes out as a top-level systemMessage, since stderr on exit 0 is not
+# shown to the user.
 #
 # Every exit is 0. By default a failure lets the Read through (fail open) and says so in a
 # systemMessage. With CHEAPSHOT_STRICT=1 a failure denies the Read instead (fail closed), so
@@ -27,7 +29,7 @@ if ! command -v jq >/dev/null 2>&1; then
   [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ] && exit 0
   # The path pattern allows JSON escapes (\" and friends), so a quote in a file name cannot
   # end the match early and slip past the deny.
-  if [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|pdf)"'; then
+  if [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|heic|heif|tiff?|bmp|pdf)"'; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this image was not read (CHEAPSHOT_STRICT=1). Tell the user."},"systemMessage":"cheapshot: jq is missing; strict mode denied an image Read. Install it: brew install jq"}'
   fi
   exit 0
@@ -36,9 +38,13 @@ fi
 path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -n "$path" ] || exit 0
 ext=$(printf '%s' "${path##*.}" | tr 'A-Z' 'a-z')
-case "$ext" in png|jpg|jpeg|webp|gif|pdf) ;; *) exit 0 ;; esac
+# The same image types `cheapshot allow` strips (NOV-117), so an allowed HEIC is rewritten too.
+case "$ext" in png|jpg|jpeg|webp|gif|heic|heif|tif|tiff|bmp|pdf) ;; *) exit 0 ;; esac
 
 tmp="${TMPDIR:-/tmp}"
+# Fresh copies made for an earlier Read (below) are needed only until that Read ran, which is
+# straight after the hook: every run removes ones over 2 minutes old. Only our own folder names.
+find "$tmp" -maxdepth 1 -type d -name 'cheapshot-read.*' -mmin +2 -exec rm -rf {} + 2>/dev/null
 sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"' | tr -c 'A-Za-z0-9._\n-' '_')
 
 # A hint that lets the Read proceed: one line on stderr, the same text as systemMessage on stdout.
@@ -115,11 +121,22 @@ if ! command -v cheapshot >/dev/null 2>&1; then
   exit 0
 fi
 
-# One-shot allowlist written by `cheapshot allow <path>`: "<expiry epoch>\t<path>" per line, or
-# "<expiry>\t<path>\t<sha256>" when `cheapshot mask` wrote it for its masked copy.
+# One-shot allowlist written by `cheapshot allow <path>` and `cheapshot mask`, one entry per line:
+#   "<expiry epoch>\t<path>"                    allow of a PDF (or an older binary): the file itself
+#   "<expiry>\t<path>\t<sha256>"                 mask: <path> is the masked copy, <sha256> its hash
+#   "<expiry>\t<path>\t<sha256>\t<copy>"         allow of an image (NOV-117): <copy> is a stripped
+#                                               copy (pixels only, no GPS, camera or date metadata)
+#                                               and <sha256> is the copy's hash
 # Expired lines are dropped; the first live match for this path is consumed. `cheapshot allow`
 # standardises paths, which strips a leading /private, while Read may pass /private/tmp/...,
-# so an entry also matches the path with that prefix removed.
+# so an entry also matches the path with that prefix removed. A Read of the copy itself matches
+# its entry too (a HEIC the hook does not intercept: the person can hand the agent the copy path).
+#
+# A hashed entry (mask or image allow) is never read in place. The hook copies the source to a
+# fresh private folder, hashes that copy, and on a match rewrites the Read to it with
+# `updatedInput` (Claude Code PreToolUse: it replaces the whole tool_input, so every other field
+# is kept). The hashed bytes are then the bytes read, which closes the gap between check and Read
+# that NOV-95's Known limits named, and an image allow shows the stripped copy, never the original.
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
   alt="$path"
@@ -127,27 +144,70 @@ if [ -f "$allow" ]; then
   now=$(date +%s)
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
+  fresh=""
+  stale=0
   tab=$(printf '\t')
-  while IFS="$tab" read -r exp p sum || [ -n "$exp" ]; do
-    [ "$exp" -ge "$now" ] 2>/dev/null || continue
-    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ]; }; then
-      # A third field (written by `cheapshot mask`) is the SHA-256 of the masked copy. Honour
-      # it only while the file is a regular file, not a symlink, with that same hash, so a
-      # file swapped in after `mask` does not pass as the masked copy (PR #18 review). Either
-      # way the entry is used up: a tampered entry falls through to normal handling.
+  # Delete an allow copy whose entry is used up or expired. Only a file inside our own
+  # cheapshot-allowed folder, so a forged entry cannot point this at anything else.
+  drop_copy() {
+    case "$1" in "${tmp%/}"/cheapshot-allowed/*|/private"${tmp%/}"/cheapshot-allowed/*)
+      case "$1" in */../*) ;; *) [ -f "$1" ] && [ ! -L "$1" ] && rm -f "$1" ;; esac ;;
+    esac
+  }
+  while IFS="$tab" read -r exp p sum copy || [ -n "$exp" ]; do
+    if ! [ "$exp" -ge "$now" ] 2>/dev/null; then
+      [ -n "$copy" ] && drop_copy "$copy"
+      continue
+    fi
+    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ] || { [ -n "$copy" ] && { [ "$copy" = "$path" ] || [ "$copy" = "$alt" ]; }; }; }; then
+      # Either way the entry is used up: a tampered entry falls through to normal handling.
       if [ -n "$sum" ]; then
-        got=""
-        if [ -f "$path" ] && [ ! -L "$path" ]; then got=$(shasum -a 256 "$path" 2>/dev/null | cut -d' ' -f1); fi
-        [ "$got" = "$sum" ] && hit=1
+        src="${copy:-$path}"
+        # Only a regular file, not a symlink (PR #18 review). cp could still race a swap, but
+        # the hash below is taken of the fresh copy, which is what the Read will see.
+        if [ -f "$src" ] && [ ! -L "$src" ] && rd=$(mktemp -d "$tmp/cheapshot-read.XXXXXX"); then
+          f="$rd/$(basename "$src")"
+          if cp "$src" "$f" 2>/dev/null && chmod 600 "$f" && [ "$(shasum -a 256 "$f" 2>/dev/null | cut -d' ' -f1)" = "$sum" ]; then
+            hit=1; fresh="$f"
+          else
+            rm -rf "${rd:?}"
+          fi
+        fi
+        # The allow copy has done its job (or was tampered with): the fresh copy is what is read.
+        [ -n "$copy" ] && drop_copy "$copy"
         continue
       fi
-      hit=1; continue
+      # A plain (hashless) entry is honoured for a PDF only. The current binary always writes a
+      # hashed entry for an image, so a plain image line is from an older binary or hand-made,
+      # and would pass the original with its GPS and camera metadata (PR #19 review). Used up
+      # either way; an image falls through to the normal redacted deny.
+      if [ "$ext" = pdf ]; then hit=1; else stale=1; fi
+      continue
     fi
-    if [ -n "$sum" ]; then printf '%s\t%s\t%s\n' "$exp" "$p" "$sum" >> "$keep"; else printf '%s\t%s\n' "$exp" "$p" >> "$keep"; fi
+    line="$exp$tab$p"
+    [ -n "$sum" ] && line="$line$tab$sum"
+    [ -n "$copy" ] && line="$line$tab$copy"
+    printf '%s\n' "$line" >> "$keep"
   done < "$allow"
   mv "$keep" "$allow"
   if [ "$hit" = 1 ]; then
-    note allow
+    [ -z "$fresh" ] && note allow
+    if [ -n "$fresh" ]; then
+      m="cheapshot: showing the agent a checked copy of $path (pixels only, no location or camera metadata)."
+      # If jq fails here, an empty reply would send the Read to the original, unstripped path.
+      # Deny instead, with a reply built without jq (PR #19 review).
+      if ! printf '%s' "$input" | jq --arg f "$fresh" --arg m "$m" \
+        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow",
+          permissionDecisionReason: "cheapshot: allowed once by the user or by cheapshot mask",
+          updatedInput: (.tool_input | .file_path = $f)}, systemMessage: $m}'; then
+        echo "cheapshot: could not hand over the checked copy; denied the Read instead of passing the original." >&2
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot could not hand over the checked copy, so the Read was denied. Tell the user; do not retry another way."},"systemMessage":"cheapshot: could not hand over the checked copy, so the Read was denied instead of passing the original."}'
+      else
+        # Log and announce only once the allow reply was actually sent (PR #19 second review).
+        echo "$m" >&2
+        note allow
+      fi
+    fi
     exit 0
   fi
 fi
@@ -203,6 +263,9 @@ else
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the layout, run in Bash: cheapshot mask $qpath, then Read the path it prints after \"masked: \" (a copy with redacted and low-confidence lines blacked out). The raw pixels still need the user's approval."
 fi
 user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the pixels, run in a terminal: cheapshot allow $qpath"
+# A plain allow line for an image was refused above: it came from an older binary, so another
+# `cheapshot allow` from that binary would loop. Say so (PR #19 second review).
+[ "${stale:-0}" = 1 ] && user_line="$user_line (The allow entry for this file came from an older cheapshot binary and was not honoured; update cheapshot, then run allow again.)"
 echo "$user_line" >&2
 jq -n --arg text "$text" --arg line "$model_line" --arg m "$user_line" \
   '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: ($text + "\n\n" + $line)}, systemMessage: $m}'

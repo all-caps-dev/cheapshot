@@ -203,6 +203,10 @@ public enum CLI {
         return URL(fileURLWithPath: tmp).appendingPathComponent("cheapshot-allow")
     }
 
+    /// Image types `allow` re-encodes into a metadata-free copy (NOV-117). Anything else (a PDF)
+    /// is allowed as the file itself, as before.
+    static let strippedExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "tif", "tiff", "bmp"]
+
     static func runAllow(path: String, io: CLIIO) -> Int32 {
         // #290 item 3: allow is a person's decision. An agent's shell tool has no terminal on stdin,
         // so a model steered by text it read cannot approve its own raw access this way. Not a hard
@@ -211,9 +215,83 @@ public enum CLI {
             io.err("cheapshot: allow must be run by a person in a terminal (needs a foreground terminal on stdin and stdout)\n")
             return 2
         }
-        guard let absolute = writeAllowEntry(path, io) else { return 1 }
+        guard strippedExtensions.contains((path as NSString).pathExtension.lowercased()) else {
+            guard let absolute = writeAllowEntry(path, io) else { return 1 }
+            io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
+            return 0
+        }
+        // NOV-117: an image the person approves still must not carry its GPS position, camera
+        // make and model or capture time to the model. Write the pixels (upright, re-encoded as
+        // PNG, no metadata) to a scratch copy and allow the original path with that copy and its
+        // SHA-256. The hook then points the Read at a fresh copy of the copy (`updatedInput`),
+        // so the agent asks for the original and gets the stripped pixels. If the copy cannot be
+        // made, nothing is allowed: never fall back to the raw file.
+        let stripped: (data: Data, width: Int, height: Int, frames: Int)
+        do { stripped = try Masker.strippedPNG(path: absolutePath(path)) }
+        catch { io.err("cheapshot: allow: \(error); nothing was allowed\n"); return 1 }
+        let dest = scratchURL(for: path, folder: "cheapshot-allowed", tag: "allowed", io)
+        let dir = dest.deletingLastPathComponent()
+        // The copy is the person's unredacted pixels: a private folder, a 0600 file, and stale
+        // copies from earlier allows (used, or never used and expired) are swept first. The
+        // hook also deletes a copy as soon as its entry is used or expires.
+        if let why = ensurePrivateDir(dir) { io.err("cheapshot: allow: \(why); nothing was allowed\n"); return 1 }
+        sweepStale(in: dir, olderThan: TimeInterval(allowSeconds + 60))
+        if let why = writePrivateFile(stripped.data, to: dest) {
+            io.err("cheapshot: allow: cannot write \(dest.path): \(why); nothing was allowed\n"); return 1
+        }
+        let digest = SHA256.hash(data: stripped.data).map { String(format: "%02x", $0) }.joined()
+        guard let absolute = writeAllowEntry(path, io, sha256: digest, copy: dest.path) else {
+            try? FileManager.default.removeItem(at: dest)
+            return 1
+        }
         io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
+        let frames = stripped.frames > 1 ? ", first frame of \(stripped.frames) only" : ""
+        io.out("cheapshot: the agent sees a copy, pixels re-encoded as an 8-bit sRGB PNG (\(stripped.width)x\(stripped.height), upright\(frames), no location, camera or date metadata): \(dest.path)\n")
         return 0
+    }
+
+    /// Creates `dir` with mode 0700, or checks an existing one: it must be a real directory (not
+    /// a symlink, checked with lstat), owned by this user, mode 0700. Anything else is refused
+    /// rather than repaired, since another user or a planted link may own it. nil means ready.
+    static func ensurePrivateDir(_ dir: URL) -> String? {
+        var st = stat()
+        if lstat(dir.path, &st) != 0 {
+            guard errno == ENOENT else { return "cannot check \(dir.path): \(String(cString: strerror(errno)))" }
+            // mkdir ignores bits the umask clears, so set the mode again after.
+            guard mkdir(dir.path, 0o700) == 0 || errno == EEXIST else {
+                return "cannot create \(dir.path): \(String(cString: strerror(errno)))"
+            }
+            guard lstat(dir.path, &st) == 0 else { return "cannot check \(dir.path)" }
+            if (st.st_mode & S_IFMT) == S_IFDIR, st.st_uid == getuid() { chmod(dir.path, 0o700); st.st_mode = (st.st_mode & S_IFMT) | 0o700 }
+        }
+        guard (st.st_mode & S_IFMT) == S_IFDIR else { return "\(dir.path) is not a plain directory (a symlink or a file)" }
+        guard st.st_uid == getuid() else { return "\(dir.path) belongs to another user" }
+        guard (st.st_mode & 0o777) == 0o700 else { return "\(dir.path) has mode \(String(st.st_mode & 0o777, radix: 8)), not 700" }
+        return nil
+    }
+
+    /// Writes `data` to a new file with mode 0600. O_EXCL refuses an existing file and O_NOFOLLOW
+    /// a symlink, so nothing already there is overwritten or followed. nil means written.
+    static func writePrivateFile(_ data: Data, to url: URL) -> String? {
+        let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { return String(cString: strerror(errno)) }
+        let written = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
+        close(fd)
+        guard written == data.count else { unlink(url.path); return "short write" }
+        return nil
+    }
+
+    /// Deletes regular files in `dir` last changed more than `age` seconds ago.
+    static func sweepStale(in dir: URL, olderThan age: TimeInterval) {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+        let cutoff = Date().addingTimeInterval(-age)
+        for name in names {
+            let p = dir.appendingPathComponent(name).path
+            guard let a = try? fm.attributesOfItem(atPath: p), a[.type] as? FileAttributeType == .typeRegular,
+                  let m = a[.modificationDate] as? Date, m < cutoff else { continue }
+            try? fm.removeItem(atPath: p)
+        }
     }
 
     /// Absolute, standardised form of `path`, the form the hook compares against.
@@ -228,16 +306,21 @@ public enum CLI {
     /// `sha256`, when given (mask), is written as a third field: the hook then honours the entry
     /// only while the file is not a symlink and still hashes to it, so swapping the masked copy
     /// for another file after `mask` does not unlock raw pixels (PR #18 review).
-    static func writeAllowEntry(_ path: String, _ io: CLIIO, sha256: String? = nil) -> String? {
+    /// `copy`, when given (allow of an image, NOV-117), is a fourth field: the stripped copy the
+    /// hook shows in place of `path`; `sha256` is then the copy's hash, not the original's.
+    static func writeAllowEntry(_ path: String, _ io: CLIIO, sha256: String? = nil, copy: String? = nil) -> String? {
         let absolute = absolutePath(path)
         // A newline, CR or tab in the path would let one call forge extra allow lines (for
         // example a far-future entry for another file with no hash). Refuse any control
         // character (PR #18 second review).
-        guard !absolute.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+        let hasControl = { (s: String) in s.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) }
+        guard !hasControl(absolute), !hasControl(copy ?? "") else {
             io.err("cheapshot: refusing to allow a path with a control character in it\n"); return nil
         }
         let expiry = Int(Date().timeIntervalSince1970) + allowSeconds
-        let line = Data((sha256.map { "\(expiry)\t\(absolute)\t\($0)\n" } ?? "\(expiry)\t\(absolute)\n").utf8)
+        // "<expiry>\t<path>[\t<sha256>[\t<copy>]]"
+        let fields = [String(expiry), absolute] + (sha256.map { [$0] } ?? []) + (copy.map { [$0] } ?? [])
+        let line = Data((fields.joined(separator: "\t") + "\n").utf8)
         let url = allowFile(io)
         let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
         guard fd >= 0 else { io.err("cheapshot: cannot open \(url.path): \(String(cString: strerror(errno)))\n"); return nil }
@@ -253,15 +336,21 @@ public enum CLI {
     /// Never next to the source, so a screenshot folder does not fill with copies, and never the
     /// source itself.
     static func defaultMaskURL(for path: String, _ io: CLIIO) -> URL {
+        scratchURL(for: path, folder: "cheapshot-masked", tag: "masked", io)
+    }
+
+    /// $TMPDIR/<folder>/<name>-<tag>-<time>-<rand>.png: the masked copy, or the stripped copy
+    /// `allow` writes for an image (NOV-117).
+    static func scratchURL(for path: String, folder: String, tag: String, _ io: CLIIO) -> URL {
         let tmp = io.environment["TMPDIR"].flatMap { $0.isEmpty ? nil : $0 } ?? "/tmp"
-        let dir = URL(fileURLWithPath: tmp).appendingPathComponent("cheapshot-masked")
+        let dir = URL(fileURLWithPath: tmp).appendingPathComponent(folder)
         // Keep the name readable but shell-friendly: macOS screenshot names carry spaces and U+202F.
         let stem = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
         let safe = String(stem.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "_" }.prefix(60))
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         let rand = String(UInt32.random(in: 0...UInt32.max), radix: 16)
-        return dir.appendingPathComponent("\(safe)-masked-\(f.string(from: Date()))-\(rand).png")
+        return dir.appendingPathComponent("\(safe)-\(tag)-\(f.string(from: Date()))-\(rand).png")
     }
 
     static func runMask(_ opts: Options, path: String, out: String?, redactor: Redactor, io: CLIIO) -> Int32 {
