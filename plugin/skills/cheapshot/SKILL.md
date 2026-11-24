@@ -87,7 +87,9 @@ not a hostile agent.
 
 - The allow entry for a masked copy carries its SHA-256, and the hook refuses a symlink or a
   changed file. A gap remains between the hook's hash check and the Read itself; a hostile
-  agent could swap the file inside it.
+  agent could swap the file inside it. Planned follow-up: the hook copies the file to a fresh
+  temp name, hashes that copy, and points the Read at it (`updatedInput`), so the hashed bytes
+  are the bytes read.
 - Content OCR cannot read (QR codes, faces, other images) is never masked, and a secret OCR
   reads only partly can slip through. The copy is layout, not proof the screen is clean.
 - `mask` and the hook each find the allow file through their own `TMPDIR`. If the two differ,
