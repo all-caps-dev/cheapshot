@@ -203,6 +203,10 @@ public enum CLI {
         return URL(fileURLWithPath: tmp).appendingPathComponent("cheapshot-allow")
     }
 
+    /// Image types `allow` re-encodes into a metadata-free copy (NOV-117). Anything else (a PDF)
+    /// is allowed as the file itself, as before.
+    static let strippedExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "heic", "heif", "tif", "tiff", "bmp"]
+
     static func runAllow(path: String, io: CLIIO) -> Int32 {
         // #290 item 3: allow is a person's decision. An agent's shell tool has no terminal on stdin,
         // so a model steered by text it read cannot approve its own raw access this way. Not a hard
@@ -211,8 +215,33 @@ public enum CLI {
             io.err("cheapshot: allow must be run by a person in a terminal (needs a foreground terminal on stdin and stdout)\n")
             return 2
         }
-        guard let absolute = writeAllowEntry(path, io) else { return 1 }
+        guard strippedExtensions.contains((path as NSString).pathExtension.lowercased()) else {
+            guard let absolute = writeAllowEntry(path, io) else { return 1 }
+            io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
+            return 0
+        }
+        // NOV-117: an image the person approves still must not carry its GPS position, camera
+        // make and model or capture time to the model. Write the pixels (upright, re-encoded as
+        // PNG, no metadata) to a scratch copy and allow the original path with that copy and its
+        // SHA-256. The hook then points the Read at a fresh copy of the copy (`updatedInput`),
+        // so the agent asks for the original and gets the stripped pixels. If the copy cannot be
+        // made, nothing is allowed: never fall back to the raw file.
+        let stripped: (data: Data, width: Int, height: Int)
+        do { stripped = try Masker.strippedPNG(path: absolutePath(path)) }
+        catch { io.err("cheapshot: allow: \(error); nothing was allowed\n"); return 1 }
+        let dest = scratchURL(for: path, folder: "cheapshot-allowed", tag: "allowed", io)
+        do {
+            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            try stripped.data.write(to: dest, options: .withoutOverwriting)
+        } catch { io.err("cheapshot: allow: cannot write \(dest.path): \(error.localizedDescription); nothing was allowed\n"); return 1 }
+        let digest = SHA256.hash(data: stripped.data).map { String(format: "%02x", $0) }.joined()
+        guard let absolute = writeAllowEntry(path, io, sha256: digest, copy: dest.path) else {
+            try? FileManager.default.removeItem(at: dest)
+            return 1
+        }
         io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
+        io.out("cheapshot: the agent sees a copy with the pixels only (\(stripped.width)x\(stripped.height), upright, no location, camera or date metadata): \(dest.path)\n")
         return 0
     }
 
@@ -228,16 +257,21 @@ public enum CLI {
     /// `sha256`, when given (mask), is written as a third field: the hook then honours the entry
     /// only while the file is not a symlink and still hashes to it, so swapping the masked copy
     /// for another file after `mask` does not unlock raw pixels (PR #18 review).
-    static func writeAllowEntry(_ path: String, _ io: CLIIO, sha256: String? = nil) -> String? {
+    /// `copy`, when given (allow of an image, NOV-117), is a fourth field: the stripped copy the
+    /// hook shows in place of `path`; `sha256` is then the copy's hash, not the original's.
+    static func writeAllowEntry(_ path: String, _ io: CLIIO, sha256: String? = nil, copy: String? = nil) -> String? {
         let absolute = absolutePath(path)
         // A newline, CR or tab in the path would let one call forge extra allow lines (for
         // example a far-future entry for another file with no hash). Refuse any control
         // character (PR #18 second review).
-        guard !absolute.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+        let hasControl = { (s: String) in s.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) }
+        guard !hasControl(absolute), !hasControl(copy ?? "") else {
             io.err("cheapshot: refusing to allow a path with a control character in it\n"); return nil
         }
         let expiry = Int(Date().timeIntervalSince1970) + allowSeconds
-        let line = Data((sha256.map { "\(expiry)\t\(absolute)\t\($0)\n" } ?? "\(expiry)\t\(absolute)\n").utf8)
+        // "<expiry>\t<path>[\t<sha256>[\t<copy>]]"
+        let fields = [String(expiry), absolute] + (sha256.map { [$0] } ?? []) + (copy.map { [$0] } ?? [])
+        let line = Data((fields.joined(separator: "\t") + "\n").utf8)
         let url = allowFile(io)
         let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
         guard fd >= 0 else { io.err("cheapshot: cannot open \(url.path): \(String(cString: strerror(errno)))\n"); return nil }
@@ -253,15 +287,21 @@ public enum CLI {
     /// Never next to the source, so a screenshot folder does not fill with copies, and never the
     /// source itself.
     static func defaultMaskURL(for path: String, _ io: CLIIO) -> URL {
+        scratchURL(for: path, folder: "cheapshot-masked", tag: "masked", io)
+    }
+
+    /// $TMPDIR/<folder>/<name>-<tag>-<time>-<rand>.png: the masked copy, or the stripped copy
+    /// `allow` writes for an image (NOV-117).
+    static func scratchURL(for path: String, folder: String, tag: String, _ io: CLIIO) -> URL {
         let tmp = io.environment["TMPDIR"].flatMap { $0.isEmpty ? nil : $0 } ?? "/tmp"
-        let dir = URL(fileURLWithPath: tmp).appendingPathComponent("cheapshot-masked")
+        let dir = URL(fileURLWithPath: tmp).appendingPathComponent(folder)
         // Keep the name readable but shell-friendly: macOS screenshot names carry spaces and U+202F.
         let stem = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
         let safe = String(stem.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "_" }.prefix(60))
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         let rand = String(UInt32.random(in: 0...UInt32.max), radix: 16)
-        return dir.appendingPathComponent("\(safe)-masked-\(f.string(from: Date()))-\(rand).png")
+        return dir.appendingPathComponent("\(safe)-\(tag)-\(f.string(from: Date()))-\(rand).png")
     }
 
     static func runMask(_ opts: Options, path: String, out: String?, redactor: Redactor, io: CLIIO) -> Int32 {

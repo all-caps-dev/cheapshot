@@ -43,20 +43,55 @@ public enum Masker {
     /// Loads the image straight from the file with ImageIO, so the CGImage is exactly the file's
     /// pixel grid. Running OCR on this same CGImage keeps the boxes and the painting in one pixel
     /// space, whatever DPI the file claims (a @2x screenshot is 144 DPI; NSImage would size it in
-    /// points). An EXIF rotation is refused: Vision would read the unrotated pixels and miss text.
+    /// points). An EXIF rotation (iPhone photos, many JPEG and HEIC files) is applied here, so
+    /// Vision reads upright text and the copy is written upright with no orientation tag (NOV-117).
+    /// A CGImage carries pixels and a colour space only: no EXIF, GPS, TIFF, IPTC or XMP.
     public static func loadPixels(path: String) throws -> CGImage {
         let url = URL(fileURLWithPath: path) as CFURL
         guard let src = CGImageSourceCreateWithURL(url, nil), CGImageSourceGetCount(src) > 0 else {
             throw Failure(message: "cannot read image \(path)")
         }
         let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
-        if let o = props?[kCGImagePropertyOrientation] as? NSNumber, o.intValue != 1 {
-            throw Failure(message: "\(path) has an EXIF rotation (\(o.intValue)); mask supports unrotated images only")
+        let orientation = (props?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        guard orientation != 1 else {
+            // Upright: decode as is, so the copy matches the file pixel for pixel.
+            guard let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+                throw Failure(message: "cannot decode image \(path)")
+            }
+            return image
         }
-        guard let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+        guard (2...8).contains(orientation) else {
+            throw Failure(message: "\(path) has an unknown EXIF orientation (\(orientation))")
+        }
+        // Rotated or mirrored: ask ImageIO for a full-size "thumbnail" with the orientation
+        // applied. MaxPixelSize is the longest side, so nothing is scaled down, and
+        // FromImageAlways decodes the real image rather than a small embedded preview.
+        let w = (props?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 0
+        let h = (props?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 0
+        guard w > 0, h > 0 else { throw Failure(message: "\(path) does not say its pixel size") }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(w, h),
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else {
             throw Failure(message: "cannot decode image \(path)")
         }
+        // Orientations 5 to 8 turn the image a quarter, so width and height swap.
+        let (ew, eh) = orientation >= 5 ? (h, w) : (w, h)
+        guard image.width == ew, image.height == eh else {
+            throw Failure(message: "\(path): rotating it gave \(image.width)x\(image.height), expected \(ew)x\(eh)")
+        }
         return image
+    }
+
+    /// The pixels of `path`, upright, as PNG bytes with no metadata: what `cheapshot allow`
+    /// hands an agent in place of the original file (NOV-117). Drawn into a fresh sRGB canvas
+    /// (`paint` with no boxes), so even a camera's own colour profile does not come along.
+    public static func strippedPNG(path: String) throws -> (data: Data, width: Int, height: Int) {
+        let image = try paint(try loadPixels(path: path), boxes: [])
+        return (try pngData(image), image.width, image.height)
     }
 
     /// Every line any of three OCR passes finds risky. Each pass sees the text differently: the
@@ -177,6 +212,10 @@ public enum Masker {
     }
 
     /// PNG bytes, lossless, so a box stays exactly black (a JPEG would smear the edges).
+    /// A CGImage holds pixels and a colour space only, so no GPS, camera or date metadata can
+    /// come from the source. ImageIO still writes an eXIf chunk of its own (colour space and
+    /// pixel size), so the text and EXIF chunks are dropped after encoding: the file holds
+    /// only image and colour chunks (NOV-117, StripMetadataTests walks the chunks).
     public static func pngData(_ image: CGImage) throws -> Data {
         let data = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
@@ -184,6 +223,32 @@ public enum Masker {
         }
         CGImageDestinationAddImage(dest, image, nil)
         guard CGImageDestinationFinalize(dest) else { throw Failure(message: "cannot encode the PNG") }
-        return data as Data
+        return try dropMetadataChunks(data as Data)
+    }
+
+    /// PNG chunks that hold metadata rather than pixels: EXIF, the three text kinds (XMP lives
+    /// in iTXt) and the modification time.
+    static let metadataChunks: Set<String> = ["eXIf", "tEXt", "zTXt", "iTXt", "tIME"]
+
+    /// Copies a PNG chunk by chunk, leaving out `metadataChunks`. A PNG is an 8-byte signature,
+    /// then chunks of [4-byte big-endian length][4-byte type][data][4-byte CRC]. Each chunk's CRC
+    /// covers only itself, so dropping whole chunks leaves the rest valid.
+    static func dropMetadataChunks(_ png: Data) throws -> Data {
+        let bytes = [UInt8](png)
+        guard bytes.count >= 8, bytes[0..<8].elementsEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) else {
+            throw Failure(message: "the PNG encoder wrote something that is not a PNG")
+        }
+        var out = Data(bytes[0..<8])
+        var i = 8
+        while i + 12 <= bytes.count {
+            let length = bytes[i..<i + 4].reduce(0) { $0 << 8 | Int($1) }
+            let end = i + 12 + length
+            guard end <= bytes.count else { throw Failure(message: "the PNG encoder wrote a truncated chunk") }
+            let type = String(decoding: bytes[i + 4..<i + 8], as: UTF8.self)
+            if !metadataChunks.contains(type) { out.append(contentsOf: bytes[i..<end]) }
+            i = end
+        }
+        guard i == bytes.count else { throw Failure(message: "the PNG encoder wrote trailing bytes") }
+        return out
     }
 }

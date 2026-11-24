@@ -34,7 +34,7 @@ cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
 cheapshot mask shot.png             # a copy with redacted and low-confidence lines painted black, allowed for one Read
-cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels
+cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels (an image arrives as a metadata-free copy)
 ```
 
 The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot report.pdf`
@@ -60,7 +60,9 @@ Settings the user controls (never set or unset them yourself):
    is not masked, so treat the copy as layout, not as proof nothing sensitive is on screen.
    If you really need the raw pixels, ask the user. They run
    `cheapshot allow <path>` in a terminal (it refuses to run without a foreground terminal), then
-   you Read the same path again. The allowance lasts five minutes and is used once. The MCP
+   you Read the same path again. For an image, that Read returns a copy: the same pixels, turned
+   upright, with no GPS position, camera make or model, capture date, IPTC or XMP. A PDF arrives
+   as the file itself. The allowance lasts five minutes and is used once. The MCP
    tools' `raw` argument is refused unless the user set `CHEAPSHOT_ALLOW_RAW=1`. These stop
    cheapshot offering you the bypass; they are not a sandbox, and routing around them (faking
    a terminal, writing the allow file) is exactly what the user said no to. Do not.
@@ -85,11 +87,22 @@ Settings the user controls (never set or unset them yourself):
 The threat model is a cooperating agent. The checks below stop accidents and casual misuse,
 not a hostile agent.
 
-- The allow entry for a masked copy carries its SHA-256, and the hook refuses a symlink or a
-  changed file. A gap remains between the hook's hash check and the Read itself; a hostile
-  agent could swap the file inside it. Planned follow-up: the hook copies the file to a fresh
-  temp name, hashes that copy, and points the Read at it (`updatedInput`), so the hashed bytes
-  are the bytes read.
+- The allow entry for a masked copy carries its SHA-256. The hook refuses a symlink, copies the
+  file into a fresh private folder (`$TMPDIR/cheapshot-read.*`, 0700), hashes that copy, and
+  points the Read at it (`updatedInput`), so the hashed bytes are the bytes read (NOV-117). A
+  hostile agent could still read the fresh copy's folder, but it holds only the masked pixels.
+- Location and device metadata never come along (NOV-117). The masked copy, and the copy
+  `cheapshot allow` makes of an image, are re-encoded PNGs with no EXIF, GPS, TIFF Make, Model
+  or Software, IPTC, XMP, MakerNote or orientation tag: ImageIO's own eXIf chunk (colour space
+  and size) is dropped too. EXIF-rotated photos (iPhone JPEG and HEIC) are turned upright first.
+- The hook intercepts png, jpg, jpeg, webp, gif and pdf Reads. For a HEIC or TIFF, `allow`
+  prints the copy's path; a Read of that path is honoured once. Reading the original HEIC is
+  not intercepted at all.
+- `allow` of a PDF still passes the file itself, including its document metadata and any EXIF
+  inside embedded photos.
+- An older cheapshot binary writes a plain allow line for images, which still passes the raw
+  file. Install the binary and the plugin together. An older hook does not understand the
+  new image entry and denies the Read (fails closed).
 - Content OCR cannot read (QR codes, faces, other images) is never masked, and a secret OCR
   reads only partly can slip through. The copy is layout, not proof the screen is clean.
 - `mask` and the hook each find the allow file through their own `TMPDIR`. If the two differ,

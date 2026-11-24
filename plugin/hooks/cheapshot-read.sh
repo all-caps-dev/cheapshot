@@ -1,8 +1,10 @@
 #!/bin/sh
 # cheapshot PreToolUse hook for Read (POSIX sh). Input: the hook JSON on stdin. Output: nothing
 # (let the Read proceed), a {"systemMessage": ...} hint with no decision (still proceeds), or a
-# deny decision whose reason is the redacted text plus one savings line. The savings line also
-# goes out as a top-level systemMessage, since stderr on exit 0 is not shown to the user.
+# deny decision whose reason is the redacted text plus one savings line, or (for a one-shot allow
+# entry with a hash) an allow decision with `updatedInput` pointing the Read at a checked copy.
+# The savings line also goes out as a top-level systemMessage, since stderr on exit 0 is not
+# shown to the user.
 #
 # Every exit is 0. By default a failure lets the Read through (fail open) and says so in a
 # systemMessage. With CHEAPSHOT_STRICT=1 a failure denies the Read instead (fail closed), so
@@ -115,11 +117,22 @@ if ! command -v cheapshot >/dev/null 2>&1; then
   exit 0
 fi
 
-# One-shot allowlist written by `cheapshot allow <path>`: "<expiry epoch>\t<path>" per line, or
-# "<expiry>\t<path>\t<sha256>" when `cheapshot mask` wrote it for its masked copy.
+# One-shot allowlist written by `cheapshot allow <path>` and `cheapshot mask`, one entry per line:
+#   "<expiry epoch>\t<path>"                    allow of a PDF (or an older binary): the file itself
+#   "<expiry>\t<path>\t<sha256>"                 mask: <path> is the masked copy, <sha256> its hash
+#   "<expiry>\t<path>\t<sha256>\t<copy>"         allow of an image (NOV-117): <copy> is a stripped
+#                                               copy (pixels only, no GPS, camera or date metadata)
+#                                               and <sha256> is the copy's hash
 # Expired lines are dropped; the first live match for this path is consumed. `cheapshot allow`
 # standardises paths, which strips a leading /private, while Read may pass /private/tmp/...,
-# so an entry also matches the path with that prefix removed.
+# so an entry also matches the path with that prefix removed. A Read of the copy itself matches
+# its entry too (a HEIC the hook does not intercept: the person can hand the agent the copy path).
+#
+# A hashed entry (mask or image allow) is never read in place. The hook copies the source to a
+# fresh private folder, hashes that copy, and on a match rewrites the Read to it with
+# `updatedInput` (Claude Code PreToolUse: it replaces the whole tool_input, so every other field
+# is kept). The hashed bytes are then the bytes read, which closes the gap between check and Read
+# that NOV-95's Known limits named, and an image allow shows the stripped copy, never the original.
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
   alt="$path"
@@ -127,27 +140,46 @@ if [ -f "$allow" ]; then
   now=$(date +%s)
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
+  fresh=""
   tab=$(printf '\t')
-  while IFS="$tab" read -r exp p sum || [ -n "$exp" ]; do
+  # Fresh copies from earlier Reads are only needed until that Read ran: drop ones over 10 minutes old.
+  find "$tmp" -maxdepth 1 -type d -name 'cheapshot-read.*' -mmin +10 -exec rm -rf {} + 2>/dev/null
+  while IFS="$tab" read -r exp p sum copy || [ -n "$exp" ]; do
     [ "$exp" -ge "$now" ] 2>/dev/null || continue
-    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ]; }; then
-      # A third field (written by `cheapshot mask`) is the SHA-256 of the masked copy. Honour
-      # it only while the file is a regular file, not a symlink, with that same hash, so a
-      # file swapped in after `mask` does not pass as the masked copy (PR #18 review). Either
-      # way the entry is used up: a tampered entry falls through to normal handling.
+    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ] || { [ -n "$copy" ] && { [ "$copy" = "$path" ] || [ "$copy" = "$alt" ]; }; }; }; then
+      # Either way the entry is used up: a tampered entry falls through to normal handling.
       if [ -n "$sum" ]; then
-        got=""
-        if [ -f "$path" ] && [ ! -L "$path" ]; then got=$(shasum -a 256 "$path" 2>/dev/null | cut -d' ' -f1); fi
-        [ "$got" = "$sum" ] && hit=1
+        src="${copy:-$path}"
+        # Only a regular file, not a symlink (PR #18 review). cp could still race a swap, but
+        # the hash below is taken of the fresh copy, which is what the Read will see.
+        if [ -f "$src" ] && [ ! -L "$src" ] && rd=$(mktemp -d "$tmp/cheapshot-read.XXXXXX"); then
+          f="$rd/$(basename "$src")"
+          if cp "$src" "$f" 2>/dev/null && [ "$(shasum -a 256 "$f" 2>/dev/null | cut -d' ' -f1)" = "$sum" ]; then
+            hit=1; fresh="$f"
+          else
+            rm -rf "${rd:?}"
+          fi
+        fi
         continue
       fi
       hit=1; continue
     fi
-    if [ -n "$sum" ]; then printf '%s\t%s\t%s\n' "$exp" "$p" "$sum" >> "$keep"; else printf '%s\t%s\n' "$exp" "$p" >> "$keep"; fi
+    line="$exp$tab$p"
+    [ -n "$sum" ] && line="$line$tab$sum"
+    [ -n "$copy" ] && line="$line$tab$copy"
+    printf '%s\n' "$line" >> "$keep"
   done < "$allow"
   mv "$keep" "$allow"
   if [ "$hit" = 1 ]; then
     note allow
+    if [ -n "$fresh" ]; then
+      m="cheapshot: showing the agent a checked copy of $path (pixels only, no location or camera metadata)."
+      echo "$m" >&2
+      printf '%s' "$input" | jq --arg f "$fresh" --arg m "$m" \
+        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow",
+          permissionDecisionReason: "cheapshot: allowed once by the user or by cheapshot mask",
+          updatedInput: (.tool_input | .file_path = $f)}, systemMessage: $m}'
+    fi
     exit 0
   fi
 fi

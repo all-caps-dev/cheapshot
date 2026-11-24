@@ -619,24 +619,26 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(negative.pct, 0)
     }
 
+    /// A PDF is allowed as the file itself: "<expiry>\t<path>". An image gets a stripped copy
+    /// instead (NOV-117, StripMetadataTests).
     func testAllowAppendsEntry() async throws {
-        let r = await run(["allow", "/tmp/shot.png"], env: ["TMPDIR": tmp.path], interactive: true)
+        let r = await run(["allow", "/tmp/report.pdf"], env: ["TMPDIR": tmp.path], interactive: true)
         XCTAssertEqual(r.code, 0)
-        XCTAssertEqual(r.out, "cheapshot: allowed /tmp/shot.png for 5 minutes\n")
+        XCTAssertEqual(r.out, "cheapshot: allowed /tmp/report.pdf for 5 minutes\n")
         let body = try String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)
         let parts = body.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\t").map(String.init)
         XCTAssertEqual(parts.count, 2)
-        XCTAssertEqual(parts[1], "/tmp/shot.png")
+        XCTAssertEqual(parts[1], "/tmp/report.pdf")
         let expiry = try XCTUnwrap(Int(parts[0]))
         let now = Int(Date().timeIntervalSince1970)
         XCTAssert(expiry >= now + 295 && expiry <= now + 305, "expiry \(expiry) is not about 5 minutes from \(now)")
 
         // A second allow appends, never truncates, and a relative path is made absolute.
-        _ = await run(["allow", "rel.png"], env: ["TMPDIR": tmp.path], interactive: true)
+        _ = await run(["allow", "rel.pdf"], env: ["TMPDIR": tmp.path], interactive: true)
         let lines = try String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)
             .split(separator: "\n")
         XCTAssertEqual(lines.count, 2)
-        XCTAssertTrue(lines[1].hasSuffix("\t" + FileManager.default.currentDirectoryPath + "/rel.png"))
+        XCTAssertTrue(lines[1].hasSuffix("\t" + FileManager.default.currentDirectoryPath + "/rel.pdf"))
     }
 
     /// The by-mode split must reconcile with the flat totals in the same payload, and must obey
