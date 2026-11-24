@@ -26,6 +26,9 @@ input() {
   fi
 }
 run_hook() { PATH="$fake:$PATH" sh "$hook"; }
+# Octal permission bits of a file, on GNU (CI runs on Linux) or BSD/macOS stat. BSD `stat -f`
+# means "filesystem status" on Linux, so try GNU's `-c` first.
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 # A PATH that has jq but no cheapshot, whatever the machine has installed.
 nobin=$(mktemp -d "$ROOT/nobin.XXXXXX"); ln -s "$(command -v jq)" "$nobin/jq"
 NOBIN_PATH="$nobin:/usr/bin:/bin"
@@ -114,7 +117,7 @@ f=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedInput.file_path // em
 [ "$dec" = allow ] && [ -n "$f" ] && [ "$f" != "$m" ] && pass "mask entry: the unchanged copy is allowed via a fresh copy" || fail "mask entry: unchanged copy: $out"
 case "$f" in "$TMPDIR"/cheapshot-read.*/masked.png) pass "mask entry: fresh copy sits in a private cheapshot-read folder";; *) fail "mask entry: fresh copy path $f";; esac
 [ "$(cat "$f" 2>/dev/null)" = masked-bytes ] && pass "mask entry: fresh copy holds the hashed bytes" || fail "mask entry: fresh copy bytes"
-[ "$(stat -f %Lp "$(dirname "$f")")" = 700 ] && pass "mask entry: fresh folder is 0700" || fail "mask entry: fresh folder mode $(stat -f %Lp "$(dirname "$f")")"
+[ "$(mode "$(dirname "$f")")" = 700 ] && pass "mask entry: fresh folder is 0700" || fail "mask entry: fresh folder mode $(mode "$(dirname "$f")")"
 # Swapping the source after the hook ran changes nothing the Read sees (the check-to-Read race).
 printf 'swapped-later' > "$m"
 [ "$(cat "$f")" = masked-bytes ] && pass "mask entry: a later swap of the source does not reach the Read" || fail "mask entry: later swap reached the fresh copy"
@@ -149,7 +152,7 @@ grep -qx -- '--note-passthrough allow' "$FAKE_LOG" && pass "image allow: recorde
 grep -q "$orig" "$TMPDIR/cheapshot-allow" && fail "image allow: entry consumed" || pass "image allow: entry consumed"
 grep -q '/tmp/other.png' "$TMPDIR/cheapshot-allow" && pass "image allow: other entries kept" || fail "image allow: other entries kept"
 [ ! -e "$c" ] && pass "image allow: the allow copy is deleted once its entry is used" || fail "image allow: allow copy left on disk"
-[ "$(stat -f %Lp "$f")" = 600 ] && pass "image allow: the fresh copy is 0600" || fail "image allow: fresh copy mode $(stat -f %Lp "$f")"
+[ "$(mode "$f")" = 600 ] && pass "image allow: the fresh copy is 0600" || fail "image allow: fresh copy mode $(mode "$f")"
 dec=$(input "$orig" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "image allow: second Read is denied again" || fail "image allow: second Read ($dec)"
 # A Read naming the copy itself matches the same entry.
