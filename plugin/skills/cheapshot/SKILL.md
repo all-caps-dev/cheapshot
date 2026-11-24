@@ -121,7 +121,7 @@ not a hostile agent.
 When an allow or mask entry checks out, the hook auto-approves the Read of the fresh copy: its
 reply sets `permissionDecision: "allow"` and points the Read at the copy with `updatedInput`.
 That skips Claude Code's permission prompt and your Read rules for that one Read. It is the
-default on purpose (Ryan, 2026-11-24): the copy is masked or stripped pixels in a private
+default on purpose (chosen 2026-11-24): the copy is masked or stripped pixels in a private
 `$TMPDIR` folder, and an extra prompt per Read buys little. An agent can make a mask entry
 itself with `cheapshot mask`, so a masked copy is the one Read that needs no person at all.
 
