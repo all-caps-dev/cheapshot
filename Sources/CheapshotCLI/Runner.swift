@@ -28,6 +28,7 @@ public enum CLI {
 
         switch opts.command {
         case .help, .version, .ledger, .allow, .notePassthrough: preconditionFailure("handled above")
+        case .mask(let path, let out): return runMask(opts, path: path, out: out, redactor: redactor ?? Redactor(), io: io)
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
         case .video(let path): return await runVideo(opts, path: path, redactor: redactor, io: io)
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)
@@ -209,17 +210,98 @@ public enum CLI {
             io.err("cheapshot: allow must be run by a person in a terminal (needs a foreground terminal on stdin and stdout)\n")
             return 2
         }
+        guard let absolute = writeAllowEntry(path, io) else { return 1 }
+        io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
+        return 0
+    }
+
+    /// Absolute, standardised form of `path`, the form the hook compares against.
+    static func absolutePath(_ path: String) -> String {
         let cwd = FileManager.default.currentDirectoryPath
-        let absolute = ((path.hasPrefix("/") ? path : cwd + "/" + path) as NSString).standardizingPath
+        return ((path.hasPrefix("/") ? path : cwd + "/" + path) as NSString).standardizingPath
+    }
+
+    /// Appends one allow line for `path` and returns the absolute path it wrote, or nil after
+    /// printing why it could not. Shared by `allow` (a person, raw pixels) and `mask` (the masked
+    /// copy only, which needs no person: the risky lines are already painted over).
+    static func writeAllowEntry(_ path: String, _ io: CLIIO) -> String? {
+        let absolute = absolutePath(path)
         let expiry = Int(Date().timeIntervalSince1970) + allowSeconds
         let line = Data("\(expiry)\t\(absolute)\n".utf8)
         let url = allowFile(io)
         let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
-        guard fd >= 0 else { io.err("cheapshot: cannot open \(url.path): \(String(cString: strerror(errno)))\n"); return 1 }
+        guard fd >= 0 else { io.err("cheapshot: cannot open \(url.path): \(String(cString: strerror(errno)))\n"); return nil }
         defer { close(fd) }
         let written = line.withUnsafeBytes { write(fd, $0.baseAddress, line.count) }
-        guard written == line.count else { io.err("cheapshot: short write to \(url.path)\n"); return 1 }
-        io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
+        guard written == line.count else { io.err("cheapshot: short write to \(url.path)\n"); return nil }
+        return absolute
+    }
+
+    // MARK: - mask
+
+    /// Where a mask goes when --out is not given: $TMPDIR/cheapshot-masked/<name>-masked-<time>-<rand>.png.
+    /// Never next to the source, so a screenshot folder does not fill with copies, and never the
+    /// source itself.
+    static func defaultMaskURL(for path: String, _ io: CLIIO) -> URL {
+        let tmp = io.environment["TMPDIR"].flatMap { $0.isEmpty ? nil : $0 } ?? "/tmp"
+        let dir = URL(fileURLWithPath: tmp).appendingPathComponent("cheapshot-masked")
+        // Keep the name readable but shell-friendly: macOS screenshot names carry spaces and U+202F.
+        let stem = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+        let safe = String(stem.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) || "-_.".unicodeScalars.contains($0) ? Character($0) : "_" }.prefix(60))
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        let rand = String(UInt32.random(in: 0...UInt32.max), radix: 16)
+        return dir.appendingPathComponent("\(safe)-masked-\(f.string(from: Date()))-\(rand).png")
+    }
+
+    static func runMask(_ opts: Options, path: String, out: String?, redactor: Redactor, io: CLIIO) -> Int32 {
+        func fail(_ message: String) -> Int32 {
+            if opts.json { _ = emit(["version": cheapshotVersion, "file": path, "error": message], io) }
+            io.err("cheapshot: \(message)\n")
+            return 1
+        }
+        guard FileManager.default.fileExists(atPath: path) else { return fail("no such file \(path)") }
+        guard (path as NSString).pathExtension.lowercased() != "pdf" else { return fail("mask works on images, not PDFs: \(path)") }
+
+        let result: MaskResult
+        do {
+            let image = try Masker.loadPixels(path: path)
+            result = try Masker.mask(image, redactor: redactor, minConfidence: opts.minConfidence)
+        } catch { return fail("\(error)") }
+
+        let dest = out.map { URL(fileURLWithPath: absolutePath($0)) } ?? defaultMaskURL(for: path, io)
+        guard dest.standardizedFileURL.path != URL(fileURLWithPath: absolutePath(path)).standardizedFileURL.path else {
+            return fail("--out is the source image; mask never overwrites it")
+        }
+        do {
+            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            // withoutOverwriting: an existing file at --out (the source, or anything else) is an error.
+            try Masker.pngData(result.image).write(to: dest, options: .withoutOverwriting)
+        } catch { return fail("cannot write \(dest.path): \(error.localizedDescription)") }
+
+        // The same one-shot, five-minute entry `cheapshot allow` writes, for the masked copy only.
+        guard let allowed = writeAllowEntry(dest.path, io) else { return 1 }
+
+        let redacted = result.boxes.filter { $0.reason == .redacted }.count
+        let low = result.boxes.count - redacted
+        if opts.json {
+            let boxes: [[String: Any]] = result.boxes.map { b in
+                let r = Masker.painted(b.rect, width: result.image.width, height: result.image.height)
+                return ["reason": b.reason.rawValue,
+                        "bbox": [Int(r.minX), Int(r.minY), Int(r.maxX), Int(r.maxY)]]
+            }
+            guard emit(["version": cheapshotVersion, "file": path, "masked": allowed, "boxes": boxes,
+                        "box_count": result.boxes.count, "redactions": result.report.counts,
+                        "width": result.image.width, "height": result.image.height,
+                        "rounds": result.rounds, "allowed_seconds": allowSeconds], io) else { return 1 }
+        } else {
+            let counts = result.report.counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
+            io.out("masked: \(allowed)\n")
+            io.out("boxes: \(result.boxes.count) (\(redacted) redacted, \(low) low-confidence)\n")
+            io.out("redactions: \(counts.isEmpty ? "none" : counts)\n")
+            io.out("cheapshot: allowed the masked copy for 5 minutes; Read the path above. Text Vision did not see is not masked.\n")
+        }
         return 0
     }
 

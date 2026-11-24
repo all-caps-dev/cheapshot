@@ -43,7 +43,7 @@ dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')
 reason=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason')
 [ "$code" = 0 ] && [ "$dec" = deny ] && pass "png is denied" || fail "png is denied (code=$code dec=$dec)"
 case "$reason" in *"hello world"*"key [AWS_KEY]"*) pass "reason carries the redacted text";; *) fail "reason carries the redacted text";; esac
-line='cheapshot: 1018 image tokens -> 37 text tokens. If you need the pixels for layout, ask the user to approve it.'
+line="cheapshot: 1018 image tokens -> 37 text tokens. If you need the layout, run in Bash: cheapshot mask '/tmp/shot.png', then Read the path it prints after \"masked: \" (a copy with redacted and low-confidence lines blacked out). The raw pixels still need the user's approval."
 user_line="cheapshot: 1018 image tokens -> 37 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow '/tmp/shot.png'"
 case "$reason" in *"$line") pass "reason ends with the savings line";; *) fail "reason ends with the savings line: $reason";; esac
 # Fleet #290 item 3: the model is never told how to approve its own raw access.
@@ -258,6 +258,17 @@ msg=$(input "$shot" | run_hook 2>/dev/null | jq -r '.systemMessage')
 q=${msg#*cheapshot allow }
 eval "set -- $q"
 [ "$#" = 1 ] && [ "$1" = "$shot" ] && pass "allow command is shell-quoted (space, U+202F)" || fail "allow command quoting: $msg"
+
+# 13b. NOV-95: the model's copy names `cheapshot mask` with the same shell quoting, so the agent can
+# run it from Bash; a PDF (mask does images only) keeps the ask-the-user line.
+reason=$(input "$shot" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason')
+q=${reason#*cheapshot mask }
+q=${q%%, then Read*}
+eval "set -- $q"
+[ "$#" = 1 ] && [ "$1" = "$shot" ] && pass "mask command is shell-quoted (space, U+202F)" || fail "mask command quoting: $reason"
+fresh
+reason=$(input /tmp/report.pdf "1-2" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason')
+case "$reason" in *"cheapshot mask"*) fail "pdf reason must not offer mask: $reason";; *"ask the user to approve it."*) pass "pdf keeps the ask-the-user line";; *) fail "pdf line: $reason";; esac
 
 # 14. A broken rules file named by CHEAPSHOT_RULES denies even in default mode.
 fresh

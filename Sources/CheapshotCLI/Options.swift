@@ -11,6 +11,7 @@ public struct Options: Equatable {
         case help, version
         case ledger(json: Bool, migrate: Bool, days: Int?, byMode: Bool)
         case allow(path: String)         // one-shot hook escape hatch, see plugin/hooks/cheapshot-read.sh
+        case mask(path: String, out: String?)  // masked copy for an agent to look at (NOV-95)
         case notePassthrough(reason: String)  // the hook records a pass-through in the ledger (#290 item 4)
         case text(path: String)          // "-" means stdin
         case video(path: String)
@@ -95,6 +96,47 @@ public struct Options: Equatable {
         }
     }
 
+    /// `cheapshot mask [--out <file.png>] [--min-conf <f>] [--rules <file>] [--json] [--] <image>`.
+    /// Its own small parser, so a flag that makes no sense here (--raw above all: a mask with
+    /// redaction off would paint nothing) is a usage error instead of being silently accepted.
+    static func parseMask(_ args: [String]) throws -> Options {
+        var o = Options(command: .help)
+        var out: String? = nil
+        var positional: [String] = []
+        var i = 0
+        func value(_ flag: String) throws -> String {
+            guard i + 1 < args.count, !args[i + 1].hasPrefix("-") else { throw UsageError(message: "mask: \(flag) needs a value") }
+            i += 1
+            return args[i]
+        }
+        while i < args.count {
+            let a = args[i]
+            if a == "--" { positional.append(contentsOf: args[(i + 1)...]); break }
+            switch a {
+            case "--out":      out = try value(a)
+            case "--json":     o.json = true
+            case "--rules":    o.rulesPath = try value(a)
+            case "--min-conf":
+                let v = try value(a)
+                guard let n = Float(v), n.isFinite, n >= 0, n <= 1 else {
+                    throw UsageError(message: "mask: --min-conf must be between 0 and 1: \(v)")
+                }
+                o.minConfidence = n
+            default:
+                if a.hasPrefix("-") { throw UsageError(message: "mask: unknown option \(a)") }
+                positional.append(a)
+            }
+            i += 1
+        }
+        guard positional.count == 1 else { throw UsageError(message: "mask takes exactly one image") }
+        if let out = out, (out as NSString).pathExtension.lowercased() != "png" {
+            throw UsageError(message: "mask: --out must end in .png (the copy is always a lossless PNG)")
+        }
+        o.command = .mask(path: positional[0], out: out)
+        o.noLedger = true   // a mask is not a savings run; the hook records the Read of the copy
+        return o
+    }
+
     public static func parse(_ args: [String]) throws -> Options {
         // Only tokens before "--" can be options, so a file named "--help" after it stays a file (#290).
         let flags = args.firstIndex(of: "--").map { Array(args[..<$0]) } ?? args
@@ -106,6 +148,7 @@ public struct Options: Equatable {
             guard !args[1].hasPrefix("-") else { throw UsageError(message: "unknown option \(args[1])") }
             return Options(command: .allow(path: args[1]))
         }
+        if args.first == "mask" { return try parseMask(Array(args.dropFirst())) }
         if args.first == "--note-passthrough" {
             // Only a fixed set of reasons, never a path, so the ledger cannot collect file names.
             guard args.count == 2, LedgerEntry.passthroughReasons.contains(args[1]) else {

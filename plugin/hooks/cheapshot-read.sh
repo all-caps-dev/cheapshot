@@ -178,9 +178,17 @@ it=$(printf '%s' "$out" | jq -r '.image_tokens // 0')
 tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 # The model's copy does not name `cheapshot allow`: approving raw pixels is the user's call
 # (Fleet #290 item 3). The user's copy, the systemMessage, carries the command.
-model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
-# Shell-quoted so a person can paste it: macOS screenshot names carry spaces and U+202F.
+# Shell-quoted so a person (or the agent's Bash tool) can paste it: macOS screenshot names
+# carry spaces and U+202F.
 qpath=$(jq -rn --arg p "$path" '$p | @sh')
+if [ "$ext" = pdf ]; then
+  model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
+else
+  # NOV-95: for an image, point the agent at the masked copy first. `cheapshot mask` paints every
+  # redacted or low-confidence line black, writes the copy to a scratch folder and allows only
+  # that copy, so the agent can see the layout without a person approving the raw pixels.
+  model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the layout, run in Bash: cheapshot mask $qpath, then Read the path it prints after \"masked: \" (a copy with redacted and low-confidence lines blacked out). The raw pixels still need the user's approval."
+fi
 user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the pixels, run in a terminal: cheapshot allow $qpath"
 echo "$user_line" >&2
 jq -n --arg text "$text" --arg line "$model_line" --arg m "$user_line" \

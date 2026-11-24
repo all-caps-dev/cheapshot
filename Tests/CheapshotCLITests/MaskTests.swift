@@ -1,0 +1,205 @@
+// Swift. Tests for `cheapshot mask` (NOV-95). The fixture is drawn here with CoreText, so the
+// test knows exactly where each line's ink is, then checked by sampling pixels: never by eye.
+import XCTest
+import ImageIO
+import CoreGraphics
+import CoreText
+@testable import CheapshotCLI
+@testable import CheapshotCore
+
+final class MaskTests: XCTestCase {
+    var tmp: URL!
+
+    override func setUpWithError() throws {
+        tmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cheapshot-mask-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    }
+    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: tmp) }
+
+    func run(_ args: [String]) async -> (code: Int32, out: String, err: String) {
+        final class Box { var out = "", err = "" }
+        let box = Box()
+        let env = ["CHEAPSHOT_HOME": tmp.path, "TMPDIR": tmp.path]   // ledger and allow file stay in tmp
+        let io = CLIIO(out: { box.out += $0 }, err: { box.err += $0 }, readStdin: { "" },
+                       environment: env, home: tmp.path, isInteractive: false)
+        let code = await CLI.run(arguments: args, io: io)
+        return (code, box.out, box.err)
+    }
+
+    // Fake values, built from parts so no whole token sits in one literal. Neither is a real credential.
+    static let fakeToken = "ghp_" + "Fake1234Test5678" + "Demo9012Abcd"
+    static let fakePhone = "(212) 555" + "-0147"
+
+    /// Lines drawn into the fixture, top to bottom, and where each one's ink landed (pixels,
+    /// top-left origin), so a test can sample inside a box.
+    struct Fixture { var url: URL; var width: Int; var height: Int; var ink: [String: CGRect] }
+
+    /// A "@2x screenshot": pixel size twice the point size, written with 144 DPI the way macOS
+    /// writes Retina captures. If the boxes were in points rather than pixels, the paint would
+    /// land in the top-left quarter and the secret's samples below would fail.
+    func makeFixture(lines: [String], name: String = "shot@2x.png") throws -> Fixture {
+        let scale: CGFloat = 2, wPt: CGFloat = 900, rowPt: CGFloat = 60
+        let w = Int(wPt * scale), h = Int((CGFloat(lines.count) * rowPt + 40) * scale)
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        let font = CTFontCreateWithName("Menlo" as CFString, 22 * scale, nil)
+        var ink: [String: CGRect] = [:]
+        for (i, s) in lines.enumerated() {
+            let attr = NSAttributedString(string: s, attributes: [kCTFontAttributeName as NSAttributedString.Key: font,
+                                                                  kCTForegroundColorAttributeName as NSAttributedString.Key:
+                                                                    CGColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)])
+            let line = CTLineCreateWithAttributedString(attr)
+            let baselineFromTop = (CGFloat(i) * rowPt + 50) * scale
+            let origin = CGPoint(x: 40 * scale, y: CGFloat(h) - baselineFromTop)   // CG is bottom-left
+            ctx.textPosition = origin
+            // The glyphs' ink box, read before drawing (CTLineDraw moves the text position to the
+            // end of the line), then flipped back to top-left pixels.
+            let b = CTLineGetImageBounds(line, ctx)
+            CTLineDraw(line, ctx)
+            ink[s] = CGRect(x: b.minX, y: CGFloat(h) - b.maxY, width: b.width, height: b.height)
+        }
+        let img = try XCTUnwrap(ctx.makeImage())
+        let url = tmp.appendingPathComponent(name)
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, [kCGImagePropertyDPIWidth: 144, kCGImagePropertyDPIHeight: 144] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return Fixture(url: url, width: w, height: h, ink: ink)
+    }
+
+    /// RGBA bytes of a PNG on disk, in its own pixel grid.
+    func pixels(_ url: URL) throws -> (w: Int, h: Int, rgba: [UInt8]) {
+        let src = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let img = try XCTUnwrap(CGImageSourceCreateImageAtIndex(src, 0, nil))
+        var buf = [UInt8](repeating: 0, count: img.width * img.height * 4)
+        let ctx = try XCTUnwrap(CGContext(data: &buf, width: img.width, height: img.height, bitsPerComponent: 8,
+                                          bytesPerRow: img.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+        return (img.width, img.height, buf)
+    }
+
+    /// Fraction of pixels in `r` (top-left origin) that are pure opaque black. The buffer rows run
+    /// top to bottom, matching the top-left boxes.
+    func blackFraction(_ p: (w: Int, h: Int, rgba: [UInt8]), in r: CGRect) -> Double {
+        let x0 = max(0, Int(r.minX)), x1 = min(p.w, Int(r.maxX.rounded(.up)))
+        let y0 = max(0, Int(r.minY)), y1 = min(p.h, Int(r.maxY.rounded(.up)))
+        var black = 0, total = 0
+        for y in y0..<y1 { for x in x0..<x1 {
+            let i = (y * p.w + x) * 4
+            total += 1
+            if p.rgba[i] == 0, p.rgba[i + 1] == 0, p.rgba[i + 2] == 0, p.rgba[i + 3] == 255 { black += 1 }
+        } }
+        return total == 0 ? 0 : Double(black) / Double(total)
+    }
+
+    /// Count of pixels in `r` that differ between two images of the same size.
+    func changed(_ a: (w: Int, h: Int, rgba: [UInt8]), _ b: (w: Int, h: Int, rgba: [UInt8]), in r: CGRect) -> Int {
+        let x0 = max(0, Int(r.minX)), x1 = min(a.w, Int(r.maxX.rounded(.up)))
+        let y0 = max(0, Int(r.minY)), y1 = min(a.h, Int(r.maxY.rounded(.up)))
+        var n = 0
+        for y in y0..<y1 { for x in x0..<x1 {
+            let i = (y * a.w + x) * 4
+            if a.rgba[i] != b.rgba[i] || a.rgba[i + 1] != b.rgba[i + 1] || a.rgba[i + 2] != b.rgba[i + 2] { n += 1 }
+        } }
+        return n
+    }
+
+    func testMaskPaintsSecretsAndLeavesNormalTextAlone() async throws {
+        let normal = "Settings General Appearance"
+        let token = "token " + Self.fakeToken
+        let phone = "call " + Self.fakePhone
+        let fx = try makeFixture(lines: [normal, token, phone])
+        let out = tmp.appendingPathComponent("masked.png")
+
+        let r = await run(["mask", "--json", "--out", out.path, fx.url.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        let j = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(r.out.utf8)) as? [String: Any])
+        let counts = try XCTUnwrap(j["redactions"] as? [String: Int])
+        XCTAssertGreaterThanOrEqual(counts["PHONE"] ?? 0, 1, "\(counts)")
+        XCTAssertGreaterThanOrEqual((counts["GITHUB_PAT"] ?? 0) + (counts["TOKEN"] ?? 0), 1, "\(counts)")
+        XCTAssertGreaterThanOrEqual(j["box_count"] as? Int ?? 0, 2, "\(j)")
+
+        let before = try pixels(fx.url), after = try pixels(out)
+        // Same pixel grid as the @2x source: no scaling anywhere.
+        XCTAssertEqual(after.w, fx.width); XCTAssertEqual(after.h, fx.height)
+        // Every pixel of the secrets' ink is now opaque black.
+        XCTAssertEqual(blackFraction(after, in: try XCTUnwrap(fx.ink[token])), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(blackFraction(after, in: try XCTUnwrap(fx.ink[phone])), 1.0, accuracy: 0.0001)
+        // The normal line is untouched, pixel for pixel.
+        XCTAssertEqual(changed(before, after, in: try XCTUnwrap(fx.ink[normal])), 0)
+
+        // The masked copy, and only it, got a one-shot allow line.
+        let allow = try String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)
+        XCTAssertTrue(allow.contains(out.path), allow)
+        XCTAssertFalse(allow.contains(fx.url.path), "the source must never be allowed by mask")
+    }
+
+    func testCleanImageGetsNoBoxesAndIsUnchanged() async throws {
+        let fx = try makeFixture(lines: ["Display Brightness", "Night Shift Schedule"])
+        let out = tmp.appendingPathComponent("clean.png")
+        let r = await run(["mask", "--out", out.path, fx.url.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertTrue(r.out.contains("boxes: 0 "), r.out)
+        let a = try pixels(fx.url), b = try pixels(out)
+        XCTAssertEqual(changed(a, b, in: CGRect(x: 0, y: 0, width: a.w, height: a.h)), 0)
+    }
+
+    func testDefaultOutputGoesToScratchNotNextToSource() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let r = await run(["mask", fx.url.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        let line = try XCTUnwrap(r.out.split(separator: "\n").first { $0.hasPrefix("masked: ") })
+        let path = String(line.dropFirst("masked: ".count))
+        XCTAssertTrue(path.contains("/cheapshot-masked/"), path)
+        XCTAssertTrue(path.hasSuffix(".png"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+    }
+
+    func testNeverOverwrites() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let original = try Data(contentsOf: fx.url)
+        // --out naming the source, then --out naming some other existing file: both refused.
+        let a = await run(["mask", "--out", fx.url.path, fx.url.path])
+        XCTAssertEqual(a.code, 1)
+        let other = tmp.appendingPathComponent("exists.png")
+        try Data("x".utf8).write(to: other)
+        let b = await run(["mask", "--out", other.path, fx.url.path])
+        XCTAssertEqual(b.code, 1)
+        XCTAssertEqual(try Data(contentsOf: fx.url), original)
+        XCTAssertEqual(try Data(contentsOf: other), Data("x".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("cheapshot-allow").path),
+                       "a failed mask must not allow anything")
+    }
+
+    func testUsageErrors() async throws {
+        for args in [["mask"], ["mask", "--raw", "a.png"], ["mask", "a.png", "b.png"],
+                     ["mask", "--out", "x.jpg", "a.png"], ["mask", "--min-conf", "2", "a.png"]] {
+            let r = await run(args)
+            XCTAssertEqual(r.code, 2, "\(args): \(r.err)")
+        }
+    }
+
+    // MARK: - pure parts
+
+    func testFlagCatchesARuleThatSpansTwoLines() {
+        // A custom rule that only matches across a newline: neither line redacts on its own.
+        let redactor = Redactor(rules: [Rule(name: "PAIR", pattern: #"alpha\nbravo"#, options: [])])
+        let lines: [(text: String, bbox: CGRect, confidence: Float)] = [
+            ("x alpha", CGRect(x: 0, y: 0, width: 10, height: 10), 1),
+            ("bravo y", CGRect(x: 0, y: 20, width: 10, height: 10), 1),
+            ("plain", CGRect(x: 0, y: 40, width: 10, height: 10), 1),
+            ("blurry", CGRect(x: 0, y: 60, width: 10, height: 10), 0.1),
+        ]
+        let boxes = Masker.flag(lines, redactor: redactor, minConfidence: 0.3)
+        XCTAssertEqual(boxes.map(\.reason), [.redacted, .redacted, .lowConfidence])
+        XCTAssertEqual(boxes.map(\.rect.minY), [0, 20, 60])
+    }
+
+    func testPaddingAndClipping() {
+        let r = Masker.painted(CGRect(x: 1, y: 1, width: 50, height: 40), width: 100, height: 100)
+        XCTAssertEqual(r, CGRect(x: 0, y: 0, width: 59, height: 49))   // pad 8 = 40 * 0.2, clipped at 0
+    }
+}
