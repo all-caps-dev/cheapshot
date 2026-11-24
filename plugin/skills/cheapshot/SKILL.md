@@ -60,7 +60,8 @@ Settings the user controls (never set or unset them yourself):
    is not masked, so treat the copy as layout, not as proof nothing sensitive is on screen.
    If you really need the raw pixels, ask the user. They run
    `cheapshot allow <path>` in a terminal (it refuses to run without a foreground terminal), then
-   you Read the same path again. For an image, that Read returns a copy: the same pixels, turned
+   you Read the same path again. For an image, that Read returns a copy: the pixels re-encoded as
+   an 8-bit sRGB PNG, first frame only (an animated GIF or multi-page TIFF loses the rest), turned
    upright, with no GPS position, camera make or model, capture date, IPTC or XMP. A PDF arrives
    as the file itself. The allowance lasts five minutes and is used once. The MCP
    tools' `raw` argument is refused unless the user set `CHEAPSHOT_ALLOW_RAW=1`. These stop
@@ -95,9 +96,13 @@ not a hostile agent.
   `cheapshot allow` makes of an image, are re-encoded PNGs with no EXIF, GPS, TIFF Make, Model
   or Software, IPTC, XMP, MakerNote or orientation tag: ImageIO's own eXIf chunk (colour space
   and size) is dropped too. EXIF-rotated photos (iPhone JPEG and HEIC) are turned upright first.
-- The hook intercepts png, jpg, jpeg, webp, gif and pdf Reads. For a HEIC or TIFF, `allow`
-  prints the copy's path; a Read of that path is honoured once. Reading the original HEIC is
-  not intercepted at all.
+- The hook intercepts png, jpg, jpeg, webp, gif, heic, heif, tif, tiff, bmp and pdf Reads, the
+  same image types `allow` strips, so a Read of an allowed HEIC is rewritten to its copy.
+- The copies are private: `$TMPDIR/cheapshot-allowed` must be a 0700 directory owned by the user
+  (`allow` refuses anything else, symlinks included) and each copy is 0600. The hook deletes an
+  allow copy as soon as its entry is used or expires, and every hook run removes its own
+  `cheapshot-read.*` copies once they are over 2 minutes old (the Read happens straight after
+  the hook).
 - `allow` of a PDF still passes the file itself, including its document metadata and any EXIF
   inside embedded photos.
 - An older cheapshot binary writes a plain allow line for images, which still passes the raw

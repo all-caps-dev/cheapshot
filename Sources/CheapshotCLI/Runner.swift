@@ -226,23 +226,72 @@ public enum CLI {
         // SHA-256. The hook then points the Read at a fresh copy of the copy (`updatedInput`),
         // so the agent asks for the original and gets the stripped pixels. If the copy cannot be
         // made, nothing is allowed: never fall back to the raw file.
-        let stripped: (data: Data, width: Int, height: Int)
+        let stripped: (data: Data, width: Int, height: Int, frames: Int)
         do { stripped = try Masker.strippedPNG(path: absolutePath(path)) }
         catch { io.err("cheapshot: allow: \(error); nothing was allowed\n"); return 1 }
         let dest = scratchURL(for: path, folder: "cheapshot-allowed", tag: "allowed", io)
-        do {
-            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
-            try stripped.data.write(to: dest, options: .withoutOverwriting)
-        } catch { io.err("cheapshot: allow: cannot write \(dest.path): \(error.localizedDescription); nothing was allowed\n"); return 1 }
+        let dir = dest.deletingLastPathComponent()
+        // The copy is the person's unredacted pixels: a private folder, a 0600 file, and stale
+        // copies from earlier allows (used, or never used and expired) are swept first. The
+        // hook also deletes a copy as soon as its entry is used or expires.
+        if let why = ensurePrivateDir(dir) { io.err("cheapshot: allow: \(why); nothing was allowed\n"); return 1 }
+        sweepStale(in: dir, olderThan: TimeInterval(allowSeconds + 60))
+        if let why = writePrivateFile(stripped.data, to: dest) {
+            io.err("cheapshot: allow: cannot write \(dest.path): \(why); nothing was allowed\n"); return 1
+        }
         let digest = SHA256.hash(data: stripped.data).map { String(format: "%02x", $0) }.joined()
         guard let absolute = writeAllowEntry(path, io, sha256: digest, copy: dest.path) else {
             try? FileManager.default.removeItem(at: dest)
             return 1
         }
         io.out("cheapshot: allowed \(absolute) for 5 minutes\n")
-        io.out("cheapshot: the agent sees a copy with the pixels only (\(stripped.width)x\(stripped.height), upright, no location, camera or date metadata): \(dest.path)\n")
+        let frames = stripped.frames > 1 ? ", first frame of \(stripped.frames) only" : ""
+        io.out("cheapshot: the agent sees a copy, pixels re-encoded as an 8-bit sRGB PNG (\(stripped.width)x\(stripped.height), upright\(frames), no location, camera or date metadata): \(dest.path)\n")
         return 0
+    }
+
+    /// Creates `dir` with mode 0700, or checks an existing one: it must be a real directory (not
+    /// a symlink, checked with lstat), owned by this user, mode 0700. Anything else is refused
+    /// rather than repaired, since another user or a planted link may own it. nil means ready.
+    static func ensurePrivateDir(_ dir: URL) -> String? {
+        var st = stat()
+        if lstat(dir.path, &st) != 0 {
+            guard errno == ENOENT else { return "cannot check \(dir.path): \(String(cString: strerror(errno)))" }
+            // mkdir ignores bits the umask clears, so set the mode again after.
+            guard mkdir(dir.path, 0o700) == 0 || errno == EEXIST else {
+                return "cannot create \(dir.path): \(String(cString: strerror(errno)))"
+            }
+            guard lstat(dir.path, &st) == 0 else { return "cannot check \(dir.path)" }
+            if (st.st_mode & S_IFMT) == S_IFDIR, st.st_uid == getuid() { chmod(dir.path, 0o700); st.st_mode = (st.st_mode & S_IFMT) | 0o700 }
+        }
+        guard (st.st_mode & S_IFMT) == S_IFDIR else { return "\(dir.path) is not a plain directory (a symlink or a file)" }
+        guard st.st_uid == getuid() else { return "\(dir.path) belongs to another user" }
+        guard (st.st_mode & 0o777) == 0o700 else { return "\(dir.path) has mode \(String(st.st_mode & 0o777, radix: 8)), not 700" }
+        return nil
+    }
+
+    /// Writes `data` to a new file with mode 0600. O_EXCL refuses an existing file and O_NOFOLLOW
+    /// a symlink, so nothing already there is overwritten or followed. nil means written.
+    static func writePrivateFile(_ data: Data, to url: URL) -> String? {
+        let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { return String(cString: strerror(errno)) }
+        let written = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
+        close(fd)
+        guard written == data.count else { unlink(url.path); return "short write" }
+        return nil
+    }
+
+    /// Deletes regular files in `dir` last changed more than `age` seconds ago.
+    static func sweepStale(in dir: URL, olderThan age: TimeInterval) {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+        let cutoff = Date().addingTimeInterval(-age)
+        for name in names {
+            let p = dir.appendingPathComponent(name).path
+            guard let a = try? fm.attributesOfItem(atPath: p), a[.type] as? FileAttributeType == .typeRegular,
+                  let m = a[.modificationDate] as? Date, m < cutoff else { continue }
+            try? fm.removeItem(atPath: p)
+        }
     }
 
     /// Absolute, standardised form of `path`, the form the hook compares against.

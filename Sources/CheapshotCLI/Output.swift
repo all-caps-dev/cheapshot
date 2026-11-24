@@ -22,7 +22,8 @@ public enum Output {
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes;
                                            needs a foreground terminal; a speed bump, not a sandbox).
-                                           An image is shown as an upright copy with no metadata
+                                           An image is shown as a copy: pixels re-encoded as an
+                                           8-bit sRGB PNG, first frame, upright, no metadata
                                            (no GPS, camera or date); a PDF as the file itself
           cheapshot mask [--out <f.png>] <image>  write a copy with every redacted or low-confidence
                                            line painted black, allow only that copy (5 minutes),

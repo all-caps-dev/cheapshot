@@ -29,7 +29,7 @@ if ! command -v jq >/dev/null 2>&1; then
   [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ] && exit 0
   # The path pattern allows JSON escapes (\" and friends), so a quote in a file name cannot
   # end the match early and slip past the deny.
-  if [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|pdf)"'; then
+  if [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|heic|heif|tiff?|bmp|pdf)"'; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this image was not read (CHEAPSHOT_STRICT=1). Tell the user."},"systemMessage":"cheapshot: jq is missing; strict mode denied an image Read. Install it: brew install jq"}'
   fi
   exit 0
@@ -38,9 +38,13 @@ fi
 path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -n "$path" ] || exit 0
 ext=$(printf '%s' "${path##*.}" | tr 'A-Z' 'a-z')
-case "$ext" in png|jpg|jpeg|webp|gif|pdf) ;; *) exit 0 ;; esac
+# The same image types `cheapshot allow` strips (NOV-117), so an allowed HEIC is rewritten too.
+case "$ext" in png|jpg|jpeg|webp|gif|heic|heif|tif|tiff|bmp|pdf) ;; *) exit 0 ;; esac
 
 tmp="${TMPDIR:-/tmp}"
+# Fresh copies made for an earlier Read (below) are needed only until that Read ran, which is
+# straight after the hook: every run removes ones over 2 minutes old. Only our own folder names.
+find "$tmp" -maxdepth 1 -type d -name 'cheapshot-read.*' -mmin +2 -exec rm -rf {} + 2>/dev/null
 sid=$(printf '%s' "$input" | jq -r '.session_id // "nosession"' | tr -c 'A-Za-z0-9._\n-' '_')
 
 # A hint that lets the Read proceed: one line on stderr, the same text as systemMessage on stdout.
@@ -142,10 +146,18 @@ if [ -f "$allow" ]; then
   hit=0
   fresh=""
   tab=$(printf '\t')
-  # Fresh copies from earlier Reads are only needed until that Read ran: drop ones over 10 minutes old.
-  find "$tmp" -maxdepth 1 -type d -name 'cheapshot-read.*' -mmin +10 -exec rm -rf {} + 2>/dev/null
+  # Delete an allow copy whose entry is used up or expired. Only a file inside our own
+  # cheapshot-allowed folder, so a forged entry cannot point this at anything else.
+  drop_copy() {
+    case "$1" in "${tmp%/}"/cheapshot-allowed/*|/private"${tmp%/}"/cheapshot-allowed/*)
+      case "$1" in */../*) ;; *) [ -f "$1" ] && [ ! -L "$1" ] && rm -f "$1" ;; esac ;;
+    esac
+  }
   while IFS="$tab" read -r exp p sum copy || [ -n "$exp" ]; do
-    [ "$exp" -ge "$now" ] 2>/dev/null || continue
+    if ! [ "$exp" -ge "$now" ] 2>/dev/null; then
+      [ -n "$copy" ] && drop_copy "$copy"
+      continue
+    fi
     if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ] || { [ -n "$copy" ] && { [ "$copy" = "$path" ] || [ "$copy" = "$alt" ]; }; }; }; then
       # Either way the entry is used up: a tampered entry falls through to normal handling.
       if [ -n "$sum" ]; then
@@ -154,12 +166,14 @@ if [ -f "$allow" ]; then
         # the hash below is taken of the fresh copy, which is what the Read will see.
         if [ -f "$src" ] && [ ! -L "$src" ] && rd=$(mktemp -d "$tmp/cheapshot-read.XXXXXX"); then
           f="$rd/$(basename "$src")"
-          if cp "$src" "$f" 2>/dev/null && [ "$(shasum -a 256 "$f" 2>/dev/null | cut -d' ' -f1)" = "$sum" ]; then
+          if cp "$src" "$f" 2>/dev/null && chmod 600 "$f" && [ "$(shasum -a 256 "$f" 2>/dev/null | cut -d' ' -f1)" = "$sum" ]; then
             hit=1; fresh="$f"
           else
             rm -rf "${rd:?}"
           fi
         fi
+        # The allow copy has done its job (or was tampered with): the fresh copy is what is read.
+        [ -n "$copy" ] && drop_copy "$copy"
         continue
       fi
       hit=1; continue

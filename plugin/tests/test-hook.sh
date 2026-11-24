@@ -56,7 +56,7 @@ grep -q -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "binary called wit
 
 # 3. every extension in the list is ours, case-insensitive
 fresh
-for e in jpg JPEG webp gif PNG; do
+for e in jpg JPEG webp gif PNG heic HEIF tif tiff bmp; do
   dec=$(input "/tmp/x.$e" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
   [ "$dec" = deny ] && pass "extension $e" || fail "extension $e"
 done
@@ -148,9 +148,12 @@ case "$f" in "$orig"|"$c") fail "image allow: Read must not name the original or
 grep -qx -- '--note-passthrough allow' "$FAKE_LOG" && pass "image allow: recorded in the ledger" || fail "image allow: ledger $(cat "$FAKE_LOG")"
 grep -q "$orig" "$TMPDIR/cheapshot-allow" && fail "image allow: entry consumed" || pass "image allow: entry consumed"
 grep -q '/tmp/other.png' "$TMPDIR/cheapshot-allow" && pass "image allow: other entries kept" || fail "image allow: other entries kept"
+[ ! -e "$c" ] && pass "image allow: the allow copy is deleted once its entry is used" || fail "image allow: allow copy left on disk"
+[ "$(stat -f %Lp "$f")" = 600 ] && pass "image allow: the fresh copy is 0600" || fail "image allow: fresh copy mode $(stat -f %Lp "$f")"
 dec=$(input "$orig" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "image allow: second Read is denied again" || fail "image allow: second Read ($dec)"
-# A Read naming the copy itself matches the same entry (for types the hook does not intercept).
+# A Read naming the copy itself matches the same entry.
+printf 'stripped-pixels' > "$c"
 printf '%s\t%s\t%s\t%s\n' "$((now + 200))" "$orig" "$csum" "$c" > "$TMPDIR/cheapshot-allow"
 f=$(input "$c" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.updatedInput.file_path // empty')
 [ "$(cat "$f" 2>/dev/null)" = stripped-pixels ] && pass "image allow: a Read of the copy path also matches" || fail "image allow: copy path read ($f)"
@@ -160,16 +163,45 @@ printf 'tampered' > "$c"
 dec=$(input "$orig" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "image allow: a changed copy is denied" || fail "image allow: changed copy ($dec)"
 [ -s "$TMPDIR/cheapshot-allow" ] && fail "image allow: tampered entry used up" || pass "image allow: tampered entry used up"
+[ ! -e "$c" ] && pass "image allow: a tampered copy is deleted" || fail "image allow: tampered copy left on disk"
 ls -d "$TMPDIR"/cheapshot-read.* >/dev/null 2>&1 && [ "$(ls -d "$TMPDIR"/cheapshot-read.* | wc -l | tr -d ' ')" = 2 ] && pass "image allow: a refused copy leaves no fresh folder" || fail "image allow: fresh folders $(ls -d "$TMPDIR"/cheapshot-read.* 2>/dev/null)"
 # A missing copy is refused too, never a fall-back to the original.
 printf '%s\t%s\t%s\t%s\n' "$((now + 200))" "$orig" "$csum" "$TMPDIR/nope.png" > "$TMPDIR/cheapshot-allow"
 dec=$(input "$orig" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "image allow: a missing copy is denied" || fail "image allow: missing copy ($dec)"
-# Old fresh folders are cleaned up on a later run.
-old=$(mktemp -d "$TMPDIR/cheapshot-read.XXXXXX"); touch -t 202601010000 "$old"
-printf '%s\t/tmp/other.png\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+# An expired entry's copy is deleted; a forged entry cannot delete a file outside cheapshot-allowed.
+printf 'stripped-pixels' > "$c"; printf 'keep-me' > "$TMPDIR/precious.png"
+printf '%s\t%s\t%s\t%s\n%s\t%s\t%s\t%s\n' "$((now - 10))" "$orig" "$csum" "$c" "$((now - 10))" "$orig" "$csum" "$TMPDIR/precious.png" > "$TMPDIR/cheapshot-allow"
 input /tmp/shot.png | run_hook >/dev/null 2>&1
-[ ! -d "$old" ] && pass "image allow: fresh folders over 10 minutes old are removed" || fail "image allow: old fresh folder kept"
+[ ! -e "$c" ] && pass "image allow: an expired entry's copy is deleted" || fail "image allow: expired copy left on disk"
+[ -e "$TMPDIR/precious.png" ] && pass "image allow: a forged copy path outside cheapshot-allowed is never deleted" || fail "image allow: forged entry deleted a file"
+# Fresh folders are removed on any later run once over 2 minutes old; a new one is kept.
+old=$(mktemp -d "$TMPDIR/cheapshot-read.XXXXXX"); touch -t 202601010000 "$old"
+new=$(mktemp -d "$TMPDIR/cheapshot-read.XXXXXX")
+rm -f "$TMPDIR/cheapshot-allow"
+input /tmp/shot.png | run_hook >/dev/null 2>&1
+[ ! -d "$old" ] && pass "image allow: fresh folders over 2 minutes old are removed, even with no allow file" || fail "image allow: old fresh folder kept"
+[ -d "$new" ] && pass "image allow: a just-made fresh folder is kept for its Read" || fail "image allow: new fresh folder removed"
+
+# 6t. macOS sets TMPDIR with a trailing slash; the binary writes the copy path without the double slash.
+fresh
+now=$(date +%s)
+mkdir -p "$TMPDIR/cheapshot-allowed"; c="$TMPDIR/cheapshot-allowed/x-allowed.png"; printf 'p' > "$c"
+printf '%s\t/tmp/x.png\tabc\t%s\n' "$((now - 10))" "$c" > "$TMPDIR/cheapshot-allow"
+input /tmp/shot.png | TMPDIR="$TMPDIR/" run_hook >/dev/null 2>&1
+[ ! -e "$c" ] && pass "trailing-slash TMPDIR: the expired copy is still deleted" || fail "trailing-slash TMPDIR: copy left"
+
+# 6h. NOV-117 review: the hook intercepts every type `allow` strips, so an allowed HEIC Read is
+# rewritten to its stripped copy instead of passing the original (and its GPS) through.
+fresh
+now=$(date +%s)
+heic="$TMPDIR/IMG_0002.HEIC"; printf 'heic-with-gps' > "$heic"
+mkdir -p "$TMPDIR/cheapshot-allowed"; hc="$TMPDIR/cheapshot-allowed/IMG_0002-allowed.png"; printf 'heic-stripped' > "$hc"
+printf '%s\t%s\t%s\t%s\n' "$((now + 200))" "$heic" "$(shasum -a 256 "$hc" | cut -d' ' -f1)" "$hc" > "$TMPDIR/cheapshot-allow"
+f=$(input "$heic" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.updatedInput.file_path // empty')
+[ "$(cat "$f" 2>/dev/null)" = heic-stripped ] && pass "heic: an allowed HEIC Read is rewritten to the stripped copy" || fail "heic: rewritten path ($f)"
+dec=$(input "$heic" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+[ "$dec" = deny ] && pass "heic: a HEIC Read with no allow is denied with text, not passed raw" || fail "heic: no-allow Read ($dec)"
 
 # 6b. allowlist last line without a trailing newline is honoured
 fresh

@@ -201,6 +201,58 @@ final class StripMetadataTests: XCTestCase {
         XCTAssertNotNil(still[kCGImagePropertyGPSDictionary])
     }
 
+    /// NOV-117 review: the copy is unredacted pixels, so it is 0600 in a 0700 folder, a stale
+    /// copy from an earlier allow is swept, and a folder that is not private is refused.
+    func testAllowCopyIsPrivateAndStaleCopiesAreSwept() async throws {
+        let src = try makePhoto("p.png", type: .png)
+        let dir = tmp.appendingPathComponent("cheapshot-allowed")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let stale = dir.appendingPathComponent("old-allowed.png")
+        try Data("old".utf8).write(to: stale)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: stale.path)
+        let r = await run(["allow", src.path], interactive: true)
+        XCTAssertEqual(r.code, 0, r.err)
+        let entry = try String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)
+        let copy = String(try XCTUnwrap(entry.split(separator: "\n").last).split(separator: "\t")[3])
+        let mode = { (p: String) in (try FileManager.default.attributesOfItem(atPath: p)[.posixPermissions] as? NSNumber)?.intValue }
+        XCTAssertEqual(try mode(copy), 0o600)
+        XCTAssertEqual(try mode(dir.path), 0o700)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path), "a stale copy must be swept")
+
+        // A folder with loose permissions, or a symlink in its place, is refused, not used.
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        let loose = await run(["allow", src.path], interactive: true)
+        XCTAssertEqual(loose.code, 1); XCTAssertTrue(loose.err.contains("not 700"), loose.err)
+        try FileManager.default.removeItem(at: dir)
+        let elsewhere = tmp.appendingPathComponent("elsewhere")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        try FileManager.default.createSymbolicLink(at: dir, withDestinationURL: elsewhere)
+        let link = await run(["allow", src.path], interactive: true)
+        XCTAssertEqual(link.code, 1); XCTAssertTrue(link.err.contains("not a plain directory"), link.err)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: elsewhere.path), [])
+    }
+
+    /// NOV-117 review: a multi-frame image keeps only its first frame, and allow says so.
+    func testAllowOfAnAnimatedGIFSaysFirstFrameOnly() async throws {
+        let url = tmp.appendingPathComponent("anim.gif")
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, UTType.gif.identifier as CFString, 3, nil))
+        for shade in [0.0, 0.5, 1.0] {
+            let ctx = try XCTUnwrap(CGContext(data: nil, width: 40, height: 30, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            ctx.setFillColor(CGColor(red: shade, green: shade, blue: shade, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+            CGImageDestinationAddImage(dest, try XCTUnwrap(ctx.makeImage()), nil)
+        }
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        let r = await run(["allow", url.path], interactive: true)
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertTrue(r.out.contains("first frame of 3 only"), r.out)
+        XCTAssertTrue(r.out.contains("8-bit sRGB PNG"), r.out)
+        let one = try makePhoto("one.png", type: .png)
+        let s = await run(["allow", one.path], interactive: true)
+        XCTAssertFalse(s.out.contains("first frame of"), s.out)
+    }
+
     /// An image allow that cannot make its copy allows nothing: never the raw file as a fallback.
     func testAllowOfAnUnreadableImageAllowsNothing() async throws {
         let bogus = tmp.appendingPathComponent("not-really.jpg")

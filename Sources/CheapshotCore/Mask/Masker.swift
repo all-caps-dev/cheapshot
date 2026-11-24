@@ -87,11 +87,14 @@ public enum Masker {
     }
 
     /// The pixels of `path`, upright, as PNG bytes with no metadata: what `cheapshot allow`
-    /// hands an agent in place of the original file (NOV-117). Drawn into a fresh sRGB canvas
-    /// (`paint` with no boxes), so even a camera's own colour profile does not come along.
-    public static func strippedPNG(path: String) throws -> (data: Data, width: Int, height: Int) {
+    /// hands an agent in place of the original file (NOV-117). Drawn into a fresh 8-bit sRGB
+    /// canvas (`paint` with no boxes), so even a camera's own colour profile does not come along.
+    /// Only the first frame is kept; `frames` says how many the file had (an animated GIF, a
+    /// multi-page TIFF) so the caller can say so.
+    public static func strippedPNG(path: String) throws -> (data: Data, width: Int, height: Int, frames: Int) {
         let image = try paint(try loadPixels(path: path), boxes: [])
-        return (try pngData(image), image.width, image.height)
+        let frames = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil).map { CGImageSourceGetCount($0) } ?? 1
+        return (try pngData(image), image.width, image.height, frames)
     }
 
     /// Every line any of three OCR passes finds risky. Each pass sees the text differently: the
