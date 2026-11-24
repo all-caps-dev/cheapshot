@@ -100,6 +100,25 @@ dec=$(input /tmp/shot.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.pe
 [ "$dec" = deny ] && pass "expired entry is ignored" || fail "expired entry is ignored"
 grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "expired entry dropped from the file" || pass "expired entry dropped from the file"
 
+# 6m. NOV-95 / PR #18: a mask entry carries the SHA-256 of the masked copy. The exact copy
+# passes; a file swapped in after mask, or a symlink, is denied and the entry is used up.
+fresh
+now=$(date +%s)
+m="$TMPDIR/masked.png"; printf 'masked-bytes' > "$m"
+sum=$(shasum -a 256 "$m" | cut -d' ' -f1)
+printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+out=$(input "$m" | run_hook 2>/dev/null)
+[ -z "$out" ] && pass "mask entry: the unchanged copy passes through" || fail "mask entry: unchanged copy passes: $out"
+printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+printf 'raw-secret-bytes' > "$m"
+dec=$(input "$m" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+[ "$dec" = deny ] && pass "mask entry: a file swapped in after mask is denied" || fail "mask entry: swapped file denied (dec=$dec)"
+grep -q "$m" "$TMPDIR/cheapshot-allow" && fail "mask entry: tampered entry used up" || pass "mask entry: tampered entry used up"
+printf 'masked-bytes' > "$TMPDIR/real.png"; ln -sf "$TMPDIR/real.png" "$TMPDIR/link.png"
+printf '%s\t%s\t%s\n' "$((now + 200))" "$TMPDIR/link.png" "$sum" > "$TMPDIR/cheapshot-allow"
+dec=$(input "$TMPDIR/link.png" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+[ "$dec" = deny ] && pass "mask entry: a symlink is denied even when its target hashes right" || fail "mask entry: symlink denied (dec=$dec)"
+
 # 6b. allowlist last line without a trailing newline is honoured
 fresh
 now=$(date +%s)

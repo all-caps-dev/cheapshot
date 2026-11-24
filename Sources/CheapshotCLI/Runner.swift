@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CryptoKit
 import CheapshotCore
 
 public enum CLI {
@@ -224,10 +225,13 @@ public enum CLI {
     /// Appends one allow line for `path` and returns the absolute path it wrote, or nil after
     /// printing why it could not. Shared by `allow` (a person, raw pixels) and `mask` (the masked
     /// copy only, which needs no person: the risky lines are already painted over).
-    static func writeAllowEntry(_ path: String, _ io: CLIIO) -> String? {
+    /// `sha256`, when given (mask), is written as a third field: the hook then honours the entry
+    /// only while the file is not a symlink and still hashes to it, so swapping the masked copy
+    /// for another file after `mask` does not unlock raw pixels (PR #18 review).
+    static func writeAllowEntry(_ path: String, _ io: CLIIO, sha256: String? = nil) -> String? {
         let absolute = absolutePath(path)
         let expiry = Int(Date().timeIntervalSince1970) + allowSeconds
-        let line = Data("\(expiry)\t\(absolute)\n".utf8)
+        let line = Data((sha256.map { "\(expiry)\t\(absolute)\t\($0)\n" } ?? "\(expiry)\t\(absolute)\n").utf8)
         let url = allowFile(io)
         let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
         guard fd >= 0 else { io.err("cheapshot: cannot open \(url.path): \(String(cString: strerror(errno)))\n"); return nil }
@@ -273,17 +277,20 @@ public enum CLI {
         guard dest.standardizedFileURL.path != URL(fileURLWithPath: absolutePath(path)).standardizedFileURL.path else {
             return fail("--out is the source image; mask never overwrites it")
         }
+        let digest: String
         do {
             try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
+            let png = try Masker.pngData(result.image)
             // withoutOverwriting: an existing file at --out (the source, or anything else) is an error.
-            try Masker.pngData(result.image).write(to: dest, options: .withoutOverwriting)
+            try png.write(to: dest, options: .withoutOverwriting)
+            digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
         } catch { return fail("cannot write \(dest.path): \(error.localizedDescription)") }
 
         // The same one-shot, five-minute entry `cheapshot allow` writes, for the masked copy only.
         // If the allow line cannot be written, remove the copy so no orphan is left behind, and
         // report through fail() so a --json caller still gets its error object.
-        guard let allowed = writeAllowEntry(dest.path, io) else {
+        guard let allowed = writeAllowEntry(dest.path, io, sha256: digest) else {
             try? FileManager.default.removeItem(at: dest)
             return fail("could not allow the masked copy; removed \(dest.path)")
         }

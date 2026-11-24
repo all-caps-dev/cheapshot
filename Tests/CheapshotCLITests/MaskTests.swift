@@ -5,6 +5,7 @@ import ImageIO
 import CoreGraphics
 import CoreText
 @testable import CheapshotCLI
+import CryptoKit
 @testable import CheapshotCore
 
 final class MaskTests: XCTestCase {
@@ -158,6 +159,22 @@ final class MaskTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: path))
     }
 
+    /// PR #18 review: the mask's allow entry carries the SHA-256 of the copy it wrote, so the
+    /// hook can refuse a file swapped in afterwards.
+    func testAllowEntryCarriesTheCopysHash() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let r = await run(["mask", fx.url.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        let line = try XCTUnwrap(r.out.split(separator: "\n").first { $0.hasPrefix("masked: ") })
+        let path = String(line.dropFirst("masked: ".count))
+        let entry = try String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)
+        let fields = try XCTUnwrap(entry.split(separator: "\n").last).split(separator: "\t").map(String.init)
+        XCTAssertEqual(fields.count, 3, entry)
+        XCTAssertEqual(fields[1], path)
+        let digest = SHA256.hash(data: try Data(contentsOf: URL(fileURLWithPath: path))).map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(fields[2], digest)
+    }
+
     func testNeverOverwrites() async throws {
         let fx = try makeFixture(lines: ["call " + Self.fakePhone])
         let original = try Data(contentsOf: fx.url)
@@ -176,7 +193,9 @@ final class MaskTests: XCTestCase {
 
     func testUsageErrors() async throws {
         for args in [["mask"], ["mask", "--raw", "a.png"], ["mask", "a.png", "b.png"],
-                     ["mask", "--out", "x.jpg", "a.png"], ["mask", "--min-conf", "2", "a.png"]] {
+                     ["mask", "--out", "x.jpg", "a.png"], ["mask", "--min-conf", "2", "a.png"],
+                     // PR #18 review: --min-conf may only raise the floor, never lower it.
+                     ["mask", "--min-conf", "0", "a.png"], ["mask", "--min-conf", "0.1", "a.png"]] {
             let r = await run(args)
             XCTAssertEqual(r.code, 2, "\(args): \(r.err)")
         }

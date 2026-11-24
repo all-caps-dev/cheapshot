@@ -121,6 +121,11 @@ public struct Options: Equatable {
                 guard let n = Float(v), n.isFinite, n >= 0, n <= 1 else {
                     throw UsageError(message: "mask: --min-conf must be between 0 and 1: \(v)")
                 }
+                // Raise only: nobody approves a mask run, so it may never mask less than the
+                // default (PR #18 review: --min-conf 0 drops every low-confidence box).
+                guard n >= Options(command: .help).minConfidence else {
+                    throw UsageError(message: "mask: --min-conf can only raise the floor (at least \(Options(command: .help).minConfidence)): \(v)")
+                }
                 o.minConfidence = n
             default:
                 if a.hasPrefix("-") { throw UsageError(message: "mask: unknown option \(a)") }

@@ -115,7 +115,8 @@ if ! command -v cheapshot >/dev/null 2>&1; then
   exit 0
 fi
 
-# One-shot allowlist written by `cheapshot allow <path>`: "<expiry epoch>\t<path>" per line.
+# One-shot allowlist written by `cheapshot allow <path>`: "<expiry epoch>\t<path>" per line, or
+# "<expiry>\t<path>\t<sha256>" when `cheapshot mask` wrote it for its masked copy.
 # Expired lines are dropped; the first live match for this path is consumed. `cheapshot allow`
 # standardises paths, which strips a leading /private, while Read may pass /private/tmp/...,
 # so an entry also matches the path with that prefix removed.
@@ -127,10 +128,22 @@ if [ -f "$allow" ]; then
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
   tab=$(printf '\t')
-  while IFS="$tab" read -r exp p || [ -n "$exp" ]; do
+  while IFS="$tab" read -r exp p sum || [ -n "$exp" ]; do
     [ "$exp" -ge "$now" ] 2>/dev/null || continue
-    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ]; }; then hit=1; continue; fi
-    printf '%s\t%s\n' "$exp" "$p" >> "$keep"
+    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ]; }; then
+      # A third field (written by `cheapshot mask`) is the SHA-256 of the masked copy. Honour
+      # it only while the file is a regular file, not a symlink, with that same hash, so a
+      # file swapped in after `mask` does not pass as the masked copy (PR #18 review). Either
+      # way the entry is used up: a tampered entry falls through to normal handling.
+      if [ -n "$sum" ]; then
+        got=""
+        if [ -f "$path" ] && [ ! -L "$path" ]; then got=$(shasum -a 256 "$path" 2>/dev/null | cut -d' ' -f1); fi
+        [ "$got" = "$sum" ] && hit=1
+        continue
+      fi
+      hit=1; continue
+    fi
+    if [ -n "$sum" ]; then printf '%s\t%s\t%s\n' "$exp" "$p" "$sum" >> "$keep"; else printf '%s\t%s\n' "$exp" "$p" >> "$keep"; fi
   done < "$allow"
   mv "$keep" "$allow"
   if [ "$hit" = 1 ]; then
