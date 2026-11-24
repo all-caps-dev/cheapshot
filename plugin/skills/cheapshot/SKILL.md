@@ -105,9 +105,12 @@ not a hostile agent.
   the hook).
 - `allow` of a PDF still passes the file itself, including its document metadata and any EXIF
   inside embedded photos.
-- An older cheapshot binary writes a plain allow line for images, which still passes the raw
-  file. Install the binary and the plugin together. An older hook does not understand the
-  new image entry and denies the Read (fails closed).
+- An older cheapshot binary writes a plain allow line for images. This hook refuses a plain
+  line for anything but a PDF, so that Read gets the normal redacted deny (fails closed).
+  Install the binary and the plugin together.
+- An older hook does not understand the new image entry. For png, jpg, jpeg, webp and gif it
+  denies the Read (fails closed), but it does not intercept heic, heif, tif, tiff or bmp at all,
+  so on an old plugin those Reads go to the raw file, metadata included.
 - Content OCR cannot read (QR codes, faces, other images) is never masked, and a secret OCR
   reads only partly can slip through. The copy is layout, not proof the screen is clean.
 - `mask` and the hook each find the allow file through their own `TMPDIR`. If the two differ,

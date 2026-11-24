@@ -176,7 +176,12 @@ if [ -f "$allow" ]; then
         [ -n "$copy" ] && drop_copy "$copy"
         continue
       fi
-      hit=1; continue
+      # A plain (hashless) entry is honoured for a PDF only. The current binary always writes a
+      # hashed entry for an image, so a plain image line is from an older binary or hand-made,
+      # and would pass the original with its GPS and camera metadata (PR #19 review). Used up
+      # either way; an image falls through to the normal redacted deny.
+      [ "$ext" = pdf ] && hit=1
+      continue
     fi
     line="$exp$tab$p"
     [ -n "$sum" ] && line="$line$tab$sum"
@@ -189,10 +194,15 @@ if [ -f "$allow" ]; then
     if [ -n "$fresh" ]; then
       m="cheapshot: showing the agent a checked copy of $path (pixels only, no location or camera metadata)."
       echo "$m" >&2
-      printf '%s' "$input" | jq --arg f "$fresh" --arg m "$m" \
+      # If jq fails here, an empty reply would send the Read to the original, unstripped path.
+      # Deny instead, with a reply built without jq (PR #19 review).
+      if ! printf '%s' "$input" | jq --arg f "$fresh" --arg m "$m" \
         '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow",
           permissionDecisionReason: "cheapshot: allowed once by the user or by cheapshot mask",
-          updatedInput: (.tool_input | .file_path = $f)}, systemMessage: $m}'
+          updatedInput: (.tool_input | .file_path = $f)}, systemMessage: $m}'; then
+        echo "cheapshot: could not hand over the checked copy; denied the Read instead of passing the original." >&2
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot could not hand over the checked copy, so the Read was denied. Tell the user; do not retry another way."}}'
+      fi
     fi
     exit 0
   fi

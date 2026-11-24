@@ -87,21 +87,22 @@ err3=$(mktemp "$ROOT/err.XXXXXX")
 out3=$(input /tmp/shot.png "" s2 | PATH="$NOBIN_PATH" sh "$hook" 2>"$err3")
 [ -s "$err3" ] && [ -n "$out3" ] && pass "new session gets the hint again" || fail "new session gets the hint again"
 
-# 6. allowlist: a live entry is consumed once, an expired entry is ignored
+# 6. allowlist: a live entry is consumed once, an expired entry is ignored. A plain (hashless)
+# entry is honoured for a PDF only (PR #19 review), so the plain-entry cases use a PDF.
 fresh
 now=$(date +%s)
-printf '%s\t/tmp/shot.png\n%s\t/tmp/other.png\n' "$((now + 200))" "$((now + 200))" > "$TMPDIR/cheapshot-allow"
-out=$(input /tmp/shot.png | run_hook 2>/dev/null)
+printf '%s\t/tmp/shot.pdf\n%s\t/tmp/other.pdf\n' "$((now + 200))" "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+out=$(input /tmp/shot.pdf | run_hook 2>/dev/null)
 [ -z "$out" ] && pass "allowed path passes through" || fail "allowed path passes through"
 grep -qx -- '--note-passthrough allow' "$FAKE_LOG" && pass "allow recorded in the ledger" || fail "allow recorded: $(cat "$FAKE_LOG")"
-grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "entry consumed" || pass "entry consumed"
-grep -q '/tmp/other.png' "$TMPDIR/cheapshot-allow" && pass "other entries kept" || fail "other entries kept"
-dec=$(input /tmp/shot.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+grep -q '/tmp/shot.pdf' "$TMPDIR/cheapshot-allow" && fail "entry consumed" || pass "entry consumed"
+grep -q '/tmp/other.pdf' "$TMPDIR/cheapshot-allow" && pass "other entries kept" || fail "other entries kept"
+dec=$(input /tmp/shot.pdf | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "second Read is denied again" || fail "second Read is denied again"
-printf '%s\t/tmp/shot.png\n' "$((now - 10))" > "$TMPDIR/cheapshot-allow"
-dec=$(input /tmp/shot.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+printf '%s\t/tmp/shot.pdf\n' "$((now - 10))" > "$TMPDIR/cheapshot-allow"
+dec=$(input /tmp/shot.pdf | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "expired entry is ignored" || fail "expired entry is ignored"
-grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "expired entry dropped from the file" || pass "expired entry dropped from the file"
+grep -q '/tmp/shot.pdf' "$TMPDIR/cheapshot-allow" && fail "expired entry dropped from the file" || pass "expired entry dropped from the file"
 
 # 6m. NOV-95 / PR #18: a mask entry carries the SHA-256 of the masked copy. The exact copy
 # passes; a file swapped in after mask, or a symlink, is denied and the entry is used up.
@@ -206,23 +207,33 @@ f=$(input "$heic" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.updatedInp
 dec=$(input "$heic" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "heic: a HEIC Read with no allow is denied with text, not passed raw" || fail "heic: no-allow Read ($dec)"
 
+# 6p. PR #19 review: a plain (hashless) entry for an image, as an older binary writes, is not
+# honoured: the original would pass with its metadata. The Read gets the redacted deny, and the
+# entry is used up.
+fresh
+now=$(date +%s)
+printf '%s\t/tmp/shot.png\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+dec=$(input /tmp/shot.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+[ "$dec" = deny ] && pass "plain image entry: Read gets the redacted deny" || fail "plain image entry denied (dec=$dec)"
+grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "plain image entry used up" || pass "plain image entry used up"
+
 # 6b. allowlist last line without a trailing newline is honoured
 fresh
 now=$(date +%s)
-printf '%s\t/tmp/other.png\n%s\t/tmp/shot.png' "$((now + 200))" "$((now + 200))" > "$TMPDIR/cheapshot-allow"
-out=$(input /tmp/shot.png | run_hook 2>/dev/null)
+printf '%s\t/tmp/other.pdf\n%s\t/tmp/shot.pdf' "$((now + 200))" "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+out=$(input /tmp/shot.pdf | run_hook 2>/dev/null)
 [ -z "$out" ] && pass "allow entry without trailing newline passes through" || fail "allow entry without trailing newline passes through"
-grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "unterminated entry consumed" || pass "unterminated entry consumed"
-grep -q '/tmp/other.png' "$TMPDIR/cheapshot-allow" && pass "other entry kept alongside it" || fail "other entry kept alongside it"
+grep -q '/tmp/shot.pdf' "$TMPDIR/cheapshot-allow" && fail "unterminated entry consumed" || pass "unterminated entry consumed"
+grep -q '/tmp/other.pdf' "$TMPDIR/cheapshot-allow" && pass "other entry kept alongside it" || fail "other entry kept alongside it"
 
 # 6c. an entry standardised to /tmp/x matches a Read of /private/tmp/x (Task 3 strips /private)
 fresh
 now=$(date +%s)
-printf '%s\t/tmp/x.png\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
-out=$(input /private/tmp/x.png | run_hook 2>/dev/null)
+printf '%s\t/tmp/x.pdf\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+out=$(input /private/tmp/x.pdf | run_hook 2>/dev/null)
 [ -z "$out" ] && pass "/private prefix: allowed /tmp path passes through" || fail "/private prefix: allowed /tmp path passes through"
-grep -q '/tmp/x.png' "$TMPDIR/cheapshot-allow" && fail "/private prefix: entry consumed" || pass "/private prefix: entry consumed"
-dec=$(input /private/tmp/x.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+grep -q '/tmp/x.pdf' "$TMPDIR/cheapshot-allow" && fail "/private prefix: entry consumed" || pass "/private prefix: entry consumed"
+dec=$(input /private/tmp/x.pdf | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "/private prefix: second Read denied again" || fail "/private prefix: second Read denied again"
 
 # 7. pdf with pages: passed as --pages, denied with text
@@ -344,8 +355,8 @@ fresh
 o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 CHEAPSHOT_PASSTHROUGH=1 run_hook 2>/dev/null)
 [ -z "$o" ] && pass "strict: CHEAPSHOT_PASSTHROUGH=1 still passes through" || fail "strict: passthrough env: $o"
 now=$(date +%s)
-printf '%s\t/tmp/shot.png\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
-o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null)
+printf '%s\t/tmp/shot.pdf\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
+o=$(input /tmp/shot.pdf | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null)
 [ -z "$o" ] && pass "strict: an allow entry still passes through" || fail "strict: allow entry: $o"
 fresh
 # A path starting with "-" is denied in strict mode and still never reaches the binary.
