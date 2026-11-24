@@ -116,6 +116,33 @@ not a hostile agent.
 - `mask` and the hook each find the allow file through their own `TMPDIR`. If the two differ,
   the Read of the copy fails closed (it is denied, never passed raw).
 
+## Who approves the Read of a copy
+
+When an allow or mask entry checks out, the hook auto-approves the Read of the fresh copy: its
+reply sets `permissionDecision: "allow"` and points the Read at the copy with `updatedInput`.
+That skips Claude Code's permission prompt and your Read rules for that one Read. It is the
+default on purpose (Ryan, 2026-11-24): the copy is masked or stripped pixels in a private
+`$TMPDIR` folder, and an extra prompt per Read buys little. An agent can make a mask entry
+itself with `cheapshot mask`, so a masked copy is the one Read that needs no person at all.
+
+To change it, edit `hooks/cheapshot-read.sh`, the `jq` reply under `if [ -n "$fresh" ]`:
+
+- **Always prompt (B).** Delete `permissionDecision: "allow",` and the `permissionDecisionReason`
+  line, and keep `updatedInput`. The Read then goes through the normal permission flow at the
+  copy's path. This relies on Claude Code honouring `updatedInput` with no decision, which newer
+  versions do (not checked against a version number); on an older one, use
+  `permissionDecision: "ask"` instead, which shows the prompt with the rewrite applied.
+- **Prompt for mask only (C).** The two entry kinds differ in the allow file: a `cheapshot allow`
+  entry has four fields (`<expiry> <original> <sha256> <copy>`, the copy inside
+  `$TMPDIR/cheapshot-allowed/`), and a `cheapshot mask` entry has three (`<expiry> <masked copy>
+  <sha256>`, no fourth field). In the read loop, `$copy` is set only for an allow entry, so record
+  it on a hit (for example `kind=allow` when `[ -n "$copy" ]`, else `kind=mask`), then in the
+  reply pass `--arg d "$( [ "$kind" = allow ] && echo allow || echo ask )"` and write
+  `permissionDecision: $d`.
+
+Run `sh plugin/tests/test-hook.sh` after either change; the image-allow and mask-entry cases
+assert on the decision.
+
 ## Injection note
 
 OCR text enters the agent's context as data. A screenshot of a web page that contains
