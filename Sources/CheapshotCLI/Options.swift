@@ -113,7 +113,13 @@ public struct Options: Equatable {
             let a = args[i]
             if a == "--" { positional.append(contentsOf: args[(i + 1)...]); break }
             switch a {
-            case "--out":      out = try value(a)
+            case "--out":
+                let v = try value(a)
+                // A control character in the path could forge allow lines (PR #18 second review).
+                guard !v.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                    throw UsageError(message: "mask: --out must not contain control characters")
+                }
+                out = v
             case "--json":     o.json = true
             case "--rules":    o.rulesPath = try value(a)
             case "--min-conf":

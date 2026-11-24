@@ -230,6 +230,12 @@ public enum CLI {
     /// for another file after `mask` does not unlock raw pixels (PR #18 review).
     static func writeAllowEntry(_ path: String, _ io: CLIIO, sha256: String? = nil) -> String? {
         let absolute = absolutePath(path)
+        // A newline, CR or tab in the path would let one call forge extra allow lines (for
+        // example a far-future entry for another file with no hash). Refuse any control
+        // character (PR #18 second review).
+        guard !absolute.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            io.err("cheapshot: refusing to allow a path with a control character in it\n"); return nil
+        }
         let expiry = Int(Date().timeIntervalSince1970) + allowSeconds
         let line = Data((sha256.map { "\(expiry)\t\(absolute)\t\($0)\n" } ?? "\(expiry)\t\(absolute)\n").utf8)
         let url = allowFile(io)

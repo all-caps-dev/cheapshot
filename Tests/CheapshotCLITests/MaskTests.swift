@@ -175,6 +175,21 @@ final class MaskTests: XCTestCase {
         XCTAssertEqual(fields[2], digest)
     }
 
+    /// PR #18 second review: no run of mask may write an allow line for any path but its copy.
+    func testNewlineInOutForgesNoAllowLine() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let forged = tmp.appendingPathComponent("a\n9999999999\t/tmp/secret.png\n/tmp/y.png").path
+        let r = await run(["mask", "--out", forged, fx.url.path])
+        XCTAssertNotEqual(r.code, 0, r.out)
+        let entry = (try? String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)) ?? ""
+        XCTAssertFalse(entry.contains("secret.png"), entry)
+        // The shared writer refuses too, so `allow` and any future caller are covered.
+        let io = CLIIO(out: { _ in }, err: { _ in }, readStdin: { "" }, environment: ["TMPDIR": tmp.path], home: tmp.path)
+        XCTAssertNil(CLI.writeAllowEntry("/tmp/x\n1\t/tmp/secret.png", io))
+        let after = (try? String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)) ?? ""
+        XCTAssertFalse(after.contains("secret.png"), after)
+    }
+
     func testNeverOverwrites() async throws {
         let fx = try makeFixture(lines: ["call " + Self.fakePhone])
         let original = try Data(contentsOf: fx.url)
@@ -195,7 +210,9 @@ final class MaskTests: XCTestCase {
         for args in [["mask"], ["mask", "--raw", "a.png"], ["mask", "a.png", "b.png"],
                      ["mask", "--out", "x.jpg", "a.png"], ["mask", "--min-conf", "2", "a.png"],
                      // PR #18 review: --min-conf may only raise the floor, never lower it.
-                     ["mask", "--min-conf", "0", "a.png"], ["mask", "--min-conf", "0.1", "a.png"]] {
+                     ["mask", "--min-conf", "0", "a.png"], ["mask", "--min-conf", "0.1", "a.png"],
+                     // PR #18 second review: a control character in --out could forge allow lines.
+                     ["mask", "--out", "/tmp/a\n9999999999\t/tmp/secret.png\n/tmp/y.png", "a.png"]] {
             let r = await run(args)
             XCTAssertEqual(r.code, 2, "\(args): \(r.err)")
         }
