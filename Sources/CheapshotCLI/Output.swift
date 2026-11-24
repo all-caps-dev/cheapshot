@@ -22,6 +22,9 @@ public enum Output {
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes;
                                            needs a foreground terminal; a speed bump, not a sandbox)
+          cheapshot mask [--out <f.png>] <image>  write a copy with every redacted or low-confidence
+                                           line painted black, allow only that copy (5 minutes),
+                                           print its path. Default copy: $TMPDIR/cheapshot-masked/
 
         OPTIONS
           --raw             do not redact (redaction is ON by default)

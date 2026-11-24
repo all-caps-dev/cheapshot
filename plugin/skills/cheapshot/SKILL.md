@@ -33,6 +33,7 @@ cheapshot --text notes.txt          # redact text with no OCR ("-" reads stdin)
 cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
+cheapshot mask shot.png             # a copy with redacted and low-confidence lines painted black, allowed for one Read
 cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels
 ```
 
@@ -52,7 +53,12 @@ Settings the user controls (never set or unset them yourself):
 
 1. When the user points at a screenshot, PDF, or recording, work from cheapshot's text. Read
    the image itself only when the question is about layout, colour, or something visual.
-2. If the hook denied a Read and you really need the pixels, ask the user. They run
+2. If the hook denied a Read of an image and you need the layout, run `cheapshot mask <path>`
+   from Bash and Read the path it prints after `masked: `. The copy has an opaque black box over
+   every line a redaction rule changed and every line under the confidence floor; only that copy
+   is allowed, once, for five minutes. Text Vision did not read at all (or read only part of)
+   is not masked, so treat the copy as layout, not as proof nothing sensitive is on screen.
+   If you really need the raw pixels, ask the user. They run
    `cheapshot allow <path>` in a terminal (it refuses to run without a foreground terminal), then
    you Read the same path again. The allowance lasts five minutes and is used once. The MCP
    tools' `raw` argument is refused unless the user set `CHEAPSHOT_ALLOW_RAW=1`. These stop
@@ -73,6 +79,21 @@ Settings the user controls (never set or unset them yourself):
    by one.
 7. An image pasted into the chat is already in context. cheapshot cannot un-send it. Ask for a
    path instead.
+
+## Known limits of `cheapshot mask`
+
+The threat model is a cooperating agent. The checks below stop accidents and casual misuse,
+not a hostile agent.
+
+- The allow entry for a masked copy carries its SHA-256, and the hook refuses a symlink or a
+  changed file. A gap remains between the hook's hash check and the Read itself; a hostile
+  agent could swap the file inside it. Planned follow-up: the hook copies the file to a fresh
+  temp name, hashes that copy, and points the Read at it (`updatedInput`), so the hashed bytes
+  are the bytes read.
+- Content OCR cannot read (QR codes, faces, other images) is never masked, and a secret OCR
+  reads only partly can slip through. The copy is layout, not proof the screen is clean.
+- `mask` and the hook each find the allow file through their own `TMPDIR`. If the two differ,
+  the Read of the copy fails closed (it is denied, never passed raw).
 
 ## Injection note
 

@@ -115,7 +115,8 @@ if ! command -v cheapshot >/dev/null 2>&1; then
   exit 0
 fi
 
-# One-shot allowlist written by `cheapshot allow <path>`: "<expiry epoch>\t<path>" per line.
+# One-shot allowlist written by `cheapshot allow <path>`: "<expiry epoch>\t<path>" per line, or
+# "<expiry>\t<path>\t<sha256>" when `cheapshot mask` wrote it for its masked copy.
 # Expired lines are dropped; the first live match for this path is consumed. `cheapshot allow`
 # standardises paths, which strips a leading /private, while Read may pass /private/tmp/...,
 # so an entry also matches the path with that prefix removed.
@@ -127,10 +128,22 @@ if [ -f "$allow" ]; then
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
   tab=$(printf '\t')
-  while IFS="$tab" read -r exp p || [ -n "$exp" ]; do
+  while IFS="$tab" read -r exp p sum || [ -n "$exp" ]; do
     [ "$exp" -ge "$now" ] 2>/dev/null || continue
-    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ]; }; then hit=1; continue; fi
-    printf '%s\t%s\n' "$exp" "$p" >> "$keep"
+    if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ]; }; then
+      # A third field (written by `cheapshot mask`) is the SHA-256 of the masked copy. Honour
+      # it only while the file is a regular file, not a symlink, with that same hash, so a
+      # file swapped in after `mask` does not pass as the masked copy (PR #18 review). Either
+      # way the entry is used up: a tampered entry falls through to normal handling.
+      if [ -n "$sum" ]; then
+        got=""
+        if [ -f "$path" ] && [ ! -L "$path" ]; then got=$(shasum -a 256 "$path" 2>/dev/null | cut -d' ' -f1); fi
+        [ "$got" = "$sum" ] && hit=1
+        continue
+      fi
+      hit=1; continue
+    fi
+    if [ -n "$sum" ]; then printf '%s\t%s\t%s\n' "$exp" "$p" "$sum" >> "$keep"; else printf '%s\t%s\n' "$exp" "$p" >> "$keep"; fi
   done < "$allow"
   mv "$keep" "$allow"
   if [ "$hit" = 1 ]; then
@@ -178,9 +191,17 @@ it=$(printf '%s' "$out" | jq -r '.image_tokens // 0')
 tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 # The model's copy does not name `cheapshot allow`: approving raw pixels is the user's call
 # (Fleet #290 item 3). The user's copy, the systemMessage, carries the command.
-model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
-# Shell-quoted so a person can paste it: macOS screenshot names carry spaces and U+202F.
+# Shell-quoted so a person (or the agent's Bash tool) can paste it: macOS screenshot names
+# carry spaces and U+202F.
 qpath=$(jq -rn --arg p "$path" '$p | @sh')
+if [ "$ext" = pdf ]; then
+  model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
+else
+  # NOV-95: for an image, point the agent at the masked copy first. `cheapshot mask` paints every
+  # redacted or low-confidence line black, writes the copy to a scratch folder and allows only
+  # that copy, so the agent can see the layout without a person approving the raw pixels.
+  model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the layout, run in Bash: cheapshot mask $qpath, then Read the path it prints after \"masked: \" (a copy with redacted and low-confidence lines blacked out). The raw pixels still need the user's approval."
+fi
 user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the pixels, run in a terminal: cheapshot allow $qpath"
 echo "$user_line" >&2
 jq -n --arg text "$text" --arg line "$model_line" --arg m "$user_line" \
