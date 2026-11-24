@@ -198,6 +198,30 @@ final class MaskTests: XCTestCase {
         XCTAssertEqual(boxes.map(\.rect.minY), [0, 20, 60])
     }
 
+    /// Two passes see the same secret line with different extents (the layout pass stops at
+    /// x 1450, the plain pass runs to 1600). Both must be painted: the whole union is black.
+    func testDifferentExtentsForOneLineAreAllPainted() throws {
+        let short = MaskBox(rect: CGRect(x: 100, y: 100, width: 1350, height: 40), reason: .redacted)
+        let long = MaskBox(rect: CGRect(x: 100, y: 100, width: 1500, height: 40), reason: .redacted)
+        let inner = MaskBox(rect: CGRect(x: 200, y: 105, width: 300, height: 30), reason: .redacted)
+        let kept = Masker.dedupe([short, long, inner])
+        XCTAssertTrue(kept.contains(long), "the wider box must never be dropped: \(kept)")
+        XCTAssertFalse(kept.contains(inner), "only a fully contained box may be dropped")
+
+        // A white 1800x300 canvas, painted with what dedupe kept, saved as PNG and sampled.
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: 1800, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 1800, height: 300))
+        let white = try XCTUnwrap(ctx.makeImage())
+        let out = tmp.appendingPathComponent("union.png")
+        try Masker.pngData(try Masker.paint(white, boxes: kept)).write(to: out)
+        let p = try pixels(out)
+        XCTAssertEqual(blackFraction(p, in: short.rect.union(long.rect)), 1.0, accuracy: 0.0001)
+        // And nothing past the padded union is painted.
+        XCTAssertEqual(blackFraction(p, in: CGRect(x: 1620, y: 100, width: 100, height: 40)), 0)
+    }
+
     func testPaddingAndClipping() {
         let r = Masker.painted(CGRect(x: 1, y: 1, width: 50, height: 40), width: 100, height: 100)
         XCTAssertEqual(r, CGRect(x: 0, y: 0, width: 59, height: 49))   // pad 8 = 40 * 0.2, clipped at 0

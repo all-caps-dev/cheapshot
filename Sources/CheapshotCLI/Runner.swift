@@ -281,7 +281,12 @@ public enum CLI {
         } catch { return fail("cannot write \(dest.path): \(error.localizedDescription)") }
 
         // The same one-shot, five-minute entry `cheapshot allow` writes, for the masked copy only.
-        guard let allowed = writeAllowEntry(dest.path, io) else { return 1 }
+        // If the allow line cannot be written, remove the copy so no orphan is left behind, and
+        // report through fail() so a --json caller still gets its error object.
+        guard let allowed = writeAllowEntry(dest.path, io) else {
+            try? FileManager.default.removeItem(at: dest)
+            return fail("could not allow the masked copy; removed \(dest.path)")
+        }
 
         let redacted = result.boxes.filter { $0.reason == .redacted }.count
         let low = result.boxes.count - redacted

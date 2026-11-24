@@ -104,8 +104,12 @@ public enum Masker {
         return out
     }
 
-    /// Drops a box that another box (of any reason) already covers almost entirely, so three
-    /// passes over the same line paint and count it once. A redacted box wins over a low-confidence one.
+    /// Drops only a box that lies entirely inside another box, so three passes over the same line
+    /// paint and count it once. A partly covered box is always kept: if the layout pass saw a
+    /// token as x 100-1450 and the plain pass as x 100-1600, dropping the second would leave the
+    /// last characters visible. Dropping a fully contained box is safe because the padding grows
+    /// with height, so the padded inner box stays inside the padded outer one. A redacted box
+    /// wins over a low-confidence one.
     static func dedupe(_ boxes: [MaskBox]) -> [MaskBox] {
         let ordered = boxes.filter { $0.reason == .redacted } + boxes.filter { $0.reason == .lowConfidence }
         var kept: [MaskBox] = []
@@ -113,12 +117,11 @@ public enum Masker {
         return kept
     }
 
-    /// True when at least 90% of `r`'s area lies inside `by`.
+    /// True when all of `r` lies inside `by` (half a pixel of slack for rounding). Anything less
+    /// counts as not covered, so the part that sticks out still gets painted.
     static func covered(_ r: CGRect, by: CGRect) -> Bool {
-        let area = r.width * r.height
-        guard area > 0 else { return true }
-        let i = r.intersection(by)
-        return !i.isNull && i.width * i.height >= 0.9 * area
+        guard r.width > 0, r.height > 0 else { return true }
+        return by.insetBy(dx: -0.5, dy: -0.5).contains(r)
     }
 
     /// The padding around a box: at least 4 px, and a fifth of the line height on taller text,

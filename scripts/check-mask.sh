@@ -38,6 +38,7 @@ HTML
 [ -s "$W/page.png" ] || { echo "Chrome wrote no screenshot"; exit 1; }
 
 export TMPDIR="$W"   # the allow file and the default mask folder land in the temp dir
+export CHEAPSHOT_HOME="$W"   # the hook's ledger notes too, never the real ledger
 orig=$("$bin" --json --no-ledger "$W/page.png") || { echo "OCR of the original failed"; exit 1; }
 echo "original redactions: $(printf '%s' "$orig" | jq -c '.results[0].redactions')"
 
