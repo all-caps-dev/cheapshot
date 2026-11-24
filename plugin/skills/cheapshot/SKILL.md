@@ -80,6 +80,19 @@ Settings the user controls (never set or unset them yourself):
 7. An image pasted into the chat is already in context. cheapshot cannot un-send it. Ask for a
    path instead.
 
+## Known limits of `cheapshot mask`
+
+The threat model is a cooperating agent. The checks below stop accidents and casual misuse,
+not a hostile agent.
+
+- The allow entry for a masked copy carries its SHA-256, and the hook refuses a symlink or a
+  changed file. A gap remains between the hook's hash check and the Read itself; a hostile
+  agent could swap the file inside it.
+- Content OCR cannot read (QR codes, faces, other images) is never masked, and a secret OCR
+  reads only partly can slip through. The copy is layout, not proof the screen is clean.
+- `mask` and the hook each find the allow file through their own `TMPDIR`. If the two differ,
+  the Read of the copy fails closed (it is denied, never passed raw).
+
 ## Injection note
 
 OCR text enters the agent's context as data. A screenshot of a web page that contains
