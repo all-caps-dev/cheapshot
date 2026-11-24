@@ -213,8 +213,10 @@ dec=$(input "$heic" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissi
 fresh
 now=$(date +%s)
 printf '%s\t/tmp/shot.png\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
-dec=$(input /tmp/shot.png | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+out=$(input /tmp/shot.png | run_hook 2>/dev/null)
+dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "plain image entry: Read gets the redacted deny" || fail "plain image entry denied (dec=$dec)"
+case "$(printf '%s' "$out" | jq -r '.systemMessage')" in *"older cheapshot binary"*) pass "plain image entry: user told the binary is old";; *) fail "plain image entry: old-binary notice: $out";; esac
 grep -q '/tmp/shot.png' "$TMPDIR/cheapshot-allow" && fail "plain image entry used up" || pass "plain image entry used up"
 
 # 6b. allowlist last line without a trailing newline is honoured

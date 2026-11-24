@@ -145,6 +145,7 @@ if [ -f "$allow" ]; then
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
   fresh=""
+  stale=0
   tab=$(printf '\t')
   # Delete an allow copy whose entry is used up or expired. Only a file inside our own
   # cheapshot-allowed folder, so a forged entry cannot point this at anything else.
@@ -180,7 +181,7 @@ if [ -f "$allow" ]; then
       # hashed entry for an image, so a plain image line is from an older binary or hand-made,
       # and would pass the original with its GPS and camera metadata (PR #19 review). Used up
       # either way; an image falls through to the normal redacted deny.
-      [ "$ext" = pdf ] && hit=1
+      if [ "$ext" = pdf ]; then hit=1; else stale=1; fi
       continue
     fi
     line="$exp$tab$p"
@@ -190,10 +191,9 @@ if [ -f "$allow" ]; then
   done < "$allow"
   mv "$keep" "$allow"
   if [ "$hit" = 1 ]; then
-    note allow
+    [ -z "$fresh" ] && note allow
     if [ -n "$fresh" ]; then
       m="cheapshot: showing the agent a checked copy of $path (pixels only, no location or camera metadata)."
-      echo "$m" >&2
       # If jq fails here, an empty reply would send the Read to the original, unstripped path.
       # Deny instead, with a reply built without jq (PR #19 review).
       if ! printf '%s' "$input" | jq --arg f "$fresh" --arg m "$m" \
@@ -201,7 +201,11 @@ if [ -f "$allow" ]; then
           permissionDecisionReason: "cheapshot: allowed once by the user or by cheapshot mask",
           updatedInput: (.tool_input | .file_path = $f)}, systemMessage: $m}'; then
         echo "cheapshot: could not hand over the checked copy; denied the Read instead of passing the original." >&2
-        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot could not hand over the checked copy, so the Read was denied. Tell the user; do not retry another way."}}'
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot could not hand over the checked copy, so the Read was denied. Tell the user; do not retry another way."},"systemMessage":"cheapshot: could not hand over the checked copy, so the Read was denied instead of passing the original."}'
+      else
+        # Log and announce only once the allow reply was actually sent (PR #19 second review).
+        echo "$m" >&2
+        note allow
       fi
     fi
     exit 0
@@ -259,6 +263,9 @@ else
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the layout, run in Bash: cheapshot mask $qpath, then Read the path it prints after \"masked: \" (a copy with redacted and low-confidence lines blacked out). The raw pixels still need the user's approval."
 fi
 user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the pixels, run in a terminal: cheapshot allow $qpath"
+# A plain allow line for an image was refused above: it came from an older binary, so another
+# `cheapshot allow` from that binary would loop. Say so (PR #19 second review).
+[ "${stale:-0}" = 1 ] && user_line="$user_line (The allow entry for this file came from an older cheapshot binary and was not honoured; update cheapshot, then run allow again.)"
 echo "$user_line" >&2
 jq -n --arg text "$text" --arg line "$model_line" --arg m "$user_line" \
   '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: ($text + "\n\n" + $line)}, systemMessage: $m}'
