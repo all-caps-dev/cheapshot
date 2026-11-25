@@ -2,7 +2,12 @@ import Foundation
 import PDFKit
 import CryptoKit
 import CoreGraphics
+// The text layer's fonts are NSFont on macOS and UIFont on iOS; isFixedPitch() below hides the split.
+#if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 public enum PDFLane: String, Codable { case text, scan }
 
@@ -164,12 +169,24 @@ public enum PDFSource {
                 bbox = CGRect(x: b.minX - bounds.minX, y: bounds.maxY - b.maxY, width: b.width, height: b.height)
             }
             if fontsAreAddressable, let attr = attributed, range.length > 0, range.location < attr.length,
-               let font = attr.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont {
-                mono = font.isFixedPitch
+               let font = attr.attribute(.font, at: range.location, effectiveRange: nil) {
+                mono = Self.isFixedPitch(font)
             }
             out.append(RenderedLine(n: out.count + 1, text: text, bbox: bbox, confidence: 1.0, fenced: mono))
         }
         return out
+    }
+
+    /// True when a text-layer font attribute is a fixed-pitch (monospaced) font. PDFKit hands
+    /// back NSFont on macOS and UIFont on iOS; anything else is not a font and counts as false.
+    static func isFixedPitch(_ font: Any) -> Bool {
+        #if canImport(AppKit)
+        return (font as? NSFont)?.isFixedPitch ?? false
+        #elseif canImport(UIKit)
+        return (font as? UIFont)?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) ?? false
+        #else
+        return false
+        #endif
     }
 
     /// The page on a white bitmap at `renderScale`. `draw(with:to:)` maps the media box onto the
