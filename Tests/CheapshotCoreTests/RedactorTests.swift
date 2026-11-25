@@ -115,6 +115,15 @@ final class RedactorTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("key sk-abcdefghijklmnopqrstuvwx").text, "key [OPENAI_KEY]")
         XCTAssertEqual(Redactor().redact(".sk-cube-grid-container-wrapper { }").text, ".sk-cube-grid-container-wrapper { }")
         XCTAssertEqual(Redactor().redact("secrets:        password: hunter2x9").text, "secrets:        password: [SECRET]")
+        XCTAssertEqual(Redactor().redact("password: hunter2x9: authentication failed").text,
+                       "password: [SECRET] authentication failed")
+        XCTAssertEqual(Redactor().redact("token=9f8e7d6c5b4a39281706f5e4d3c2b1a0: unauthorized").text,
+                       "token=[SECRET] unauthorized")
+        XCTAssertEqual(Redactor().redact(#"DATABASE_URL="postgres://u:pw1Secret9@localhost""#).text,
+                       #"DATABASE_URL="postgres://[URL_CREDS]@localhost""#)
+        XCTAssertEqual(
+            Redactor().redact(#"["DATABASE_URL=postgres://app:pw1Secret9@db","REDIS_URL=redis://:pw2Secret9@cache:6379/0"]"#).text,
+            #"["DATABASE_URL=postgres://[URL_CREDS]@db","REDIS_URL=redis://[URL_CREDS]@cache:6379/0"]"#)
         let iam = String(repeating: "Ab3%2F", count: 120)
         XCTAssertEqual(Redactor().redact("postgresql://iam_user:\(iam)@db.example.com:5432/app").text,
                        "postgresql://[URL_CREDS]@db.example.com:5432/app")
