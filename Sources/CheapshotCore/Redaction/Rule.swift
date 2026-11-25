@@ -79,7 +79,9 @@ public struct Rule: Sendable {
         let numericOnlyAfterPassword = "(?:(?<=" + passwordKeys + gap + ")"
             + #"|(?!["']?[0-9][0-9.,_+\-]*(?:["'\s`;&]|$)))"#
         let value = #"(?:"([^"\r\n]{4,})"|'([^'\r\n]{4,})'|["']?([^\s"'`,;&]{4,}))"#
-        return key + gap + numericOnlyAfterPassword + value
+        // A value that is itself a `key:` belongs to the next field (`secrets:   password: x`).
+        let notNextKey = #"(?!["']?[\w\-.]+["']?:(?:[ \t]|$))"#
+        return key + gap + numericOnlyAfterPassword + notNextKey + value
     }
 
     /// Ordered most specific first, so a key is not eaten by a looser rule. The validators are
@@ -93,10 +95,11 @@ public struct Rule: Sendable {
         // Anthropic keys (sk-ant-api03-, sk-ant-admin01-, sk-ant-oat01-) used to fall through to
         // OPENAI_KEY. This rule runs first so the label says whose key leaked.
         Rule(name: "ANTHROPIC_KEY", pattern: #"\bsk-ant-[A-Za-z0-9_\-]{20,}"#, options: []),
-        // The validator wants two digits in the body: real keys are random base62 or hex, while a
-        // CSS class from a spinner kit ("sk-cube-grid-container-wrapper") is hyphenated words.
+        // The validator refuses only a CSS class from a spinner kit ("sk-cube-grid-container-wrapper"):
+        // short lowercase words joined by hyphens. A key with one digit or none, such as
+        // `sk-live-phwfvcajkbjyn3mgwsiu`, is still a key.
         Rule(name: "OPENAI_KEY",  pattern: #"\bsk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#, options: [],
-             validator: { $0.filter(\.isNumber).count >= 2 }),
+             validator: { !Validators.looksLikeHyphenatedWords($0) }),
         // Stripe secret and restricted keys, live and test, plus webhook signing secrets.
         // Publishable keys (pk_) are public by design and are left alone.
         Rule(name: "STRIPE_KEY",  pattern: #"\b(?:sk|rk)_(?:live|test|prod)_[A-Za-z0-9]{20,}\b"#, options: []),
@@ -144,10 +147,10 @@ public struct Rule: Sendable {
         // hold "/" or "@": it runs lazily to the first "@" that is followed by a host and then
         // a port, path, query, space or end. A port after the colon ("localhost:3000/x@b.com")
         // is not a password. The username may be empty: "redis://:pw@host" and "amqps://:pw@mq"
-        // are the normal Redis and AMQP forms. Username (128), password (256) and host (253) are
+        // are the normal Redis and AMQP forms. Username (128), password (4096, room for an RDS IAM token, and it never crosses another "://") and host (253) are
         // bounded so the lazy password never walks to the end of a long line from every "://x:".
         Rule(name: "URL_CREDS",
-             pattern: #"(?<=://)[^\s:/@\[\]]{0,128}:(?!\d{1,5}(?:[/?#]|\s|$))[^\s?#]{1,256}?(?=@(?:\[[0-9A-Fa-f:.]{2,64}\]|[A-Za-z0-9.\-]{1,253})(?:[:/?#]|\s|$))"#),
+             pattern: #"(?<=://)[^\s:/@\[\]]{0,128}:(?!\d{1,5}(?:[/?#]|\s|$))(?:(?!://)[^\s?#]){1,4096}?(?=@(?:\[[0-9A-Fa-f:.]{2,64}\]|[A-Za-z0-9.\-]{1,253})(?:[:/?#]|\s|$))"#),
         // `[ \t]+`, never `\s+`: a builtin that can cross a newline redacts a joined document
         // differently from the lines it was joined from, which changed the line count in the
         // `--json` line array and left the token in the clear there.

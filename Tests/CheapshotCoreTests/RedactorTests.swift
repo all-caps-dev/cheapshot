@@ -110,6 +110,14 @@ final class RedactorTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("password: correct.horse.battery").text, "password: [SECRET]")
         XCTAssertEqual(Redactor().redact("0 192 168 1 20").text, "0 [IPV4]")
         XCTAssertEqual(Redactor().redact("00 192 168 1 20").text, "00 [IPV4]")
+        // Release review: keys with one digit or none, the next field's key, long URL passwords.
+        XCTAssertEqual(Redactor().redact("Your key sk-live-phwfvcajkbjyn3mgwsiu").text, "Your key [OPENAI_KEY]")
+        XCTAssertEqual(Redactor().redact("key sk-abcdefghijklmnopqrstuvwx").text, "key [OPENAI_KEY]")
+        XCTAssertEqual(Redactor().redact(".sk-cube-grid-container-wrapper { }").text, ".sk-cube-grid-container-wrapper { }")
+        XCTAssertEqual(Redactor().redact("secrets:        password: hunter2x9").text, "secrets:        password: [SECRET]")
+        let iam = String(repeating: "Ab3%2F", count: 120)
+        XCTAssertEqual(Redactor().redact("postgresql://iam_user:\(iam)@db.example.com:5432/app").text,
+                       "postgresql://[URL_CREDS]@db.example.com:5432/app")
         XCTAssertEqual(Redactor().redact("pass: data.center.rocks").text, "pass: [SECRET]")
         XCTAssertEqual(Redactor().redact("viewBox=\"0 0 24 24\"").text, "viewBox=\"0 0 24 24\"")
         XCTAssertEqual(

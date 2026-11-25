@@ -130,6 +130,13 @@ public enum Validators {
         return codePathRoots.contains(first.lowercased())
     }
 
+    /// A CSS class name such as `sk-cube-grid-container-wrapper`: lowercase words joined by
+    /// hyphens, at least three of them, none longer than 12 letters.
+    public static func looksLikeHyphenatedWords(_ s: String) -> Bool {
+        let parts = s.split(separator: "-", omittingEmptySubsequences: false)
+        return parts.count >= 3 && parts.allSatisfy { !$0.isEmpty && $0.count <= 12 && $0.allSatisfy { $0.isASCII && $0.isLowercase } }
+    }
+
     /// SECRET's veto. A keyword cue (`password=`) is strong evidence by itself, so the bar is
     /// low: at least 6 characters, and a letters-only value needs 10 so prose such as
     /// "password: forgotten" survives. gitleaks' generic-api-key uses the same idea, a keyword
