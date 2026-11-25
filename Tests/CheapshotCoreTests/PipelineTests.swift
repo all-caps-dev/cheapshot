@@ -55,24 +55,51 @@ final class PipelineTests: XCTestCase {
     // MARK: - text
 
     func testReadTextDropsOneTrailingNewlineAndRedacts() {
-        let r = Pipeline.readText("acct 12345678\n\n", redactor: Redactor())
+        let r = Pipeline.readText("acct 12345678\n\n", redaction: .redact(Redactor()))
         XCTAssertEqual(r.text, "acct [BANK_ACCT]\n")
+        XCTAssertTrue(r.redacted)
         XCTAssertEqual(r.report.counts, ["BANK_ACCT": 1])
         XCTAssertEqual(r.textTokens, Tokens.text(r.text))
     }
 
-    func testNoRedactorMeansRawText() {
-        let r = Pipeline.readText("mail \(Self.fakeMail)", redactor: nil)
+    func testRawIsExplicitAndEveryResultSaysSo() throws {
+        // Redaction off has to be asked for by name (.raw); there is no nil that means raw.
+        let r = Pipeline.readText("mail \(Self.fakeMail)", redaction: .raw)
         XCTAssertEqual(r.text, "mail \(Self.fakeMail)")
         XCTAssertEqual(r.report, RedactionReport())
-        XCTAssertEqual(Pipeline.redact("x", with: nil).text, "x")
+        XCTAssertFalse(r.redacted)
+        XCTAssertEqual(Pipeline.redact("x \(Self.fakeMail)", with: .raw).text, "x \(Self.fakeMail)")
+        XCTAssertEqual(Pipeline.redactLines([line(1, Self.fakeMail)], with: .raw).map(\.text), [Self.fakeMail])
+        XCTAssertFalse(Pipeline.Redaction.raw.isRedacting)
+        XCTAssertTrue(Pipeline.Redaction.redact(Redactor()).isRedacting)
+
+        let image = try Pipeline.readImage(try textImage(), redaction: .raw, minConfidence: 0.3)
+        XCTAssertFalse(image.redacted)
+        XCTAssertTrue(image.text.contains(Self.fakeMail), "raw means the text as read: \(image.text)")
+        XCTAssertEqual(image.report, RedactionReport())
+    }
+
+    func testReadPDFRawSaysSo() throws {
+        let url = tmp.appendingPathComponent("raw.pdf")
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &box, nil))
+        ctx.beginPDFPage(nil)
+        let attr = NSAttributedString(string: "acct 12345678 on page one", attributes: [kCTFontAttributeName as NSAttributedString.Key:
+                                                                                    CTFontCreateWithName("Helvetica" as CFString, 12, nil)])
+        ctx.textPosition = CGPoint(x: 72, y: 700)
+        CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+        ctx.endPDFPage()
+        ctx.closePDF()
+        let r = try Pipeline.readPDF(url: url, pages: nil, minConfidence: 0.3, forceOCR: false, redaction: .raw)
+        XCTAssertFalse(r.redacted)
+        XCTAssertTrue(r.text.contains("12345678"), r.text)
     }
 
     // MARK: - per-line redaction
 
     func testRedactLinesMatchesTheDocumentRedactionAndKeepsGeometry() {
         let lines = [line(1, "mail \(Self.fakeMail)"), line(2, "plain")]
-        let out = Pipeline.redactLines(lines, with: Redactor())
+        let out = Pipeline.redactLines(lines, with: .redact(Redactor()))
         XCTAssertEqual(out.map(\.text), ["mail [EMAIL]", "plain"])
         XCTAssertEqual(out.map(\.n), [1, 2])
         XCTAssertEqual(out.map(\.bbox), lines.map(\.bbox))
@@ -82,13 +109,13 @@ final class PipelineTests: XCTestCase {
     func testRedactLinesCatchesARuleThatNeedsTheLineAbove() {
         // Fires only with the line above in view, so per-line redaction would miss it.
         let redactor = Redactor(rules: [Rule(name: "bearer", pattern: #"(?<=Authorization: Bearer\n)\S+"#)])
-        let out = Pipeline.redactLines([line(1, "Authorization: Bearer"), line(2, "abc123")], with: redactor)
+        let out = Pipeline.redactLines([line(1, "Authorization: Bearer"), line(2, "abc123")], with: .redact(redactor))
         XCTAssertEqual(out.map(\.text), ["Authorization: Bearer", "[bearer]"])
     }
 
     func testRedactLinesFallsBackToPerLineWhenARuleEatsANewline() throws {
         let redactor = Redactor(customRules: try RuleFile.parse(Data(#"[{"name":"nl","pattern":"\\n"}]"#.utf8)))
-        let out = Pipeline.redactLines([line(1, "a \(Self.fakeMail)"), line(2, "b")], with: redactor)
+        let out = Pipeline.redactLines([line(1, "a \(Self.fakeMail)"), line(2, "b")], with: .redact(redactor))
         XCTAssertEqual(out.map(\.text), ["a [EMAIL]", "b"], "each line on its own, still redacted")
     }
 
@@ -96,7 +123,8 @@ final class PipelineTests: XCTestCase {
 
     func testReadImageRedactsAndCountsTokens() throws {
         let image = try textImage()
-        let r = try Pipeline.readImage(image, redactor: Redactor(), minConfidence: 0.3)
+        let r = try Pipeline.readImage(image, redaction: .redact(Redactor()), minConfidence: 0.3)
+        XCTAssertTrue(r.redacted)
         XCTAssertTrue(r.text.contains("[EMAIL]"), r.text)
         XCTAssertTrue(r.text.contains("[BANK_ACCT]"), r.text)
         XCTAssertEqual(r.report.counts["EMAIL"], 1)
@@ -114,9 +142,9 @@ final class PipelineTests: XCTestCase {
     func testReadImageFromPathDataAndPixelsAgree() throws {
         let image = try textImage()
         let url = try pngFile(image)
-        let a = try Pipeline.readImage(path: url.path, redactor: Redactor(), minConfidence: 0.3)
-        let b = try Pipeline.readImage(data: try Data(contentsOf: url), redactor: Redactor(), minConfidence: 0.3)
-        let c = try Pipeline.readImage(image, redactor: Redactor(), minConfidence: 0.3)
+        let a = try Pipeline.readImage(path: url.path, redaction: .redact(Redactor()), minConfidence: 0.3)
+        let b = try Pipeline.readImage(data: try Data(contentsOf: url), redaction: .redact(Redactor()), minConfidence: 0.3)
+        let c = try Pipeline.readImage(image, redaction: .redact(Redactor()), minConfidence: 0.3)
         for other in [b, c] {
             XCTAssertEqual(a.text, other.text)
             XCTAssertEqual(a.report, other.report)
@@ -127,18 +155,18 @@ final class PipelineTests: XCTestCase {
 
     func testPixelSizeOverridesTheImageSizeForTokens() throws {
         let image = try textImage()
-        let r = try Pipeline.readImage(image, pixelSize: (100, 50), redactor: nil, minConfidence: 0.3)
+        let r = try Pipeline.readImage(image, pixelSize: (100, 50), redaction: .raw, minConfidence: 0.3)
         XCTAssertEqual(r.imageTokens, Tokens.image(width: 100, height: 50))
     }
 
     func testUnreadableImageThrowsCannotReadImage() throws {
         let junk = tmp.appendingPathComponent("junk.png")
         try Data("not an image".utf8).write(to: junk)
-        XCTAssertThrowsError(try Pipeline.readImage(path: junk.path, redactor: nil, minConfidence: 0.3)) { e in
+        XCTAssertThrowsError(try Pipeline.readImage(path: junk.path, redaction: .raw, minConfidence: 0.3)) { e in
             XCTAssertEqual(e as? Pipeline.ReadError, .unreadableImage)
             XCTAssertEqual("\(e)", "cannot read image")
         }
-        XCTAssertThrowsError(try Pipeline.readImage(data: Data(), redactor: nil, minConfidence: 0.3))
+        XCTAssertThrowsError(try Pipeline.readImage(data: Data(), redaction: .raw, minConfidence: 0.3))
     }
 
     // MARK: - PDFs
@@ -157,7 +185,8 @@ final class PipelineTests: XCTestCase {
         }
         ctx.closePDF()
 
-        let r = try Pipeline.readPDF(url: url, pages: nil, minConfidence: 0.3, forceOCR: false, redactor: Redactor())
+        let r = try Pipeline.readPDF(url: url, pages: nil, minConfidence: 0.3, forceOCR: false, redaction: .redact(Redactor()))
+        XCTAssertTrue(r.redacted)
         XCTAssertEqual(r.document.pageCount, 2)
         XCTAssertEqual(r.document.sha256.count, 64)
         XCTAssertTrue(r.text.contains("acct [BANK_ACCT]"), r.text)

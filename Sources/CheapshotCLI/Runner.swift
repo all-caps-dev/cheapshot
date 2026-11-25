@@ -85,7 +85,14 @@ public enum CLI {
 
     /// Redacts `lines` the way the document text is redacted, then formats them as above.
     static func lineJSON(_ lines: [RenderedLine], redactor: Redactor?) -> [[String: Any]] {
-        lineJSON(Pipeline.redactLines(lines, with: redactor))
+        lineJSON(Pipeline.redactLines(lines, with: redaction(redactor)))
+    }
+
+    /// The CLI's redactor is nil for --raw and nothing else (`makeRedactor`). This is the one
+    /// place that turns that nil into the Pipeline's explicit `.raw`.
+    static func redaction(_ redactor: Redactor?) -> Pipeline.Redaction {
+        guard let redactor = redactor else { return .raw }
+        return .redact(redactor)
     }
 
     /// Writes the --json envelope, or the serialization failure to stderr. False means the run
@@ -401,7 +408,7 @@ public enum CLI {
             }
             raw = s
         }
-        let read = Pipeline.readText(raw, redactor: redactor)
+        let read = Pipeline.readText(raw, redaction: redaction(redactor))
         let (text, report, tt) = (read.text, read.report, read.textTokens)
         if opts.json {
             guard emit(payload([["file": path, "text": text, "redactions": report.counts,
@@ -436,7 +443,7 @@ public enum CLI {
             if (f as NSString).pathExtension.lowercased() == "pdf" {
                 let read: Pipeline.PDFRead
                 do { read = try Pipeline.readPDF(url: URL(fileURLWithPath: f), pages: opts.pages, minConfidence: opts.minConfidence,
-                                                 forceOCR: opts.forceOCR, redactor: redactor) }
+                                                 forceOCR: opts.forceOCR, redaction: redaction(redactor)) }
                 catch {
                     failed += 1
                     results.append(["file": f, "error": "\(error)"])
@@ -458,7 +465,7 @@ public enum CLI {
                 continue
             }
             let read: Pipeline.ImageRead
-            do { read = try Pipeline.readImage(path: f, redactor: redactor, minConfidence: opts.minConfidence) }
+            do { read = try Pipeline.readImage(path: f, redaction: redaction(redactor), minConfidence: opts.minConfidence) }
             catch Pipeline.ReadError.unreadableImage {
                 failed += 1
                 results.append(["file": f, "error": "\(Pipeline.ReadError.unreadableImage)"])

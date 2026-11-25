@@ -49,9 +49,26 @@ public enum Pipeline {
 
     // MARK: - redaction
 
-    /// `text` redacted, or unchanged with an empty report when `redactor` is nil (redaction off).
-    public static func redact(_ text: String, with redactor: Redactor?) -> (text: String, report: RedactionReport) {
-        redactor?.redact(text) ?? (text, RedactionReport())
+    /// Whether a read redacts, said out loud. Redaction off is `.raw` by name, never a missing
+    /// redactor, so an app cannot turn redaction off by accident (Fable review of step 2, row 3).
+    public enum Redaction {
+        /// Redact with these rules. The normal case.
+        case redact(Redactor)
+        /// Leave the text exactly as read: the CLI's --raw. Every result says `redacted: false`.
+        case raw
+
+        public var isRedacting: Bool {
+            if case .redact = self { return true }
+            return false
+        }
+    }
+
+    /// `text` redacted, or unchanged with an empty report for `.raw`.
+    public static func redact(_ text: String, with redaction: Redaction) -> (text: String, report: RedactionReport) {
+        switch redaction {
+        case .redact(let redactor): return redactor.redact(text)
+        case .raw: return (text, RedactionReport())
+        }
     }
 
     /// The same lines with their text redacted; number, box, confidence and fence unchanged.
@@ -61,9 +78,9 @@ public enum Pipeline {
     /// a rule whose pattern crosses a newline redacted the document but not the lines. When a rule
     /// does eat a newline the split no longer lines up, and then per-line redaction is the honest
     /// fallback: keeping each line's number and box on the right text matters more.
-    public static func redactLines(_ lines: [RenderedLine], with redactor: Redactor?) -> [RenderedLine] {
-        let joined = redact(lines.map(\.text).joined(separator: "\n"), with: redactor).text.components(separatedBy: "\n")
-        let texts = joined.count == lines.count ? joined : lines.map { redact($0.text, with: redactor).text }
+    public static func redactLines(_ lines: [RenderedLine], with redaction: Redaction) -> [RenderedLine] {
+        let joined = redact(lines.map(\.text).joined(separator: "\n"), with: redaction).text.components(separatedBy: "\n")
+        let texts = joined.count == lines.count ? joined : lines.map { redact($0.text, with: redaction).text }
         return zip(lines, texts).map { l, text in
             var out = l
             out.text = text
@@ -77,14 +94,16 @@ public enum Pipeline {
         public var text: String
         public var report: RedactionReport
         public var textTokens: Int
+        /// False only for a `.raw` read: then `text` is exactly what was read.
+        public var redacted: Bool
     }
 
     /// Redacts plain text. One trailing newline is dropped first, so text read from a file or a
     /// pipe ends where its last line ends.
-    public static func readText(_ raw: String, redactor: Redactor?) -> TextRead {
+    public static func readText(_ raw: String, redaction: Redaction) -> TextRead {
         let input = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
-        let (text, report) = redact(input, with: redactor)
-        return TextRead(text: text, report: report, textTokens: Tokens.text(text))
+        let (text, report) = redact(input, with: redaction)
+        return TextRead(text: text, report: report, textTokens: Tokens.text(text), redacted: redaction.isRedacting)
     }
 
     // MARK: - images
@@ -110,6 +129,8 @@ public enum Pipeline {
         /// What the image would cost an agent to look at, and what the text costs instead.
         public var imageTokens: Int
         public var textTokens: Int
+        /// False only for a `.raw` read: then `text` and `lines` are exactly what OCR read.
+        public var redacted: Bool
         /// The cold-start check (v0.6.0, OCR.recognizeLayoutChecked): `retried` is true when a
         /// second OCR pass ran; `screenshotLike` is the image heuristic the retry was gated on.
         /// `status` `.empty` with `retried` is a screenshot-like image that still read blank, a
@@ -123,29 +144,29 @@ public enum Pipeline {
     /// redact, count.
     /// Throws ``ReadError/unreadableImage`` when the file cannot be decoded, and passes OCR
     /// errors through unchanged.
-    public static func readImage(path: String, redactor: Redactor?, minConfidence: Float) throws -> ImageRead {
+    public static func readImage(path: String, redaction: Redaction, minConfidence: Float) throws -> ImageRead {
         guard let image = ImageLoader.load(path: path) else { throw ReadError.unreadableImage }
-        return try readImage(image, pixelSize: ImageLoader.pixelSize(path: path), redactor: redactor, minConfidence: minConfidence)
+        return try readImage(image, pixelSize: ImageLoader.pixelSize(path: path), redaction: redaction, minConfidence: minConfidence)
     }
 
     /// Reads an image held in memory (a paste or a drop), so its pixels never touch disk.
-    public static func readImage(data: Data, redactor: Redactor?, minConfidence: Float) throws -> ImageRead {
+    public static func readImage(data: Data, redaction: Redaction, minConfidence: Float) throws -> ImageRead {
         guard let image = ImageLoader.load(data: data) else { throw ReadError.unreadableImage }
-        return try readImage(image, pixelSize: ImageLoader.pixelSize(data: data), redactor: redactor, minConfidence: minConfidence)
+        return try readImage(image, pixelSize: ImageLoader.pixelSize(data: data), redaction: redaction, minConfidence: minConfidence)
     }
 
     /// Reads decoded pixels. `pixelSize` is the size to bill tokens for; it defaults to the
     /// image's own size, and differs only for a file whose reader reports another size (an SVG).
     public static func readImage(_ image: CGImage, pixelSize: (width: Int, height: Int)? = nil,
-                                 redactor: Redactor?, minConfidence: Float) throws -> ImageRead {
+                                 redaction: Redaction, minConfidence: Float) throws -> ImageRead {
         let checked = try OCR.recognizeLayoutChecked(image: image, minConfidence: minConfidence)
         let rendered = checked.lines
-        let (text, report) = redact(Layout.text(rendered), with: redactor)
+        let (text, report) = redact(Layout.text(rendered), with: redaction)
         let size = pixelSize ?? (image.width, image.height)
-        return ImageRead(text: text, report: report, lines: redactLines(rendered, with: redactor),
+        return ImageRead(text: text, report: report, lines: redactLines(rendered, with: redaction),
                          width: size.width, height: size.height,
                          imageTokens: Tokens.image(width: size.width, height: size.height),
-                         textTokens: Tokens.text(text),
+                         textTokens: Tokens.text(text), redacted: redaction.isRedacting,
                          retried: checked.retried, screenshotLike: checked.screenshotLike)
     }
 
@@ -160,17 +181,20 @@ public enum Pipeline {
         /// What reading every page as a 2x image would have cost: an estimate, not a measurement.
         public var imageTokens: Int
         public var textTokens: Int
+        /// False only for a `.raw` read: then `text` and every page's lines are exactly as read.
+        public var redacted: Bool
     }
 
     /// Reads a PDF (text lane or scan lane per page), redacts, counts. PDFSource errors pass
     /// through unchanged.
     public static func readPDF(url: URL, pages: ClosedRange<Int>?, minConfidence: Float, forceOCR: Bool,
-                               redactor: Redactor?) throws -> PDFRead {
+                               redaction: Redaction) throws -> PDFRead {
         var doc = try PDFSource.pages(of: url, range: pages, minConfidence: minConfidence, forceOCR: forceOCR)
-        let (text, report) = redact(PDFSource.text(of: doc), with: redactor)
+        let (text, report) = redact(PDFSource.text(of: doc), with: redaction)
         let it = doc.pages.reduce(0) { $0 + Tokens.image(width: $1.width, height: $1.height) }
-        for i in doc.pages.indices { doc.pages[i].lines = redactLines(doc.pages[i].lines, with: redactor) }
-        return PDFRead(document: doc, text: text, report: report, imageTokens: it, textTokens: Tokens.text(text))
+        for i in doc.pages.indices { doc.pages[i].lines = redactLines(doc.pages[i].lines, with: redaction) }
+        return PDFRead(document: doc, text: text, report: report, imageTokens: it, textTokens: Tokens.text(text),
+                       redacted: redaction.isRedacting)
     }
 
     // MARK: - totals and the ledger
