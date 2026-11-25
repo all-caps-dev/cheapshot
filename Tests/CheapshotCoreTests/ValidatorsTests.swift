@@ -143,6 +143,9 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertTrue(Validators.secretValue("john.smith"))
         XCTAssertTrue(Validators.secretValue("data.center.rocks"))
         XCTAssertTrue(Validators.secretValue("open.sesame.secret"))    // secret-name leaf alone
-        XCTAssertFalse(Validators.secretValue("this.state.authToken")) // camelCase segment
+        XCTAssertTrue(Validators.secretValue("iLove.myDog"))           // camelCase alone: passphrase
+        XCTAssertTrue(Validators.secretValue("horse_battery.staple"))  // "_" alone: passphrase
+        XCTAssertTrue(Validators.secretValue("my_secret.phrase"))
+        XCTAssertTrue(Validators.looksLikeSecret("Kx9.mQ2vB7nZ4wR8tY1pL3sD6fH"))  // dotted random run
     }
 }
