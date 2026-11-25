@@ -413,19 +413,19 @@ dec=$(input /tmp/shot.png | CLAUDE_PLUGIN_ROOT="$root2" PATH="$fake:$PATH" sh -c
 
 # 12. Fleet #290 item 4: CHEAPSHOT_STRICT=1 denies on every failure instead of passing pixels through.
 strict_denies() {
-  # $1 label; stdin is the hook output
-  o=$(cat)
+  # $1 label; $o holds the hook output. The caller captures it first (o=$(...); strict_denies),
+  # since piping into this function ran it in a subshell where a failure was never counted.
   [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "strict: $1 is denied" || fail "strict: $1 is denied: $o"
 }
 fresh
-input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_EXIT=1 run_hook 2>/dev/null | strict_denies "binary failure"
+o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_EXIT=1 run_hook 2>/dev/null); strict_denies "binary failure"
 grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "strict: a deny is not a pass-through" || pass "strict: a deny is not recorded as a pass-through"
 fresh
-input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_RAW='not json' run_hook 2>/dev/null | strict_denies "non-JSON output"
+o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_RAW='not json' run_hook 2>/dev/null); strict_denies "non-JSON output"
 fresh
-input /tmp/report.pdf | CHEAPSHOT_STRICT=1 FAKE_PAGES=42 run_hook 2>/dev/null | strict_denies "PDF over the page cap"
+o=$(input /tmp/report.pdf | CHEAPSHOT_STRICT=1 FAKE_PAGES=42 run_hook 2>/dev/null); strict_denies "PDF over the page cap"
 fresh
-input /tmp/shot.png | CHEAPSHOT_STRICT=1 PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null | strict_denies "missing binary"
+o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null); strict_denies "missing binary"
 fresh
 # No jq on PATH (/bin has cat but no jq): strict still denies an image Read and leaves a source file alone.
 # A PATH holding only symlinks to the tools the hook needs, so no jq is reachable even where /bin
