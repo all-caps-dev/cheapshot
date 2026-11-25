@@ -79,11 +79,7 @@ public struct Rule: Sendable {
         let numericOnlyAfterPassword = "(?:(?<=" + passwordKeys + gap + ")"
             + #"|(?!["']?[0-9][0-9.,_+\-]*(?:["'\s`;&]|$)))"#
         let value = #"(?:"([^"\r\n]{4,})"|'([^'\r\n]{4,})'|["']?([^\s"'`,;&]{4,}))"#
-        // A value that is itself a secret keyword key belongs to the next field
-        // (`secrets:   password: x`). Any other value followed by ":" is still a value
-        // (`password: hunter2x9: authentication failed`).
-        let notNextKey = #"(?!["']?"# + secretKeywords + #"[\w\-.]{0,20}["']?:(?:[ \t]|$))"#
-        return key + gap + numericOnlyAfterPassword + notNextKey + value
+        return key + gap + numericOnlyAfterPassword + value
     }
 
     /// Ordered most specific first, so a key is not eaten by a looser rule. The validators are
@@ -149,12 +145,10 @@ public struct Rule: Sendable {
         // hold "/" or "@": it runs lazily to the first "@" that is followed by a host and then
         // a port, path, query, space or end. A port after the colon ("localhost:3000/x@b.com")
         // is not a password. The username may be empty: "redis://:pw@host" and "amqps://:pw@mq"
-        // are the normal Redis and AMQP forms. Username (128), password (4096, room for an RDS IAM token) and host (253) are
-        // bounded, and the password never crosses another "://", so the lazy password never walks to
-        // the end of a long line from every "://x:". The host may also end at a quote, comma,
-        // semicolon or closing bracket, so a URL inside JSON or a quoted value is caught.
+        // are the normal Redis and AMQP forms. Username (128), password (256) and host (253) are
+        // bounded so the lazy password never walks to the end of a long line from every "://x:".
         Rule(name: "URL_CREDS",
-             pattern: #"(?<=://)[^\s:/@\[\]]{0,128}:(?!\d{1,5}(?:[/?#]|\s|$))(?:(?!://)[^\s?#]){1,4096}?(?=@(?:\[[0-9A-Fa-f:.]{2,64}\]|[A-Za-z0-9.\-]{1,253})(?:[:/?#"',;)>\]}]|\s|$))"#),
+             pattern: #"(?<=://)[^\s:/@\[\]]{0,128}:(?!\d{1,5}(?:[/?#]|\s|$))[^\s?#]{1,256}?(?=@(?:\[[0-9A-Fa-f:.]{2,64}\]|[A-Za-z0-9.\-]{1,253})(?:[:/?#]|\s|$))"#),
         // `[ \t]+`, never `\s+`: a builtin that can cross a newline redacts a joined document
         // differently from the lines it was joined from, which changed the line count in the
         // `--json` line array and left the token in the clear there.
