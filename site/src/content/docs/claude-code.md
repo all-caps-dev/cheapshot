@@ -66,8 +66,8 @@ the ledger, and `cheapshot --ledger` counts them:
 An image with no text that does not look like a photo is denied in every mode,
 never passed as pixels: a screenshot that still read blank after the cold-start
 retry (`"empty"` with `"retried": true`), a result with no usable `ocr_status`,
-and any image read by a binary older than 0.6.0, which reports neither field and
-so cannot tell a photo from a failed read. Look at the image yourself, then run
+and any image read by a binary that does not report `ocr_status` (added in
+v0.6.0), which cannot tell a photo from a failed read. Look at the image yourself, then run
 `cheapshot allow <path>` in a terminal, or `cheapshot mask <path>` for a copy with
 any text it finds blacked out. When text was found but OCR was retried, the
 redacted text is still returned, with a note that some lines may be missing.

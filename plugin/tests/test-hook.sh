@@ -310,6 +310,7 @@ reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason 
 msg=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
 case "$reason" in *"no text"*"retry"*) pass "empty + retried: reason says OCR read nothing after a retry";; *) fail "empty + retried reason: $reason";; esac
 case "$reason" in *"cheapshot allow"*|*"cheapshot mask"*) fail "empty + retried: reason must not name allow or mask";; *) pass "empty + retried: reason names neither allow nor mask";; esac
+case "$reason" in *"Read it once more"*) fail "empty + retried: reason must not invite a re-Read: $reason";; *) pass "empty + retried: reason does not invite a re-Read";; esac
 case "$msg" in *"cheapshot allow '/tmp/shot.png'"*) pass "empty + retried: user message names cheapshot allow, quoted";; *) fail "empty + retried user message lacks allow: $msg";; esac
 case "$msg" in *"cheapshot mask '/tmp/shot.png'"*) pass "empty + retried: user message names cheapshot mask";; *) fail "empty + retried user message lacks mask: $msg";; esac
 grep -qF "$msg" "$err" && pass "empty + retried: user message also on stderr" || fail "empty + retried stderr: $(cat "$err")"
@@ -321,7 +322,9 @@ o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_RAW="$(ocr_result '"empty"' tr
 fresh
 o=$(input /tmp/shot.png | FAKE_EMPTY_TEXT=1 run_hook 2>/dev/null); denied "older binary, empty text"
 msg=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
-case "$msg" in *"older"*"cheapshot allow '/tmp/shot.png'"*) pass "older binary: user message says update or allow";; *) fail "older binary user message: $msg";; esac
+case "$msg" in *"does not report ocr_status (added in v0.6.0)"*"cheapshot allow '/tmp/shot.png'"*) pass "older binary: user message says update or allow";; *) fail "older binary user message: $msg";; esac
+# Dev builds that call themselves 0.6.0 lack the fields too, so the message makes no version claim.
+case "$msg" in *"older than"*) fail "older binary: message must not claim a version: $msg";; *) pass "older binary: message makes no version claim";; esac
 grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "older binary: a deny is not a pass-through" || pass "older binary: not recorded as a pass-through"
 # An older binary that found text is unchanged: the redacted text, no flag (test 2 covers the rest).
 fresh
@@ -368,6 +371,46 @@ o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result 5 '"yes"' 'hello')" run_hook 2>
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello"*"may be missing"*) pass "malformed fields with text are flagged";; *) fail "malformed fields flag: $o";; esac
 # Output that is not JSON at all is still the existing failure path (test 9b: fails open by
 # default, denied under CHEAPSHOT_STRICT=1); NOV-160 does not change it.
+# 9d-g. NOV-160 review: "blank" (a photo) needs text "" and, when the field is there,
+# screenshot_like false. Anything else that reads empty is denied.
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"empty"' false '' true)" run_hook 2>/dev/null); denied "empty, not retried, but screenshot_like"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/shot.png","redactions":{},"image_tokens":1018,"text_tokens":0,"lines":[],"ocr_status":"empty","retried":false,"screenshot_like":false}],"image_tokens":1018,"text_tokens":0}' run_hook 2>/dev/null); denied "photo result with no text field"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"empty"' false '\n' false)" run_hook 2>/dev/null); denied "photo result whose text is only a newline"
+fresh
+# No screenshot_like field at all (allowed absent): a photo still passes.
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/shot.png","text":"","redactions":{},"image_tokens":1018,"text_tokens":0,"lines":[],"ocr_status":"empty","retried":false}],"image_tokens":1018,"text_tokens":0}' run_hook 2>/dev/null)
+[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "photo without screenshot_like still passes" || fail "photo without screenshot_like: $o"
+# 9d-h. one field without the other: denied when empty
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/shot.png","text":"","image_tokens":1018,"text_tokens":0,"ocr_status":"empty"}],"image_tokens":1018,"text_tokens":0}' run_hook 2>/dev/null); denied "ocr_status without retried"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/shot.png","text":"","image_tokens":1018,"text_tokens":0,"retried":false}],"image_tokens":1018,"text_tokens":0}' run_hook 2>/dev/null); denied "retried without ocr_status"
+# 9d-i. several results: a photo passes only when every result is a photo
+photo='{"file":"/tmp/a.png","text":"","image_tokens":1018,"text_tokens":0,"ocr_status":"empty","retried":false,"screenshot_like":false}'
+blank='{"file":"/tmp/b.png","text":"","image_tokens":1018,"text_tokens":0,"ocr_status":"empty","retried":true,"screenshot_like":true}'
+okr='{"file":"/tmp/c.png","text":"hello","image_tokens":1018,"text_tokens":5,"ocr_status":"ok","retried":false,"screenshot_like":true}'
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="{\"results\":[$photo,$photo],\"image_tokens\":2036,\"text_tokens\":0}" run_hook 2>/dev/null)
+[ -z "$o" ] && pass "multi-result: all photos pass through" || fail "multi-result all photos: $o"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="{\"results\":[$photo,$blank],\"image_tokens\":2036,\"text_tokens\":0}" run_hook 2>/dev/null); denied "multi-result: photo plus blank-after-retry"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="{\"results\":[$okr,$blank],\"image_tokens\":2036,\"text_tokens\":5}" run_hook 2>/dev/null); denied "multi-result: text plus blank-after-retry"
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello"*"may be missing"*) pass "multi-result: text plus blank-after-retry is flagged";; *) fail "multi-result flag: $o";; esac
+# 9d-j. a single quote in the path: the allow and mask commands in the user message stay pasteable
+fresh
+qshot="/tmp/it's here.png"
+o=$(input "$qshot" | FAKE_RAW="$(ocr_result '"empty"' true '')" run_hook 2>/dev/null); denied "single-quote path, blank after retry"
+msg=$(printf '%s' "$o" | jq -r '.systemMessage')
+a=${msg#*cheapshot allow }; a=${a%% (or cheapshot mask*}
+eval "set -- $a"
+[ "$#" = 1 ] && [ "$1" = "$qshot" ] && pass "single-quote path: allow command is shell-quoted" || fail "single-quote allow quoting: $msg"
+m=${msg#*cheapshot mask }; m=${m%% for a copy*}
+eval "set -- $m"
+[ "$#" = 1 ] && [ "$1" = "$qshot" ] && pass "single-quote path: mask command is shell-quoted" || fail "single-quote mask quoting: $msg"
 # 9d-f. PDFs carry no ocr_status: an empty PDF result keeps the old pass-through.
 fresh
 o=$(input /tmp/report.pdf 1-2 | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/report.pdf","text":"","redactions":{},"image_tokens":2200,"text_tokens":0,"source":{"path":"/tmp/report.pdf","sha256":"ab12","pages":2},"pages":[]}],"image_tokens":2200,"text_tokens":0}' run_hook 2>/dev/null)

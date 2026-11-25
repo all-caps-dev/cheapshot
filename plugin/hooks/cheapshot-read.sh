@@ -11,12 +11,13 @@
 # pixels never reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the
 # session, or `cheapshot allow <path>` from a terminal) or the image has no text to redact
 # (Fleet #290 item 4). "No text" passes only when the binary says so for a photo (ocr_status
-# "empty", retried false) or for a PDF. A screenshot still blank after the cold-start retry, an
-# unknown or malformed status, and any empty image from a binary older than 0.6.0 (no ocr_status:
-# it cannot tell a photo from a failed read) are denied in every mode (NOV-160). A broken rules
-# file named by $CHEAPSHOT_RULES denies in both modes: passing the pixels would skip the
-# built-in redaction as well as the custom rules. (A broken
-# default rules.json never gets here: the binary warns and keeps its built-in rules.)
+# "empty", retried false, text "", screenshot_like false or absent) or for a PDF. A screenshot
+# still blank after the cold-start retry, an unknown or malformed status, and any empty image
+# from a binary that does not report ocr_status (added in v0.6.0; it cannot tell a photo from a
+# failed read) are denied in every mode (NOV-160). A broken rules file named by $CHEAPSHOT_RULES
+# denies in both modes: passing the pixels would skip the built-in redaction as well as the
+# custom rules. (A broken default rules.json never gets here: the binary warns and keeps its
+# built-in rules.)
 #
 # Every pass-through of an image or PDF is recorded in the ledger as a zero-token line with a
 # reason and no path (`cheapshot --note-passthrough <reason>`). Needs jq.
@@ -249,10 +250,14 @@ text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2
 # result (cheapshot 0.6.0 and later). One word per distinct verdict, space separated:
 #   ok             text found on the first pass
 #   retried        text found, but a second pass ran (empty or short cold start): lines may be missing
-#   blank          empty with no retry: a photo or small image, the pixels are the content
+#   blank          empty with no retry, text exactly "", and screenshot_like false (or absent):
+#                  a photo or small image, the pixels are the content
 #   blank_retried  a screenshot-like image that still read empty after the retry: a likely OCR failure
-#   legacy         neither field present: an older binary that cannot tell a photo from a failure
-#   unknown        a status this hook does not know, or fields of the wrong type
+#   legacy         neither field present: a binary without them (any build before v0.6.0's
+#                  cold-start retry, including dev builds that call themselves 0.6.0), which
+#                  cannot tell a photo from a failure
+#   unknown        a status this hook does not know, fields of the wrong type, only one of the two
+#                  fields, or an "empty" result that does not look like a photo
 # Empty output (non-object results, an empty array, a jq error) counts as unknown below.
 # PDF results carry neither field and keep the old handling.
 ocr=""
@@ -262,7 +267,8 @@ if [ "$ext" != pdf ]; then
       if (has("ocr_status") or has("retried")) | not then "legacy"
       elif (.ocr_status | type) != "string" or (.retried | type) != "boolean" then "unknown"
       elif .ocr_status == "ok" then (if .retried then "retried" else "ok" end)
-      elif .ocr_status == "empty" then (if .retried then "blank_retried" else "blank" end)
+      elif .ocr_status == "empty" and .retried then "blank_retried"
+      elif .ocr_status == "empty" and .text == "" and (.screenshot_like // false) == false then "blank"
       else "unknown" end
     ] | unique | join(" ")' 2>/dev/null)
 fi
@@ -286,12 +292,12 @@ if [ -z "$text" ]; then
     *" blank_retried "*)
       why="OCR read no text from $path even after a retry, though it looks like a screenshot (a likely OCR failure)" ;;
     *" legacy "*)
-      why="no text in $path; this cheapshot binary is older than 0.6.0 and cannot say whether OCR failed"
-      extra=" Or update cheapshot (brew upgrade all-caps-dev/tap/cheapshot), which can tell a photo from a failed read." ;;
+      why="no text in $path; this cheapshot binary does not report ocr_status (added in v0.6.0), so it cannot say whether OCR failed"
+      extra=" Or update to a cheapshot release that includes it (brew upgrade all-caps-dev/tap/cheapshot)." ;;
     *)
       why="no text in $path, and cheapshot did not report a usable OCR status" ;;
   esac
-  deny "cheapshot: $why, so the pixels were kept out. Tell the user. You may Read it once more (OCR is often warm by then); do not read it another way." \
+  deny "cheapshot: $why, so the pixels were kept out. Tell the user; do not read it another way." \
        "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath (or cheapshot mask $qpath for a copy with any text it finds blacked out).$extra"
   exit 0
 fi
