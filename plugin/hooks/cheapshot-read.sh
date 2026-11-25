@@ -10,8 +10,12 @@
 # systemMessage. With CHEAPSHOT_STRICT=1 a failure denies the Read instead (fail closed), so
 # pixels never reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the
 # session, or `cheapshot allow <path>` from a terminal) or the image has no text to redact
-# (Fleet #290 item 4). A broken rules file named by $CHEAPSHOT_RULES denies in both modes:
-# passing the pixels would skip the built-in redaction as well as the custom rules. (A broken
+# (Fleet #290 item 4). "No text" passes only when the binary says so for a photo (ocr_status
+# "empty", retried false) or for a PDF. A screenshot still blank after the cold-start retry, an
+# unknown or malformed status, and any empty image from a binary older than 0.6.0 (no ocr_status:
+# it cannot tell a photo from a failed read) are denied in every mode (NOV-160). A broken rules
+# file named by $CHEAPSHOT_RULES denies in both modes: passing the pixels would skip the
+# built-in redaction as well as the custom rules. (A broken
 # default rules.json never gets here: the binary warns and keeps its built-in rules.)
 #
 # Every pass-through of an image or PDF is recorded in the ledger as a zero-token line with a
@@ -239,13 +243,68 @@ code=$?
 
 printf '%s' "$out" | jq -e '.results | type == "array"' >/dev/null 2>&1 || failed "unreadable output for $path."
 
-text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")')
+text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2>/dev/null)
+
+# NOV-160: how sure the binary is that OCR worked, from `ocr_status` and `retried` on each image
+# result (cheapshot 0.6.0 and later). One word per distinct verdict, space separated:
+#   ok             text found on the first pass
+#   retried        text found, but a second pass ran (empty or short cold start): lines may be missing
+#   blank          empty with no retry: a photo or small image, the pixels are the content
+#   blank_retried  a screenshot-like image that still read empty after the retry: a likely OCR failure
+#   legacy         neither field present: an older binary that cannot tell a photo from a failure
+#   unknown        a status this hook does not know, or fields of the wrong type
+# Empty output (non-object results, an empty array, a jq error) counts as unknown below.
+# PDF results carry neither field and keep the old handling.
+ocr=""
+if [ "$ext" != pdf ]; then
+  ocr=$(printf '%s' "$out" | jq -r '
+    [.results[] |
+      if (has("ocr_status") or has("retried")) | not then "legacy"
+      elif (.ocr_status | type) != "string" or (.retried | type) != "boolean" then "unknown"
+      elif .ocr_status == "ok" then (if .retried then "retried" else "ok" end)
+      elif .ocr_status == "empty" then (if .retried then "blank_retried" else "blank" end)
+      else "unknown" end
+    ] | unique | join(" ")' 2>/dev/null)
+fi
+
 if [ -z "$text" ]; then
-  # Nothing recognised: there are no tokens to save, the pixels are the content. Not a failure,
-  # so strict mode lets it through too (documented), but it is still a pass-through and is recorded.
-  note no_text
-  echo "cheapshot: no text in $path, reading it as pixels." >&2
+  # Nothing recognised. For a PDF, or an image the binary says read empty without a retry (a
+  # photo), there are no tokens to save and the pixels are the content: not a failure, so strict
+  # mode lets it through too (documented), but it is still a pass-through and is recorded.
+  if [ "$ext" = pdf ] || [ "$ocr" = blank ]; then
+    note no_text
+    echo "cheapshot: no text in $path, reading it as pixels." >&2
+    exit 0
+  fi
+  # Any other empty image result fails closed, in every mode: the pixels may hold a secret that
+  # OCR missed, so they never reach the model unless a person looks first and allows them. The
+  # model is not told about `cheapshot allow` or `cheapshot mask` (Fleet #290 item 3): mask runs
+  # with no approval and, on an image it also reads as blank, would paint nothing.
+  qpath=$(jq -rn --arg p "$path" '$p | @sh')
+  extra=""
+  case " $ocr " in
+    *" blank_retried "*)
+      why="OCR read no text from $path even after a retry, though it looks like a screenshot (a likely OCR failure)" ;;
+    *" legacy "*)
+      why="no text in $path; this cheapshot binary is older than 0.6.0 and cannot say whether OCR failed"
+      extra=" Or update cheapshot (brew upgrade all-caps-dev/tap/cheapshot), which can tell a photo from a failed read." ;;
+    *)
+      why="no text in $path, and cheapshot did not report a usable OCR status" ;;
+  esac
+  deny "cheapshot: $why, so the pixels were kept out. Tell the user. You may Read it once more (OCR is often warm by then); do not read it another way." \
+       "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath (or cheapshot mask $qpath for a copy with any text it finds blacked out).$extra"
   exit 0
+fi
+
+# Text was found but OCR was retried, or its status is unclear: the redacted text still goes to
+# the model as usual, flagged so neither side mistakes it for the whole image. A legacy binary
+# with text is left exactly as before.
+flag=""
+if [ "$ext" != pdf ]; then
+  case " $ocr " in
+    *" retried "*|*" blank_retried "*|*" unknown "*|"  ")
+      flag="OCR on this image was retried or reported no clear status, so some lines may be missing." ;;
+  esac
 fi
 it=$(printf '%s' "$out" | jq -r '.image_tokens // 0')
 tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
@@ -266,6 +325,11 @@ user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the
 # A plain allow line for an image was refused above: it came from an older binary, so another
 # `cheapshot allow` from that binary would loop. Say so (PR #19 second review).
 [ "${stale:-0}" = 1 ] && user_line="$user_line (The allow entry for this file came from an older cheapshot binary and was not honoured; update cheapshot, then run allow again.)"
+# NOV-160: the flag goes first on both lines, so the deny reason still ends with the savings line.
+if [ -n "$flag" ]; then
+  model_line="cheapshot: $flag ${model_line#cheapshot: }"
+  user_line="cheapshot: $flag ${user_line#cheapshot: }"
+fi
 echo "$user_line" >&2
 jq -n --arg text "$text" --arg line "$model_line" --arg m "$user_line" \
   '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: ($text + "\n\n" + $line)}, systemMessage: $m}'

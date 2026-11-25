@@ -279,13 +279,103 @@ fresh
 out=$(input /tmp/shot.png | FAKE_RAW='' run_hook 2>/dev/null); code=$?
 [ "$code" = 0 ] && [ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" ] && pass "empty output passes through" || fail "empty output passes through (code=$code out=$out)"
 
-# 9c. binary exits 0 with no recognised text: pass through, the pixels are the content
+# 9c. NOV-160: the binary says the image read empty without a retry (ocr_status "empty",
+# retried false): a photo or a small image, so the pixels are the content. Pass through, recorded.
+# (Before NOV-160 this case used FAKE_EMPTY_TEXT, which has no ocr_status: see 9d-b for that now.)
+ocr_result() {
+  # $1 ocr_status JSON value, $2 retried JSON value, $3 text (JSON-escaped), $4 screenshot_like
+  printf '{"version":"0.6.0","results":[{"file":"/tmp/shot.png","text":"%s","redactions":{},"image_tokens":1018,"text_tokens":%s,"lines":[],"ocr_status":%s,"retried":%s,"screenshot_like":%s}],"image_tokens":1018,"text_tokens":%s}' \
+    "$3" "${#3}" "$1" "$2" "${4:-true}" "${#3}"
+}
 fresh
 err=$(mktemp "$ROOT/err.XXXXXX")
-out=$(input /tmp/shot.png | FAKE_EMPTY_TEXT=1 run_hook 2>"$err"); code=$?
-[ "$code" = 0 ] && [ -z "$out" ] && pass "empty text passes through" || fail "empty text passes through (code=$code out=$out)"
+out=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"empty"' false '' false)" run_hook 2>"$err"); code=$?
+[ "$code" = 0 ] && [ -z "$out" ] && pass "empty text (photo, not retried) passes through" || fail "empty text passes through (code=$code out=$out)"
 grep -qF 'cheapshot: no text in /tmp/shot.png, reading it as pixels.' "$err" && pass "empty text reported on stderr" || fail "empty text reported on stderr: $(cat "$err")"
 grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "empty text recorded in the ledger" || fail "empty text recorded: $(cat "$FAKE_LOG")"
+
+# 9d. NOV-160: OCR that is still empty after the cold-start retry must never fall through to the
+# pixel path. Deny in every mode, tell the user about `cheapshot allow` and `cheapshot mask`, and
+# never tell the model how to approve its own raw access.
+denied() {
+  # $1 label; $o holds the hook output (captured by the caller, not piped in, so this runs in
+  # the main shell and a failure is counted).
+  [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "$1 is denied" || fail "$1 is denied: $o"
+}
+# 9d-a. empty + retried: a screenshot that still read blank
+fresh
+err=$(mktemp "$ROOT/err.XXXXXX")
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"empty"' true '')" run_hook 2>"$err"); denied "empty + retried"
+reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+msg=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+case "$reason" in *"no text"*"retry"*) pass "empty + retried: reason says OCR read nothing after a retry";; *) fail "empty + retried reason: $reason";; esac
+case "$reason" in *"cheapshot allow"*|*"cheapshot mask"*) fail "empty + retried: reason must not name allow or mask";; *) pass "empty + retried: reason names neither allow nor mask";; esac
+case "$msg" in *"cheapshot allow '/tmp/shot.png'"*) pass "empty + retried: user message names cheapshot allow, quoted";; *) fail "empty + retried user message lacks allow: $msg";; esac
+case "$msg" in *"cheapshot mask '/tmp/shot.png'"*) pass "empty + retried: user message names cheapshot mask";; *) fail "empty + retried user message lacks mask: $msg";; esac
+grep -qF "$msg" "$err" && pass "empty + retried: user message also on stderr" || fail "empty + retried stderr: $(cat "$err")"
+grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "empty + retried: a deny is not a pass-through" || pass "empty + retried: not recorded as a pass-through"
+fresh
+o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_RAW="$(ocr_result '"empty"' true '')" run_hook 2>/dev/null); denied "strict: empty + retried"
+# 9d-b. an older binary (no ocr_status, no retried) with empty text: it cannot say whether OCR
+# failed, so the hook keeps the pixels out and asks for an update or a person's allow.
+fresh
+o=$(input /tmp/shot.png | FAKE_EMPTY_TEXT=1 run_hook 2>/dev/null); denied "older binary, empty text"
+msg=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+case "$msg" in *"older"*"cheapshot allow '/tmp/shot.png'"*) pass "older binary: user message says update or allow";; *) fail "older binary user message: $msg";; esac
+grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "older binary: a deny is not a pass-through" || pass "older binary: not recorded as a pass-through"
+# An older binary that found text is unchanged: the redacted text, no flag (test 2 covers the rest).
+fresh
+o=$(input /tmp/shot.png | run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello world"*) pass "older binary with text is unchanged";; *) fail "older binary with text: $o";; esac
+# 9d-c. short + retried. The binary keeps the longer pass and reports "ok"; the text is there and
+# redacted, so the Read is still denied with it, plus a flag that lines may be missing.
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"ok"' true 'hello')" run_hook 2>/dev/null); denied "short + retried (ok)"
+reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+msg=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+case "$reason" in "hello"*"may be missing"*) pass "short + retried: text plus a may-be-missing flag for the model";; *) fail "short + retried reason: $reason";; esac
+case "$msg" in *"may be missing"*) pass "short + retried: the user sees the flag too";; *) fail "short + retried user message: $msg";; esac
+# A status this hook does not know (a future "short", say) with text: denied with the text, flagged.
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"short"' true 'hello')" run_hook 2>/dev/null); denied "unknown status with text"
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello"*"may be missing"*) pass "unknown status with text is flagged";; *) fail "unknown status flag: $o";; esac
+# Unknown status with no text: denied, never pixels.
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"short"' true '')" run_hook 2>/dev/null); denied "unknown status, empty text"
+# 9d-d. ok, not retried: exactly the old deny, no flag
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"ok"' false 'hello world')" run_hook 2>/dev/null)
+reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+[ "$reason" = "hello world
+
+cheapshot: 1018 image tokens -> 11 text tokens. If you need the layout, run in Bash: cheapshot mask '/tmp/shot.png', then Read the path it prints after \"masked: \" (a copy with redacted and low-confidence lines blacked out). The raw pixels still need the user's approval." ] && pass "ok: deny reason is unchanged" || fail "ok reason: $reason"
+[ "$(printf '%s' "$o" | jq -r '.systemMessage')" = "cheapshot: 1018 image tokens -> 11 text tokens. To show the agent the pixels, run in a terminal: cheapshot allow '/tmp/shot.png'" ] && pass "ok: user message is unchanged" || fail "ok user message: $o"
+# "ok" with empty text contradicts itself: denied.
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"ok"' false '')" run_hook 2>/dev/null); denied "ok status with empty text"
+# 9d-e. malformed: wrong types, non-object results, an empty results array. Each is denied when
+# there is no text; none may reach the pixel path.
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result 5 '"yes"' '')" run_hook 2>/dev/null); denied "malformed field types, empty text"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result 'null' true '')" run_hook 2>/dev/null); denied "null ocr_status, empty text"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[1],"image_tokens":0,"text_tokens":0}' run_hook 2>/dev/null); denied "non-object result"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[],"image_tokens":0,"text_tokens":0}' run_hook 2>/dev/null); denied "empty results array"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result 5 '"yes"' 'hello')" run_hook 2>/dev/null); denied "malformed field types with text"
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello"*"may be missing"*) pass "malformed fields with text are flagged";; *) fail "malformed fields flag: $o";; esac
+# Output that is not JSON at all is still the existing failure path (test 9b: fails open by
+# default, denied under CHEAPSHOT_STRICT=1); NOV-160 does not change it.
+# 9d-f. PDFs carry no ocr_status: an empty PDF result keeps the old pass-through.
+fresh
+o=$(input /tmp/report.pdf 1-2 | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/report.pdf","text":"","redactions":{},"image_tokens":2200,"text_tokens":0,"source":{"path":"/tmp/report.pdf","sha256":"ab12","pages":2},"pages":[]}],"image_tokens":2200,"text_tokens":0}' run_hook 2>/dev/null)
+[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "empty PDF text still passes through" || fail "empty PDF: $o $(cat "$FAKE_LOG")"
+# A PDF with text is never flagged: it has no ocr_status by design.
+fresh
+o=$(input /tmp/report.pdf 3-5 | run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"may be missing"*) fail "PDF with text is flagged: $o";; *) pass "PDF with text is not flagged";; esac
 
 # 10. no file_path at all
 fresh

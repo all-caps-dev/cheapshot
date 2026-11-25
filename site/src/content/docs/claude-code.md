@@ -60,8 +60,17 @@ the ledger, and `cheapshot --ledger` counts them:
   the pixels through rather than blocking the agent.
 - The path starts with `-`, so it would parse as a flag. The hook never hands
   it to the binary and says so in a system message.
-- OCR finds no text in the image. There is nothing to redact, so the pixels are
-  the content.
+- OCR finds no text in a photo or a small image (`ocr_status` `"empty"` with no
+  retry), or in a PDF. There is nothing to redact, so the pixels are the content.
+
+An image with no text that does not look like a photo is denied in every mode,
+never passed as pixels: a screenshot that still read blank after the cold-start
+retry (`"empty"` with `"retried": true`), a result with no usable `ocr_status`,
+and any image read by a binary older than 0.6.0, which reports neither field and
+so cannot tell a photo from a failed read. Look at the image yourself, then run
+`cheapshot allow <path>` in a terminal, or `cheapshot mask <path>` for a copy with
+any text it finds blacked out. When text was found but OCR was retried, the
+redacted text is still returned, with a note that some lines may be missing.
 
 ## Strict mode
 
@@ -69,9 +78,10 @@ Set `CHEAPSHOT_STRICT=1` and every failure above (missing binary, missing `jq`,
 a binary error, unreadable output, a PDF over 20 pages with no range, a path
 that starts with `-`) denies the Read instead of passing the pixels through.
 `CHEAPSHOT_PASSTHROUGH=1` and `cheapshot allow` still work, because those are
-your decisions. Strict mode still lets an image with no recognised text through:
-that is not a failure, and there is no text to redact. It is recorded in the
-ledger as a `no_text` pass-through.
+your decisions. Strict mode still lets a photo or a PDF with no recognised text
+through: that is not a failure, and there is no text to redact. It is recorded in
+the ledger as a `no_text` pass-through. A blank screenshot is denied in both modes
+(above).
 
 The plugin's MCP tools refuse `raw: true` unless `CHEAPSHOT_ALLOW_RAW=1` is set
 in the environment that starts Claude Code; see the [MCP page](/cheapshot/mcp/#environment).
