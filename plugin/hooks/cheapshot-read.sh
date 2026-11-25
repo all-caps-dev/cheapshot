@@ -250,7 +250,8 @@ text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2
 # result (cheapshot 0.6.0 and later). One word per distinct verdict, space separated:
 #   ok             text found on the first pass
 #   retried        text found, but a second pass ran (empty or short cold start): lines may be missing
-#   blank          empty with no retry, text exactly "", and screenshot_like false (or absent):
+#   blank          empty with no retry, text exactly "", and screenshot_like false or absent
+#                  (null is not absent: it denies):
 #                  a photo or small image, the pixels are the content
 #   blank_retried  a screenshot-like image that still read empty after the retry: a likely OCR failure
 #   legacy         neither field present: a binary without them (any build before v0.6.0's
@@ -268,7 +269,7 @@ if [ "$ext" != pdf ]; then
       elif (.ocr_status | type) != "string" or (.retried | type) != "boolean" then "unknown"
       elif .ocr_status == "ok" then (if .retried then "retried" else "ok" end)
       elif .ocr_status == "empty" and .retried then "blank_retried"
-      elif .ocr_status == "empty" and .text == "" and (.screenshot_like // false) == false then "blank"
+      elif .ocr_status == "empty" and .text == "" and ((has("screenshot_like") | not) or .screenshot_like == false) then "blank"
       else "unknown" end
     ] | unique | join(" ")' 2>/dev/null)
 fi

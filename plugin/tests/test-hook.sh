@@ -380,6 +380,8 @@ o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/
 fresh
 o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"empty"' false '\n' false)" run_hook 2>/dev/null); denied "photo result whose text is only a newline"
 fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result '"empty"' false '' null)" run_hook 2>/dev/null); denied "empty, not retried, screenshot_like null"
+fresh
 # No screenshot_like field at all (allowed absent): a photo still passes.
 o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/shot.png","text":"","redactions":{},"image_tokens":1018,"text_tokens":0,"lines":[],"ocr_status":"empty","retried":false}],"image_tokens":1018,"text_tokens":0}' run_hook 2>/dev/null)
 [ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "photo without screenshot_like still passes" || fail "photo without screenshot_like: $o"
