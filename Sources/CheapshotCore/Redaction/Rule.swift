@@ -73,7 +73,7 @@ public struct Rule: Sendable {
     /// (`password<TAB>value`, a TSV row). The two branches cannot both match the same text, so a
     /// long run of tabs does not backtrack.
     private static func assignment(_ separator: String) -> String {
-        let key = secretKeywords + excludedTokenCounter + #"(?:[_\-.][\w\-.]{0,20})?"# + excludedKeySuffix
+        let key = secretKeywords + excludedTokenCounter + #"(?:[_\-.][\w\-.]{0,20}+)?"# + excludedKeySuffix
         let gap = #"(?:["']?[ \t]{0,40}"# + separator + #"[ \t]{0,40}|\t[ \t]{0,40})"#
         // A number is a value only after a password key. The lookbehind runs once per keyword hit.
         let numericOnlyAfterPassword = "(?:(?<=" + passwordKeys + gap + ")"
@@ -244,8 +244,8 @@ public struct Rule: Sendable {
         // five or more digits, such as top output or CSS shorthand, also redacts; a miss is worse.
         // A first octet of 0 is refused: no routable address starts with 0, and SVG
         // `viewBox="0 0 24 24"` and CSS `margin: 0 16 24 16` are on most code screenshots. The
-        // refusal sits in the pattern too, so `0 192 168 1 20` still matches from 192.
-        Rule(name: "IPV4",        pattern: #"(?<![\d.])(?!0[ \u00B7])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)[ \u00B7]){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"#, options: [],
+        // refusal sits in the pattern too, so `0 192 168 1 20` and `00 192 168 1 20` still match from 192.
+        Rule(name: "IPV4",        pattern: #"(?<![\d.])(?!0+[ \u00B7])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)[ \u00B7]){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"#, options: [],
              validator: { $0.filter(\.isNumber).count > 4 && Int($0.prefix(while: \.isNumber)) != 0 }),
     ]
 }

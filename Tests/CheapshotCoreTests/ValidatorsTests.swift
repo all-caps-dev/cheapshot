@@ -141,5 +141,8 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertFalse(Validators.secretValue("process.env.DB_PASS"))   // a code root
         XCTAssertTrue(Validators.secretValue("correct.horse.battery"))  // dotted passphrase
         XCTAssertTrue(Validators.secretValue("john.smith"))
+        XCTAssertTrue(Validators.secretValue("data.center.rocks"))
+        XCTAssertTrue(Validators.secretValue("open.sesame.secret"))    // secret-name leaf alone
+        XCTAssertFalse(Validators.secretValue("this.state.authToken")) // camelCase segment
     }
 }

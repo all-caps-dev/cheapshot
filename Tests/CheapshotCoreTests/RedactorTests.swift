@@ -109,6 +109,8 @@ final class RedactorTests: XCTestCase {
     func testReleaseReviewRedactionGaps() {
         XCTAssertEqual(Redactor().redact("password: correct.horse.battery").text, "password: [SECRET]")
         XCTAssertEqual(Redactor().redact("0 192 168 1 20").text, "0 [IPV4]")
+        XCTAssertEqual(Redactor().redact("00 192 168 1 20").text, "00 [IPV4]")
+        XCTAssertEqual(Redactor().redact("pass: data.center.rocks").text, "pass: [SECRET]")
         XCTAssertEqual(Redactor().redact("viewBox=\"0 0 24 24\"").text, "viewBox=\"0 0 24 24\"")
         XCTAssertEqual(
             Redactor().redact("\"cookie\": \"sid=347301ef56e64dc3cd6089065c3146e8; theme=dark\"").text,
