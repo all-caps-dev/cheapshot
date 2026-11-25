@@ -139,6 +139,31 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(r.textTokens, Tokens.text(r.text))
     }
 
+    /// A line of symbols that Vision (accurate, language correction on) scores 0.5, under a
+    /// clean line it scores 1.0. Measured on macOS 27.2: Vision's scores come in steps (1.0,
+    /// 0.5, 0.3), and nothing tried scored under the default floor of 0.3, so the floor here is
+    /// raised to 0.6 to put the symbols line under it.
+    static let lowRow = "% $ # @ ! & * ( ) _ + ="
+    static let floor: Float = 0.6
+
+    func testLinesUnderTheConfidenceFloorAreDropped() throws {
+        let image = try textImage(["normal reference line here", Self.lowRow])
+        // Premise: with no floor, Vision does see the symbols line, and scores it under 0.6.
+        // If a future Vision scores it differently this fails here instead of passing for nothing.
+        let all = try Pipeline.readImage(image, redaction: .raw, minConfidence: 0)
+        let low = all.lines.filter { $0.text.contains("#") }
+        XCTAssertEqual(low.count, 1, "fixture: Vision should read the symbols line: \(all.lines.map(\.text))")
+        XCTAssertLessThan(low.first?.confidence ?? 1, Self.floor, "fixture: the symbols line must score under the floor")
+        XCTAssertTrue(all.lines.contains { $0.text.contains("normal reference") && $0.confidence >= Self.floor })
+
+        // With the floor, the low line is gone from the lines and from the text; the clean one stays.
+        let r = try Pipeline.readImage(image, redaction: .redact(Redactor()), minConfidence: Self.floor)
+        XCTAssertFalse(r.lines.contains { $0.text.contains("#") }, "under-floor line kept: \(r.lines.map(\.text))")
+        XCTAssertFalse(r.text.contains("#"), r.text)
+        XCTAssertTrue(r.text.contains("normal reference line here"), r.text)
+        XCTAssertTrue(r.lines.allSatisfy { $0.confidence >= Self.floor })
+    }
+
     func testReadImageFromPathDataAndPixelsAgree() throws {
         let image = try textImage()
         let url = try pngFile(image)

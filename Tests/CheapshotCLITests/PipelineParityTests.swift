@@ -166,6 +166,17 @@ final class PipelineParityTests: XCTestCase {
         try await assertSame(["--min-conf", "0.9", "--json", shot])
     }
 
+    func testMinConfFloorReachesTheReadAndIsByteIdentical() async throws {
+        // Vision scores the symbols line 0.5 (see PipelineTests.lowRow), so --min-conf 0.6 must
+        // drop it in today's CLI exactly as in the frozen one, and --min-conf 0 must keep it.
+        let path = try write(try textImage(["normal reference line here", "% $ # @ ! & * ( ) _ + ="]), "low.png", .png)
+        let kept = try await assertSame(["--min-conf", "0", path])
+        XCTAssertTrue(kept.out.contains("#"), "fixture: the symbols line should be read with no floor: \(kept.out)")
+        let dropped = try await assertSame(["--min-conf", "0.6", "--json", path])
+        XCTAssertFalse(dropped.out.contains("#"), "under-floor line kept: \(dropped.out)")
+        XCTAssertTrue(dropped.out.contains("normal reference line here"), dropped.out)
+    }
+
     func testRawRunsAreByteIdenticalAndMarkedRaw() async throws {
         let shot = try screenshot()
         let raw = try await assertSame(["--raw", "--json", "--stats", shot])
