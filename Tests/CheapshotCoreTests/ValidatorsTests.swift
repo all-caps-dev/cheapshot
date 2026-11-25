@@ -130,6 +130,9 @@ final class ValidatorsTests: XCTestCase {
                   "src/components/Button2.tsx", "WKWebView.loadHTMLString2"] {
             XCTAssertFalse(Validators.looksLikeSecret(s), s)
         }
+        // A dotted random password is still caught, even with four lowercase letters in a row.
+        XCTAssertTrue(Validators.looksLikeSecret("Kx9.mQ2vB7nZ4wR8tY1pL3sD6fH"))
+        XCTAssertTrue(Validators.looksLikeSecret("Kx9.mQ2vB7nZmqvbR8tY1pL3sD6fH"))
     }
 
     func testSecretValueVetoesCodePathsAndFractions() {
@@ -138,7 +141,7 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertFalse(Validators.secretValue("142/150"))
         XCTAssertFalse(Validators.secretValue("123.4k/200k"))
         XCTAssertTrue(Validators.secretValue("my.s3cret.pass"))   // a digit: not a code path
-        XCTAssertFalse(Validators.secretValue("process.env.DB_PASS"))   // a code root
+        XCTAssertFalse(Validators.secretValue("props.user.authToken"))  // a code root
         XCTAssertTrue(Validators.secretValue("correct.horse.battery"))  // dotted passphrase
         XCTAssertTrue(Validators.secretValue("john.smith"))
         XCTAssertTrue(Validators.secretValue("data.center.rocks"))
@@ -146,6 +149,5 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertTrue(Validators.secretValue("iLove.myDog"))           // camelCase alone: passphrase
         XCTAssertTrue(Validators.secretValue("horse_battery.staple"))  // "_" alone: passphrase
         XCTAssertTrue(Validators.secretValue("my_secret.phrase"))
-        XCTAssertTrue(Validators.looksLikeSecret("Kx9.mQ2vB7nZ4wR8tY1pL3sD6fH"))  // dotted random run
     }
 }

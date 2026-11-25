@@ -114,10 +114,12 @@ public enum Validators {
     }
 
     /// First segments that make a dotted, digit-free value read as a code path, not a passphrase.
-    /// Common English words (`this`, `data`, `app`) are left out: a miss costs more than a false hit.
+    /// Short everyday words (`this`, `data`, `app`) are left out, since a miss costs more than a false
+    /// hit. A few roots are still words (`request`, `settings`), so `request.denied.again` is kept.
     static let codePathRoots: Set<String> = [
-        "args", "config", "ctx", "env", "opts", "os", "params", "process", "props", "req", "res",
-        "request", "response", "secrets", "settings",
+        "args", "cfg", "config", "creds", "ctx", "env", "json", "kwargs", "options", "opts", "os",
+        "params", "payload", "process", "props", "req", "res", "request", "resp", "response",
+        "secrets", "settings",
     ]
 
     /// True when a dotted value starts with a code root (`process.env.DB_PASS`,
@@ -147,8 +149,9 @@ public enum Validators {
         if fullMatch(#"your[a-z0-9_\-]*"#, lower) { return false }    // your_api_key_here
         // A dotted code path with no digit reads the secret from elsewhere: `response.data.token`.
         // It must also start with a code root such as `req` or `process`, so a dotted passphrase
-        // such as `data.center.rocks` still redacts. Known gap: the `this.` and `self.` prefixes
-        // above still veto `this.is.my.password`, as on v0.5.0.
+        // such as `data.center.rocks` still redacts. Known gap, as on v0.5.0: the prefixes in
+        // `codeReferencePrefixes` above (`this.`, `self.`, `config.`, `env.` and the rest) veto any
+        // value that starts with them, so `this.is.my.password` is kept.
         if fullMatch(#"[a-z_][A-Za-z_]*(?:\.[A-Za-z_][A-Za-z_]*)+"#, t) && looksLikeCodePath(t) { return false }
         // A fraction or ratio is a count, not a PIN: `tests pass: 142/150`, `tokens: 123.4k/200k`.
         if fullMatch(#"\d+(?:\.\d+)?[kKmM]?/\d+(?:\.\d+)?[kKmM]?"#, t) { return false }
@@ -178,14 +181,14 @@ public enum Validators {
     /// Below 32 characters a fixed 4.4 is unreachable or nearly so (n characters carry at most
     /// log2(n) bits each: 4.32 at 20), so a 24-character random secret was caught 16% of the time.
     /// Short runs also pass ``looksLikeShortSecret``; the 4.4 gate stays as an OR so a random key
-    /// v0.5.0 caught is not lost. It skips only a dotted value with a lowercase run of 4 or more
-    /// (`WKWebView.loadHTMLString2`), so a dotted random password (`Kx9.mQ2vB7nZ4wR8tY1pL3sD6fH`)
-    /// is still caught.
+    /// v0.5.0 caught is not lost. It skips only a value with a method name after a dot (four or
+    /// more lowercase letters, then a capital: `WKWebView.loadHTMLString2`), so a dotted random
+    /// password (`Kx9.mQ2vB7nZmqvbR8tY1pL3sD6fH`) is still caught.
     public static func looksLikeSecret(_ s: String) -> Bool {
         if s.contains("://") { return false }   // URL
         if s.hasPrefix("/")  { return false }   // absolute path
         if s.count < 32 {
-            let dottedCode = s.contains(".") && fullMatch(#".*[a-z]{4}.*"#, s)
+            let dottedCode = fullMatch(#".*\.[a-z]{4,}[A-Z].*"#, s)
             return (entropy(s) >= 4.4 && !dottedCode) || looksLikeShortSecret(s)
         }
         return entropy(s) >= 4.4
