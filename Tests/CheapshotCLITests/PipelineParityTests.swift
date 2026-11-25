@@ -222,6 +222,29 @@ final class PipelineParityTests: XCTestCase {
         XCTAssertTrue(broken.err.contains("warning: ignoring"), broken.err)
     }
 
+    func testARuleThatSpansTwoLinesIsByteIdentical() async throws {
+        // A rule that needs the line above to fire. Redacting the lines joined catches it;
+        // redacting each line alone would leave the token in the clear in the per-line JSON.
+        let rows = ["Authorization: Bearer", "tok" + "en0123456789abcdef"]
+        let rules = try file("bearer.json", #"[{"name":"bearer","pattern":"(?<=Authorization: Bearer\\n)\\S+"}]"#)
+        let url = tmp.appendingPathComponent("auth.pdf")
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &box, nil))
+        ctx.beginPDFPage(nil)
+        for (i, s) in rows.enumerated() {
+            let attr = NSAttributedString(string: s, attributes: [kCTFontAttributeName as NSAttributedString.Key:
+                                                                     CTFontCreateWithName("Helvetica" as CFString, 12, nil)])
+            ctx.textPosition = CGPoint(x: 72, y: 700 - CGFloat(i) * 20)
+            CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+        }
+        ctx.endPDFPage()
+        ctx.closePDF()
+        let shot = try write(try textImage(rows), "auth.png", .png)
+        let r = try await assertSame(["--json", "--rules", rules, url.path, shot])
+        XCTAssertFalse(r.out.contains(rows[1]), "the token must be redacted in the text and in every line: \(r.out)")
+        XCTAssertTrue(r.out.contains("[BEARER]"), r.out)
+    }
+
     func testTextRunsAreByteIdentical() async throws {
         let input = Self.lines.joined(separator: "\n") + "\n"
         try await assertSame(["--text", "-"], stdin: input)
