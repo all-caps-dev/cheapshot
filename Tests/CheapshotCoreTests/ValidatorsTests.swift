@@ -138,5 +138,8 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertFalse(Validators.secretValue("142/150"))
         XCTAssertFalse(Validators.secretValue("123.4k/200k"))
         XCTAssertTrue(Validators.secretValue("my.s3cret.pass"))   // a digit: not a code path
+        XCTAssertFalse(Validators.secretValue("process.env.DB_PASS"))   // a code root
+        XCTAssertTrue(Validators.secretValue("correct.horse.battery"))  // dotted passphrase
+        XCTAssertTrue(Validators.secretValue("john.smith"))
     }
 }

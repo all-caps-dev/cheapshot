@@ -113,6 +113,24 @@ public enum Validators {
         return name.contains(".") || name.contains("_") || fullMatch(#".*[a-z][A-Z].*"#, String(name))
     }
 
+    /// Segment names that make a dotted, digit-free value read as a code path, not a passphrase.
+    static let codePathRoots: Set<String> = [
+        "app", "args", "config", "context", "ctx", "data", "env", "opts", "options", "os", "params",
+        "process", "props", "req", "request", "res", "response", "secrets", "self", "settings",
+        "state", "this", "vars", "window",
+    ]
+    static let codePathLeaves: Set<String> = [
+        "apikey", "api_key", "auth", "cred", "creds", "credential", "credentials", "key", "pass",
+        "passwd", "password", "pwd", "secret", "token",
+    ]
+
+    /// True when a dotted value starts with a code root or ends on a secret name.
+    static func looksLikeCodePath(_ t: String) -> Bool {
+        let parts = t.lowercased().split(separator: ".").map(String.init)
+        guard let first = parts.first, let last = parts.last else { return false }
+        return codePathRoots.contains(first) || codePathLeaves.contains(last)
+    }
+
     /// SECRET's veto. A keyword cue (`password=`) is strong evidence by itself, so the bar is
     /// low: at least 6 characters, and a letters-only value needs 10 so prose such as
     /// "password: forgotten" survives. gitleaks' generic-api-key uses the same idea, a keyword
@@ -131,7 +149,9 @@ public enum Validators {
         if codeReferencePrefixes.contains(where: { lower.hasPrefix($0) }) { return false }
         if fullMatch(#"your[a-z0-9_\-]*"#, lower) { return false }    // your_api_key_here
         // A dotted code path with no digit reads the secret from elsewhere: `response.data.token`.
-        if fullMatch(#"[a-z_][A-Za-z_]*(?:\.[A-Za-z_][A-Za-z_]*)+"#, t) { return false }
+        // It must also read as code (a known root such as `req` or `process`, or a last segment
+        // naming the secret), so a dotted passphrase such as `correct.horse.battery` still redacts.
+        if fullMatch(#"[a-z_][A-Za-z_]*(?:\.[A-Za-z_][A-Za-z_]*)+"#, t) && looksLikeCodePath(t) { return false }
         // A fraction or ratio is a count, not a PIN: `tests pass: 142/150`, `tokens: 123.4k/200k`.
         if fullMatch(#"\d+(?:\.\d+)?[kKmM]?/\d+(?:\.\d+)?[kKmM]?"#, t) { return false }
         // A quoted value may hold spaces; words of letters only are prose ("is required").

@@ -104,6 +104,17 @@ final class RedactorTests: XCTestCase {
     }
 
     // Every builtin rule name is a plain token, since it lands verbatim inside [NAME].
+    // 0.6.0 pre-push review: a dotted passphrase still redacts, a spaced address right after a
+    // 0 column is still tried from its own first octet, and a quoted Cookie value is covered.
+    func testReleaseReviewRedactionGaps() {
+        XCTAssertEqual(Redactor().redact("password: correct.horse.battery").text, "password: [SECRET]")
+        XCTAssertEqual(Redactor().redact("0 192 168 1 20").text, "0 [IPV4]")
+        XCTAssertEqual(Redactor().redact("viewBox=\"0 0 24 24\"").text, "viewBox=\"0 0 24 24\"")
+        XCTAssertEqual(
+            Redactor().redact("\"cookie\": \"sid=347301ef56e64dc3cd6089065c3146e8; theme=dark\"").text,
+            "\"cookie\": \"sid=[SECRET]; theme=dark\"")
+    }
+
     func testBuiltinNamesArePlainTokens() {
         for rule in Rule.builtin {
             XCTAssertTrue(rule.name.allSatisfy { $0.isUppercase || $0.isNumber || $0 == "_" }, rule.name)

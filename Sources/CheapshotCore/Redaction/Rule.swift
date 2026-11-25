@@ -193,11 +193,11 @@ public struct Rule: Sendable {
         // keeps "%" so a URL-encoded tail ("...%2B...") goes with the rest of the value. The
         // validator keeps short plain values such as `theme=dark`.
         Rule(name: "SECRET",
-             pattern: #"(?:(?<!Set-)\bCookie["']?[ \t]*:[ \t]*|\G(?<=.)[ \t]*;[ \t]*)[^\s=;,"]{1,256}="# + cookieValue,
+             pattern: #"(?:(?<!Set-)\bCookie["']?[ \t]*:[ \t]*["']?|\G(?<=.)[ \t]*;[ \t]*)[^\s=;,"]{1,256}="# + cookieValue,
              validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
         // Set-Cookie: only the first pair is the cookie; the rest are attributes (Path=/).
         Rule(name: "SECRET",
-             pattern: #"\bSet-Cookie["']?[ \t]*:[ \t]*[^\s=;,"]{1,256}="# + cookieValue,
+             pattern: #"\bSet-Cookie["']?[ \t]*:[ \t]*["']?[^\s=;,"]{1,256}="# + cookieValue,
              validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
 
         // --- Personal data. ---
@@ -243,8 +243,9 @@ public struct Rule: Sendable {
         // version, not an address. Accepted cost: a four-column row of numbers up to 255 with
         // five or more digits, such as top output or CSS shorthand, also redacts; a miss is worse.
         // A first octet of 0 is refused: no routable address starts with 0, and SVG
-        // `viewBox="0 0 24 24"` and CSS `margin: 0 16 24 16` are on most code screenshots.
-        Rule(name: "IPV4",        pattern: #"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)[ \u00B7]){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"#, options: [],
+        // `viewBox="0 0 24 24"` and CSS `margin: 0 16 24 16` are on most code screenshots. The
+        // refusal sits in the pattern too, so `0 192 168 1 20` still matches from 192.
+        Rule(name: "IPV4",        pattern: #"(?<![\d.])(?!0[ \u00B7])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)[ \u00B7]){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"#, options: [],
              validator: { $0.filter(\.isNumber).count > 4 && Int($0.prefix(while: \.isNumber)) != 0 }),
     ]
 }
