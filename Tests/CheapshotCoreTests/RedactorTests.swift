@@ -179,13 +179,36 @@ final class RedactorTests: XCTestCase {
             "Cookie: " + String(repeating: "a=b; ", count: n / 5),
             "password" + String(repeating: "\t", count: n),
             String(repeating: "password\t \t", count: n / 11),
+            // NOV-161: the next-key step after an empty field. Chains of keys, keys with
+            // prefixes, an overlapping value, and a long numeric tail after a password key.
+            String(repeating: "secrets: password: ", count: n / 19),
+            String(repeating: "token: ", count: n / 7),
+            String(repeating: "a_password:\t", count: n / 12),
+            String(repeating: "pass: pass ", count: n / 11),
+            "password: " + String(repeating: "token:", count: n / 6),
+            "secrets:" + String(repeating: " ", count: 40) + "password: " + String(repeating: "1", count: n),
+            String(repeating: "secrets:  MyPassword: ", count: n / 22),
+            // NOV-161: URL_CREDS has no length cap now. One valid long password, many starts
+            // with no host, hosts that are too long, bracket hosts that never close, many '@',
+            // and the JSON shape that leaked (two credential URLs per object).
+            "postgres://u:" + String(repeating: "a", count: n) + "@h",
+            String(repeating: "://u:@", count: n / 6),
+            String(repeating: "x://u:p@h,", count: n / 10),
+            String(repeating: "://u:p@" + String(repeating: "a", count: 260), count: n / 267),
+            "://u:" + String(repeating: "@[" + String(repeating: ":", count: 70), count: n / 72),
+            "://u:" + String(repeating: "@a", count: n / 2),
+            String(repeating: #"{"a":"postgres://u:pw@h1","b":"mysql://u:pw@h2"},"#, count: n / 50),
+            String(repeating: "://a:b\"", count: n / 7),
         ]
         let redactor = Redactor()
+        var slowest = (0.0, "")
         for shape in shapes {
             let start = Date()
             _ = redactor.redact(shape)
             let elapsed = Date().timeIntervalSince(start)
             XCTAssertLessThan(elapsed, 1.0, "\(shape.prefix(16))... took \(elapsed)s")
+            if elapsed > slowest.0 { slowest = (elapsed, String(shape.prefix(24))) }
         }
+        print("slowest 100k shape: \(slowest.1.debugDescription) \(String(format: "%.3f", slowest.0))s")
     }
 }

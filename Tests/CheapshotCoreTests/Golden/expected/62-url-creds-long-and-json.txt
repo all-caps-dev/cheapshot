@@ -1,0 +1,7 @@
+postgres://[URL_CREDS]@mydb.abc123.us-east-1.rds.amazonaws.com:5432/app
+{"a":"postgres://[URL_CREDS]@h1","b":"mysql://[URL_CREDS]@h2"}
+DATABASE_URL="postgres://[URL_CREDS]@localhost"
+postgres://[URL_CREDS]@host:5432/db
+(postgres://[URL_CREDS]@db)
+http://localhost:3000/[EMAIL]
+https://example.com:8443/status

@@ -19,14 +19,39 @@ public struct Rule: Sendable {
     /// When true, only the first capture group that took part in the match is validated and
     /// replaced; the rest of the match (a key name, a separator) stays in the text.
     public let replacesCaptureGroup: Bool
+    /// When set, this finds the hits instead of `pattern` (which is then documentation only).
+    /// For a rule a regex cannot express in linear time; see ``URLCreds``.
+    public let matcher: (@Sendable (String) -> [NSRange])?
+    /// When set (with `replacesCaptureGroup`), a captured value that is itself the key of the
+    /// next assignment is followed to that assignment's value. See ``NextKey``.
+    public let nextKey: NextKey?
+
+    /// The empty-field step for a keyword assignment rule. In aligned YAML an empty field sits
+    /// right before the next one (`secrets:        password: hunter2x9`), so the rule reads
+    /// `password:` as the value of `secrets:`. Matches cannot overlap, so without this step the
+    /// real value after it was never looked at.
+    ///
+    /// After each hit, `pattern` is tried anchored at the start of the captured value. When it
+    /// matches, its own value starts after the captured one ends, and that value passes the
+    /// rule's validator, both are redacted and the step repeats from the new value. The captured
+    /// text is never kept in the clear just because it reads as a key: `admin_pass:` can be a
+    /// password. When the next value fails the validator, the scan resumes right after the
+    /// captured text, as it would without this step.
+    public struct NextKey: Sendable {
+        public let pattern: String
+        public init(pattern: String) { self.pattern = pattern }
+    }
 
     public init(name: String, pattern: String,
                 options: NSRegularExpression.Options = [.caseInsensitive],
                 validator: (@Sendable (String) -> Bool)? = nil,
                 retryShorter: Bool = false,
-                replacesCaptureGroup: Bool = false) {
+                replacesCaptureGroup: Bool = false,
+                matcher: (@Sendable (String) -> [NSRange])? = nil,
+                nextKey: NextKey? = nil) {
         self.name = name; self.pattern = pattern; self.options = options; self.validator = validator
         self.retryShorter = retryShorter; self.replacesCaptureGroup = replacesCaptureGroup
+        self.matcher = matcher; self.nextKey = nextKey
     }
 
     /// Keywords that mark the value after them as a credential: `password=`, `api_key:`,
@@ -81,6 +106,13 @@ public struct Rule: Sendable {
         let value = #"(?:"([^"\r\n]{4,})"|'([^'\r\n]{4,})'|["']?([^\s"'`,;&]{4,}))"#
         return key + gap + numericOnlyAfterPassword + value
     }
+
+    /// The empty-field step for SECRET (see ``NextKey``). The next key may have any prefix made
+    /// of value characters (`db_password`, `MyPassword`, `{password`, a long Spring property
+    /// path), as on the main pattern. It is matched anchored at the captured value and the lazy
+    /// prefix is capped at 128, so the step costs a bounded amount per hit.
+    private static let secretNextKey = NextKey(
+        pattern: #"[^\s"'`,;&]{0,128}?"# + assignment(#"(?:=>?|:=?)"#))
 
     /// Ordered most specific first, so a key is not eaten by a looser rule. The validators are
     /// passed as non-capturing closures: an unapplied reference to a static method is not a
@@ -139,16 +171,10 @@ public struct Rule: Sendable {
         Rule(name: "PRIVATE_KEY", pattern: #"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"#, options: []),
 
         // --- Credentials identified by their position, not their shape. ---
-        // user:password inside a URL (postgres://, mongodb+srv://, https://, redis://). Only
-        // the credentials go; the scheme and host stay so the line still reads. Runs before
-        // EMAIL, which would otherwise read "pass@host.com" as an address. The password may
-        // hold "/" or "@": it runs lazily to the first "@" that is followed by a host and then
-        // a port, path, query, space or end. A port after the colon ("localhost:3000/x@b.com")
-        // is not a password. The username may be empty: "redis://:pw@host" and "amqps://:pw@mq"
-        // are the normal Redis and AMQP forms. Username (128), password (256) and host (253) are
-        // bounded so the lazy password never walks to the end of a long line from every "://x:".
-        Rule(name: "URL_CREDS",
-             pattern: #"(?<=://)[^\s:/@\[\]]{0,128}:(?!\d{1,5}(?:[/?#]|\s|$))[^\s?#]{1,256}?(?=@(?:\[[0-9A-Fa-f:.]{2,64}\]|[A-Za-z0-9.\-]{1,253})(?:[:/?#]|\s|$))"#),
+        // user:password inside a URL. A linear scanner with no password length cap (RDS IAM
+        // tokens run to ~700 characters); its rules are in URLCreds.swift. Runs before EMAIL,
+        // which would otherwise read "pass@host.com" as an address.
+        Rule(name: "URL_CREDS", pattern: URLCreds.referencePattern, matcher: { URLCreds.ranges(in: $0) }),
         // `[ \t]+`, never `\s+`: a builtin that can cross a newline redacts a joined document
         // differently from the lines it was joined from, which changed the line count in the
         // `--json` line array and left the token in the clear there.
@@ -161,7 +187,7 @@ public struct Rule: Sendable {
         // Only the value goes. The validator drops placeholders, code references such as
         // process.env.X, and values another rule already replaced.
         Rule(name: "SECRET",      pattern: assignment(#"(?:=>?|:=?)"#),
-             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true, nextKey: secretNextKey),
         // Long command-line flags with a space instead of "=": `--password X`, `--token X`,
         // `--api-key X`, `--http-password X`. A value that starts with "-" is the next flag.
         Rule(name: "SECRET",
