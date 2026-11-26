@@ -11,6 +11,10 @@ This file is now the record of how v0.5.0 went out. The steps below stay as writ
 - Token: `COMMITTER_TOKEN` is set and expires 2027-04-01. The tap job cannot bump the formula after that until the token is replaced.
 - Tap job 403: `Resource not accessible by personal access token` means the token does not cover `homebrew-tap`. Fix its repository access at https://github.com/settings/personal-access-tokens , then run `gh run rerun <run-id> --failed`. Saving the edit keeps the token value, so the secret and the tag stay as they are.
 
+## Next: v0.6.0
+
+Same path as v0.5.0 step 9.2, with no rc and no setup: the seven secrets and the tap are in place. `Version.swift` already reads `0.6.0`, `CHANGELOG.md` has the entry, and `packaging/homebrew/cheapshot.rb` points at v0.6.0 (the tap job writes the real `url` and `sha256` into the tap; the copy here keeps the placeholder hash). Tag from main once the release branch is merged: `git tag v0.6.0 && git push origin v0.6.0`.
+
 ## 0. Preconditions (AGENT, done in Phase 2)
 - `scripts/check-phase2.sh` prints `ok: phase 2` on a clean main.
 - `main` is ahead of `origin/main` by the Phase 1 and Phase 2 commits, unpushed.

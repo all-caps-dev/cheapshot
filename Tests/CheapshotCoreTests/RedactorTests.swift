@@ -104,6 +104,23 @@ final class RedactorTests: XCTestCase {
     }
 
     // Every builtin rule name is a plain token, since it lands verbatim inside [NAME].
+    // 0.6.0 pre-push review: a dotted passphrase still redacts, a spaced address right after a
+    // 0 column is still tried from its own first octet, and a quoted Cookie value is covered.
+    func testReleaseReviewRedactionGaps() {
+        XCTAssertEqual(Redactor().redact("password: correct.horse.battery").text, "password: [SECRET]")
+        XCTAssertEqual(Redactor().redact("0 192 168 1 20").text, "0 [IPV4]")
+        XCTAssertEqual(Redactor().redact("00 192 168 1 20").text, "00 [IPV4]")
+        // Release review: keys with one digit or none are still keys; CSS classes are not.
+        XCTAssertEqual(Redactor().redact("Your key sk-live-phwfvcajkbjyn3mgwsiu").text, "Your key [OPENAI_KEY]")
+        XCTAssertEqual(Redactor().redact("key sk-abcdefghijklmnopqrstuvwx").text, "key [OPENAI_KEY]")
+        XCTAssertEqual(Redactor().redact(".sk-cube-grid-container-wrapper { }").text, ".sk-cube-grid-container-wrapper { }")
+        XCTAssertEqual(Redactor().redact("pass: data.center.rocks").text, "pass: [SECRET]")
+        XCTAssertEqual(Redactor().redact("viewBox=\"0 0 24 24\"").text, "viewBox=\"0 0 24 24\"")
+        XCTAssertEqual(
+            Redactor().redact("\"cookie\": \"sid=347301ef56e64dc3cd6089065c3146e8; theme=dark\"").text,
+            "\"cookie\": \"sid=[SECRET]; theme=dark\"")
+    }
+
     func testBuiltinNamesArePlainTokens() {
         for rule in Rule.builtin {
             XCTAssertTrue(rule.name.allSatisfy { $0.isUppercase || $0.isNumber || $0 == "_" }, rule.name)
@@ -147,13 +164,71 @@ final class RedactorTests: XCTestCase {
             "+44" + String(repeating: " 1", count: n / 2),
             String(repeating: "a.", count: n / 2) + "@",
             String(repeating: "1 ", count: n / 2),
+            // Post-merge review F3: these four were quadratic (10 to 16 s at 100,000 characters).
+            String(repeating: "eyJaaaaaaaa-", count: n / 12),
+            String(repeating: "://a:b", count: n / 6),
+            String(repeating: "x://a:bb,", count: n / 9),
+            String(repeating: "://a:b@_", count: n / 8),
+            String(repeating: "pass_", count: n / 5),
+            // Shapes for the 0.6.0 flag, header and cookie rules.
+            String(repeating: "--password x ", count: n / 13),
+            String(repeating: "sshpass -a ", count: n / 11),
+            String(repeating: "mysql -u r ", count: n / 11),
+            String(repeating: "curl -u a:b ", count: n / 12),
+            String(repeating: "Authorization: ", count: n / 15),
+            "Cookie: " + String(repeating: "a=b; ", count: n / 5),
+            "password" + String(repeating: "\t", count: n),
+            String(repeating: "password\t \t", count: n / 11),
+            // NOV-161: values scanned again after an empty field. Chains of keys, keys with
+            // prefixes, an overlapping value, and a long numeric tail after a password key.
+            String(repeating: "secrets: password: ", count: n / 19),
+            String(repeating: "token: ", count: n / 7),
+            String(repeating: "a_password:\t", count: n / 12),
+            String(repeating: "pass: pass ", count: n / 11),
+            "password: " + String(repeating: "token:", count: n / 6),
+            "secrets:" + String(repeating: " ", count: 40) + "password: " + String(repeating: "1", count: n),
+            String(repeating: "secrets:  MyPassword: ", count: n / 22),
+            // NOV-161: URL_CREDS has no length cap now. One valid long password, many starts
+            // with no host, hosts that are too long, bracket hosts that never close, many '@',
+            // and the JSON shape that leaked (two credential URLs per object).
+            "postgres://u:" + String(repeating: "a", count: n) + "@h",
+            String(repeating: "://u:@", count: n / 6),
+            String(repeating: "x://u:p@h,", count: n / 10),
+            String(repeating: "://u:p@" + String(repeating: "a", count: 260), count: n / 267),
+            "://u:" + String(repeating: "@[" + String(repeating: ":", count: 70), count: n / 72),
+            "://u:" + String(repeating: "@a", count: n / 2),
+            String(repeating: #"{"a":"postgres://u:pw@h1","b":"mysql://u:pw@h2"},"#, count: n / 50),
+            String(repeating: "://a:b\"", count: n / 7),
+            // Fable review of 801ab86: values scanned again (refused nesting, keys inside long or
+            // quoted values, alternating quotes), real and fake closers, escaped quotes, long
+            // usernames with no length cap.
+            "token: " + String(repeating: "process.env.token=", count: n / 18),
+            String(repeating: "token=process.env.", count: n / 18),
+            String(repeating: "password: " + String(repeating: "a1", count: 70) + "token: x1y2z3w4 ", count: n / 170),
+            String(repeating: #"password: "prod, token": "#, count: n / 26),
+            "password: '" + String(repeating: "\"token: '", count: n / 10),
+            String(repeating: "pass: pass:x", count: n / 12),
+            String(repeating: "(pg://u:p@ss)w", count: n / 14),
+            String(repeating: #""pg://u:p@ss\"w","#, count: n / 18),
+            String(repeating: "(a://b:c@d)\"e://f:g@h\"<i://j:k@l>`m://n:o@p`'q://r:s@t'", count: n / 55),
+            String(repeating: "('\"<`x://u:", count: n / 11),
+            "pg://" + String(repeating: "u", count: n),
+            String(repeating: "x://" + String(repeating: "u", count: 200), count: n / 204),
+            String(repeating: "(x://u:1", count: n / 8),
         ]
         let redactor = Redactor()
+        var slowest = (0.0, "")
+        // Liveness: a regex that gives up on a shape is fast and redacts nothing after it, so
+        // every shape is followed by a password line that must still be redacted.
+        let marker = "Zq9kQ2" + "mW7p"
         for shape in shapes {
             let start = Date()
-            _ = redactor.redact(shape)
+            let out = redactor.redact(shape + "\npassword=" + marker).text
             let elapsed = Date().timeIntervalSince(start)
             XCTAssertLessThan(elapsed, 1.0, "\(shape.prefix(16))... took \(elapsed)s")
+            XCTAssertTrue(out.hasSuffix("\npassword=[SECRET]"), "\(shape.prefix(16))... stopped redacting")
+            if elapsed > slowest.0 { slowest = (elapsed, String(shape.prefix(24))) }
         }
+        print("slowest 100k shape: \(slowest.1.debugDescription) \(String(format: "%.3f", slowest.0))s")
     }
 }

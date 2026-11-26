@@ -19,14 +19,31 @@ public struct Rule: Sendable {
     /// When true, only the first capture group that took part in the match is validated and
     /// replaced; the rest of the match (a key name, a separator) stays in the text.
     public let replacesCaptureGroup: Bool
+    /// When set, this finds the hits instead of `pattern` (which is then documentation only).
+    /// For a rule a regex cannot express in linear time; see ``URLCreds``.
+    public let matcher: (@Sendable (String) -> [NSRange])?
+    /// With `replacesCaptureGroup`: after an accepted value, the scan resumes at the start of
+    /// that value instead of after it, and hits inside a span already redacted are dropped. A
+    /// refused value of at most 128 characters is scanned again the same way.
+    ///
+    /// Why: in aligned YAML an empty field sits right before the next one
+    /// (`secrets:        password: hunter2x9`), so the rule reads `password:` as the value of
+    /// `secrets:`. Matches cannot overlap, so the real value after it was never looked at. A key
+    /// can also sit inside a long value (`password: <140 chars>token: x`) or a quoted one
+    /// (`"prod, token": "x"`). Scanning the value again finds those keys. The scan never resumes
+    /// later than the end of the match, where the plain scan resumes; see `rescanningHits`.
+    public let rescansValues: Bool
 
     public init(name: String, pattern: String,
                 options: NSRegularExpression.Options = [.caseInsensitive],
                 validator: (@Sendable (String) -> Bool)? = nil,
                 retryShorter: Bool = false,
-                replacesCaptureGroup: Bool = false) {
+                replacesCaptureGroup: Bool = false,
+                matcher: (@Sendable (String) -> [NSRange])? = nil,
+                rescansValues: Bool = false) {
         self.name = name; self.pattern = pattern; self.options = options; self.validator = validator
         self.retryShorter = retryShorter; self.replacesCaptureGroup = replacesCaptureGroup
+        self.matcher = matcher; self.rescansValues = rescansValues
     }
 
     /// Keywords that mark the value after them as a credential: `password=`, `api_key:`,
@@ -57,19 +74,32 @@ public struct Rule: Sendable {
     /// other keyword a number is a count or a setting (`token_limit: 100000`).
     private static let passwordKeys = #"(?:pass(?:word|wd|phrase)?|pwd)"#
 
+    /// A flag's value: quoted (the quotes stay) or a bare word. Every branch is a capture group.
+    private static let flagValue = #"(?:"([^"\r\n]{1,256})"|'([^'\r\n]{1,256})'|([^\s"'`]{1,256}))"#
+    /// A cookie value: quoted, or up to the next ";" or whitespace.
+    private static let cookieValue = #"(?:"([^"\r\n]{1,4096})"|([^;\s"]{1,4096}))"#
+
     /// Builds the SECRET pattern for a keyword assignment with the given separator class. It
     /// matches forward from the keyword and the value is a capture group (the rule sets
     /// `replacesCaptureGroup`), so the key name stays in the text. Matching forward, not with a
     /// lookbehind at every position, keeps a 100,000-character line fast.
     /// A quoted value runs to its closing quote, so `,` `;` `&` inside it are kept; only an
     /// unquoted value stops at them (query strings, argument lists).
+    /// The gap allows up to 40 spaces or tabs either side of the separator, so aligned YAML and
+    /// tables (`password:      value`) are caught, and a lone tab works as a separator
+    /// (`password<TAB>value`, a TSV row). The two branches cannot both match the same text, so a
+    /// long run of tabs does not backtrack.
     private static func assignment(_ separator: String) -> String {
-        let key = secretKeywords + excludedTokenCounter + #"(?:[_\-.][\w\-.]{0,20})?"# + excludedKeySuffix
-        let gap = #"["']?[ \t]{0,3}"# + separator + #"[ \t]{0,3}"#
+        let key = secretKeywords + excludedTokenCounter + #"(?:[_\-.][\w\-.]{0,20}+)?"# + excludedKeySuffix
+        let gap = #"(?:["']?[ \t]{0,40}"# + separator + #"[ \t]{0,40}|\t[ \t]{0,40})"#
         // A number is a value only after a password key. The lookbehind runs once per keyword hit.
         let numericOnlyAfterPassword = "(?:(?<=" + passwordKeys + gap + ")"
             + #"|(?!["']?[0-9][0-9.,_+\-]*(?:["'\s`;&]|$)))"#
-        let value = #"(?:"([^"\r\n]{4,})"|'([^'\r\n]{4,})'|["']?([^\s"'`,;&]{4,}))"#
+        // Each run is written `{3}` then `+`, never `{4,}`: ICU keeps a backtrack frame per
+        // iteration of a counted loop, so a value of ~80,000 characters overflowed its stack, the
+        // match failed in silence and every later assignment in the document went unredacted.
+        // A `+` over one character set is a simple loop with a single frame.
+        let value = #"(?:"([^"\r\n]{3}[^"\r\n]+)"|'([^'\r\n]{3}[^'\r\n]+)'|["']?([^\s"'`,;&]{3}[^\s"'`,;&]+))"#
         return key + gap + numericOnlyAfterPassword + value
     }
 
@@ -84,7 +114,11 @@ public struct Rule: Sendable {
         // Anthropic keys (sk-ant-api03-, sk-ant-admin01-, sk-ant-oat01-) used to fall through to
         // OPENAI_KEY. This rule runs first so the label says whose key leaked.
         Rule(name: "ANTHROPIC_KEY", pattern: #"\bsk-ant-[A-Za-z0-9_\-]{20,}"#, options: []),
-        Rule(name: "OPENAI_KEY",  pattern: #"\bsk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#, options: []),
+        // The validator refuses only a CSS class from a spinner kit ("sk-cube-grid-container-wrapper"):
+        // short lowercase words joined by hyphens. A key with one digit or none, such as
+        // `sk-live-phwfvcajkbjyn3mgwsiu`, is still a key.
+        Rule(name: "OPENAI_KEY",  pattern: #"\bsk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#, options: [],
+             validator: { !Validators.looksLikeHyphenatedWords($0) }),
         // Stripe secret and restricted keys, live and test, plus webhook signing secrets.
         // Publishable keys (pk_) are public by design and are left alone.
         Rule(name: "STRIPE_KEY",  pattern: #"\b(?:sk|rk)_(?:live|test|prod)_[A-Za-z0-9]{20,}\b"#, options: []),
@@ -118,19 +152,18 @@ public struct Rule: Sendable {
         Rule(name: "AZURE_CLIENT_SECRET", pattern: #"(?<![A-Za-z0-9_~.\-])[A-Za-z0-9_~.]{3}\dQ~[A-Za-z0-9_~.\-]{31,34}(?![A-Za-z0-9_~.\-])"#, options: []),
         // HashiCorp Vault service, batch and recovery tokens (hvs., hvb., hvr.).
         Rule(name: "VAULT_TOKEN", pattern: #"\bhv[sbr]\.[A-Za-z0-9_\-]{90,}"#, options: []),
-        Rule(name: "JWT",         pattern: #"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"#, options: []),
+        // The left edge is a lookbehind, not \b: "-" is a segment character but also a word
+        // boundary, so with \b every "-eyJ" in a long run restarted a scan to the end of the line
+        // (16 s on 100,000 characters of "eyJaaaaaaaa-"). Now only the first eyJ of a run starts.
+        Rule(name: "JWT",         pattern: #"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\b"#, options: []),
         // PEM headers, plus the PGP armor header ("-----BEGIN PGP PRIVATE KEY BLOCK-----").
         Rule(name: "PRIVATE_KEY", pattern: #"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"#, options: []),
 
         // --- Credentials identified by their position, not their shape. ---
-        // user:password inside a URL (postgres://, mongodb+srv://, https://, redis://). Only
-        // the credentials go; the scheme and host stay so the line still reads. Runs before
-        // EMAIL, which would otherwise read "pass@host.com" as an address. The password may
-        // hold "/" or "@": it runs lazily to the first "@" that is followed by a host and then
-        // a port, path, query, space or end. A port after the colon ("localhost:3000/x@b.com")
-        // is not a password.
-        Rule(name: "URL_CREDS",
-             pattern: #"(?<=://)[^\s:/@\[\]]+:(?!\d{1,5}(?:[/?#]|\s|$))[^\s?#]+?(?=@(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.\-]+)(?:[:/?#]|\s|$))"#),
+        // user:password inside a URL. A linear scanner with no password length cap (RDS IAM
+        // tokens run to ~700 characters); its rules are in URLCreds.swift. Runs before EMAIL,
+        // which would otherwise read "pass@host.com" as an address.
+        Rule(name: "URL_CREDS", pattern: URLCreds.referencePattern, matcher: { URLCreds.ranges(in: $0) }),
         // `[ \t]+`, never `\s+`: a builtin that can cross a newline redacts a joined document
         // differently from the lines it was joined from, which changed the line count in the
         // `--json` line array and left the token in the clear there.
@@ -143,6 +176,44 @@ public struct Rule: Sendable {
         // Only the value goes. The validator drops placeholders, code references such as
         // process.env.X, and values another rule already replaced.
         Rule(name: "SECRET",      pattern: assignment(#"(?:=>?|:=?)"#),
+             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true, rescansValues: true),
+        // Long command-line flags with a space instead of "=": `--password X`, `--token X`,
+        // `--api-key X`, `--http-password X`. A value that starts with "-" is the next flag.
+        Rule(name: "SECRET",
+             pattern: #"(?<![\w\-])--(?:[\w\-]{0,20}-)?(?:password|passwd|pass|token|secret|api-?key|access-key|secret-key|auth-token|access-token)[ \t]+(?!-)"# + flagValue,
+             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+        // `-p X` only after a command where -p means password, never as a bare flag (`mkdir -p`,
+        // `ssh -p 22`). sshpass takes `-p X` or `-pX`; docker, podman and helm registry login
+        // take `-p X`. mysql takes only `-pX`: with a space, the next word is the database name.
+        // Case-sensitive so mysql's `-P 3306` (port) is not read as a password.
+        Rule(name: "SECRET",
+             pattern: #"\bsshpass(?:[ \t]+-[A-Za-oq-z][^\s]*){0,4}[ \t]+-p[ \t]*"# + flagValue,
+             options: [], validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+        Rule(name: "SECRET",
+             pattern: #"\b(?:docker|podman|nerdctl|buildah|skopeo|oras|helm[ \t]+registry)[ \t]+login\b[^\n|;&]{0,120}?[ \t]-p[ \t]+(?!-)"# + flagValue,
+             options: [], validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+        Rule(name: "SECRET",
+             pattern: #"\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]{0,120}?[ \t]-p(?=[^\s])"# + flagValue,
+             options: [], validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+        // `curl -u user:password` and `--user user:password`. Only the password goes.
+        Rule(name: "SECRET",
+             pattern: #"\bcurl\b[^\n|;&]{0,200}?[ \t](?:-u|--user)(?:[ \t]+|=)["']?[^\s:"']{0,128}:([^\s"']{1,256})"#,
+             options: [], validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+        // `Authorization: <value>` and `Authorization: <scheme> <value>` for schemes other than
+        // Bearer and Basic, which have their own rules above (`token <hex>` is GitHub's form).
+        Rule(name: "SECRET",
+             pattern: #"\bAuthorization["']?[ \t]*[:=][ \t]*["']?(?:(?!(?:Bearer|Basic)\b)[A-Za-z][\w\-]{0,20}[ \t]+)?([^\s"'`,;]{1,1024})"#,
+             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+        // Cookie header: every name=value pair on the line. The first pair follows "Cookie:"; each
+        // later one is chained with \G (the end of the previous match) and a ";". The value class
+        // keeps "%" so a URL-encoded tail ("...%2B...") goes with the rest of the value. The
+        // validator keeps short plain values such as `theme=dark`.
+        Rule(name: "SECRET",
+             pattern: #"(?:(?<!Set-)\bCookie["']?[ \t]*:[ \t]*["']?|\G(?<=.)[ \t]*;[ \t]*)[^\s=;,"]{1,256}="# + cookieValue,
+             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+        // Set-Cookie: only the first pair is the cookie; the rest are attributes (Path=/).
+        Rule(name: "SECRET",
+             pattern: #"\bSet-Cookie["']?[ \t]*:[ \t]*["']?[^\s=;,"]{1,256}="# + cookieValue,
              validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
 
         // --- Personal data. ---
@@ -187,7 +258,10 @@ public struct Rule: Sendable {
         // regex; the validator refuses four single digits ("1 2 3 4"), which is prose or a
         // version, not an address. Accepted cost: a four-column row of numbers up to 255 with
         // five or more digits, such as top output or CSS shorthand, also redacts; a miss is worse.
-        Rule(name: "IPV4",        pattern: #"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)[ \u00B7]){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"#, options: [],
-             validator: { $0.filter(\.isNumber).count > 4 }),
+        // A first octet of 0 is refused: no routable address starts with 0, and SVG
+        // `viewBox="0 0 24 24"` and CSS `margin: 0 16 24 16` are on most code screenshots. The
+        // refusal sits in the pattern too, so `0 192 168 1 20` and `00 192 168 1 20` still match from 192.
+        Rule(name: "IPV4",        pattern: #"(?<![\d.])(?!0+[ \u00B7])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)[ \u00B7]){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"#, options: [],
+             validator: { $0.filter(\.isNumber).count > 4 && Int($0.prefix(while: \.isNumber)) != 0 }),
     ]
 }

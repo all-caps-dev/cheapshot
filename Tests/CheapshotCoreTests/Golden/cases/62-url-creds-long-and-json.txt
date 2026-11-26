@@ -1,0 +1,7 @@
+postgres://iamuser:mydb.abc123.us-east-1.rds.amazonaws.com%3A5432%2F%3FAction%3Dconnect%26DBUser%3Diamuser%26X-Amz-Algorithm%3DAWS4-HMAC-SHA256%26X-Amz-Date%3D20261125T000000Z%26X-Amz-Expires%3D900%26X-Amz-Security-Token%3DjzzP5eIOpA8GNYcOR4ZCWvmmmXIrkJVLEBfBs9atFYeD0by1lWcVZOjq1IC1Un5st5QZ3ftZIIKPzM7365dEfwzby4ZnsvD3pS8HaKA1ca7kpeJ6dEQkJdauXS4Rxu0YYoKtAz7iGnLuH9lRZPYpkYh2o6BRlEe7⟦⟧FUqH2GG6jLPccgfE3peerKQ1SXdxCsP20PdEEgk8BwTjVKzGkKOxsLaho4IUBunIiYZSjoMO15BIvmCUbOMnr5yFVEZWX6FzgET0OtGqXiMHbag1Ct6JjP3KAsMYpc00ByZxJpqsq1YC2mex0BWo5C4VnDYs338R%26X-Amz-SignedHeaders%3Dhost%26X-Amz-Signature%3D657f1ff1e1f2f0088cf6be8d4e1f57c8⟦⟧d108f7e182b7a64c61f057b21f687edb@mydb.abc123.us-east-1.rds.amazonaws.com:5432/app
+{"a":"postgres://u:pw1Sec⟦⟧ret9@h1","b":"mysql://u2:pw2Sec⟦⟧ret8@h2"}
+DATABASE_URL="postgres://u:pw1Sec⟦⟧ret9@localhost"
+postgres://u:p@ss,w0⟦⟧rd@host:5432/db
+(postgres://u:hunt⟦⟧er2x9@db)
+http://localhost:3000/x@b.com
+https://example.com:8443/status

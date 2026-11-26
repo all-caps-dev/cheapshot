@@ -207,6 +207,29 @@ final class RunnerTests: XCTestCase {
         XCTAssertNotNil(first["text"] as? String)
         XCTAssertTrue(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("ledger.jsonl").path), "successful run writes the ledger")
         XCTAssertEqual(try ledgerEntries().map { $0["mode"] as? String }, ["image"])
+        // 200 x 100 is under the screenshot size floor: empty, and no retry, reads as "no text".
+        XCTAssertEqual(first["ocr_status"] as? String, "empty")
+        XCTAssertEqual(first["retried"] as? Bool, false)
+        XCTAssertEqual(first["screenshot_like"] as? Bool, false)
+    }
+
+    /// A blank screenshot-sized image is flat colour, so an empty first pass is retried once and
+    /// reported as empty after a retry, which a caller must not take for a photo.
+    func testBlankScreenshotSizedImageReportsEmptyAfterRetry() async throws {
+        let png = tmp.appendingPathComponent("blank-shot.png")
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: 640, height: 480, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 640, height: 480))
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(png as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, try XCTUnwrap(ctx.makeImage()), nil); XCTAssertTrue(CGImageDestinationFinalize(dest))
+
+        let r = await run(["--json", png.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        let first = try XCTUnwrap((try json(r.out)["results"] as? [[String: Any]])?.first)
+        XCTAssertEqual(first["ocr_status"] as? String, "empty")
+        XCTAssertEqual(first["retried"] as? Bool, true)
+        XCTAssertEqual(first["screenshot_like"] as? Bool, true)
+        XCTAssertTrue(r.err.contains("no text found after a retry"), r.err)
     }
 
     /// The JSON line array is redacted line by line and its box is integer pixels, top-left origin.

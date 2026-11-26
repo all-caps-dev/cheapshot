@@ -499,20 +499,29 @@ public enum CLI {
                 io.err("cheapshot: cannot read \(f)\n")
                 continue
             }
-            let rendered: [RenderedLine]
-            do { rendered = try OCR.recognizeLayout(image: image, minConfidence: opts.minConfidence) }
+            let checked: OCR.CheckedLayout
+            do { checked = try OCR.recognizeLayoutChecked(image: image, minConfidence: opts.minConfidence) }
             catch {
                 failed += 1
                 results.append(["file": f, "error": "\(error)"])
                 io.err("cheapshot: \(f): \(error)\n")
                 continue
             }
+            let rendered = checked.lines
+            if checked.retried && checked.status == .empty {
+                io.err("cheapshot: \(f): no text found after a retry, though it looks like a screenshot\n")
+            }
             let (text, report) = apply(redactor, Layout.text(rendered))
             let size = ImageLoader.pixelSize(path: f) ?? (image.width, image.height)
             let it = Tokens.image(width: size.width, height: size.height), tt = Tokens.text(text)
             images.add(imageTokens: it, textTokens: tt, redactions: report.total)
             results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
-                            "lines": lineJSON(rendered, redactor: redactor)])
+                            "lines": lineJSON(rendered, redactor: redactor),
+                            // "empty" with "retried": true is a screenshot-like image that still read blank
+                            // (a likely cold-start OCR failure); "empty" without a retry is a photo or a
+                            // small image. Callers must not treat the first like the second.
+                            "ocr_status": checked.status.rawValue, "retried": checked.retried,
+                            "screenshot_like": checked.screenshotLike])
             if !opts.json {
                 if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
                 io.out(text + "\n")

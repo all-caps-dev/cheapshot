@@ -113,6 +113,30 @@ public enum Validators {
         return name.contains(".") || name.contains("_") || fullMatch(#".*[a-z][A-Z].*"#, String(name))
     }
 
+    /// First segments that make a dotted, digit-free value read as a code path, not a passphrase.
+    /// Short everyday words (`this`, `data`, `app`) are left out, since a miss costs more than a false
+    /// hit. A few roots are still words (`request`, `settings`), so `request.denied.again` is kept.
+    static let codePathRoots: Set<String> = [
+        "args", "cfg", "config", "creds", "ctx", "env", "json", "kwargs", "options", "opts", "os",
+        "params", "payload", "process", "props", "req", "res", "request", "resp", "response",
+        "secrets", "settings",
+    ]
+
+    /// True when a dotted value starts with a code root (`process.env.DB_PASS`,
+    /// `response.data.token`). A "_" or camelCase segment alone is not enough: `iLove.myDog` and
+    /// `horse_battery.staple` are passphrases.
+    static func looksLikeCodePath(_ t: String) -> Bool {
+        guard let first = t.split(separator: ".").first else { return false }
+        return codePathRoots.contains(first.lowercased())
+    }
+
+    /// A CSS class name such as `sk-cube-grid-container-wrapper`: lowercase words joined by
+    /// hyphens, at least three of them, none longer than 12 letters.
+    public static func looksLikeHyphenatedWords(_ s: String) -> Bool {
+        let parts = s.split(separator: "-", omittingEmptySubsequences: false)
+        return parts.count >= 3 && parts.allSatisfy { !$0.isEmpty && $0.count <= 12 && $0.allSatisfy { $0.isASCII && $0.isLowercase } }
+    }
+
     /// SECRET's veto. A keyword cue (`password=`) is strong evidence by itself, so the bar is
     /// low: at least 6 characters, and a letters-only value needs 10 so prose such as
     /// "password: forgotten" survives. gitleaks' generic-api-key uses the same idea, a keyword
@@ -130,6 +154,14 @@ public enum Validators {
         if (t.hasPrefix("/") || t.hasPrefix("~/")) && t.dropFirst(2).contains("/") { return false }
         if codeReferencePrefixes.contains(where: { lower.hasPrefix($0) }) { return false }
         if fullMatch(#"your[a-z0-9_\-]*"#, lower) { return false }    // your_api_key_here
+        // A dotted code path with no digit reads the secret from elsewhere: `response.data.token`.
+        // It must also start with a code root such as `req` or `process`, so a dotted passphrase
+        // such as `data.center.rocks` still redacts. Known gap, as on v0.5.0: the prefixes in
+        // `codeReferencePrefixes` above (`this.`, `self.`, `config.`, `env.` and the rest) veto any
+        // value that starts with them, so `this.is.my.password` is kept.
+        if fullMatch(#"[a-z_][A-Za-z_]*(?:\.[A-Za-z_][A-Za-z_]*)+"#, t) && looksLikeCodePath(t) { return false }
+        // A fraction or ratio is a count, not a PIN: `tests pass: 142/150`, `tokens: 123.4k/200k`.
+        if fullMatch(#"\d+(?:\.\d+)?[kKmM]?/\d+(?:\.\d+)?[kKmM]?"#, t) { return false }
         // A quoted value may hold spaces; words of letters only are prose ("is required").
         if t.contains(" ") && t.split(separator: " ").allSatisfy({ $0.allSatisfy(\.isLetter) }) { return false }
         if t.allSatisfy({ $0.isLetter }) { return t.count >= 10 }
@@ -151,10 +183,52 @@ public enum Validators {
     /// TOKEN is the catch-all for secrets with no recognizable prefix. Its character class
     /// contains "/" and ".", so without a gate it swallows every absolute path and screenshot
     /// filename. Measured on real input: paths and CleanShot filenames top out at 4.14 bits/char,
-    /// prefix-less secrets start at 4.66. 4.4 sits in the gap.
+    /// prefix-less secrets start at 4.66. 4.4 sits in the gap for 32 characters and up.
+    ///
+    /// Below 32 characters a fixed 4.4 is unreachable or nearly so (n characters carry at most
+    /// log2(n) bits each: 4.32 at 20), so a 24-character random secret was caught 16% of the time.
+    /// Short runs also pass ``looksLikeShortSecret``; the 4.4 gate stays as an OR so a random key
+    /// v0.5.0 caught is not lost. It skips only a value with a method name after a dot (four or
+    /// more lowercase letters, then a capital: `WKWebView.loadHTMLString2`), so a dotted random
+    /// password (`Kx9.mQ2vB7nZmqvbR8tY1pL3sD6fH`) is still caught.
     public static func looksLikeSecret(_ s: String) -> Bool {
         if s.contains("://") { return false }   // URL
         if s.hasPrefix("/")  { return false }   // absolute path
+        if s.count < 32 {
+            let dottedCode = fullMatch(#".*\.[a-z]{4,}[A-Z].*"#, s)
+            return (entropy(s) >= 4.4 && !dottedCode) || looksLikeShortSecret(s)
+        }
         return entropy(s) >= 4.4
+    }
+
+    /// Base64 starts of image and key files. A short fragment of one in source code is data, not
+    /// a credential: PNG, GIF, WebP, SVG, and the OpenSSH public key blob.
+    private static let base64FilePrefixes = ["iVBORw0KGgo", "R0lGOD", "UklGR", "PHN2Zy", "AAAAC3NzaC1", "AAAAB3NzaC1"]
+
+    /// The 20 to 31 character gate. The bar scales with length (0.84 of the log2(n) ceiling) and
+    /// four shape checks keep code out. Calibrated with seeded random strings: about 91% of
+    /// base62, base64 and base64url secrets at every length from 20 to 31 pass (was 0% at 20,
+    /// 16% at 24), and none of a 50-item corpus of identifiers, filenames, versions and paths does.
+    /// - a digit: camelCase identifiers rarely have one, random base62 of 20 almost always does
+    /// - no ".": dotted names, filenames and versions (`com.apple.Safari.v17`, `Ubuntu-22.04`)
+    /// - no lowercase run longer than 5: words (`iPhone15ProMaxSimulator` has "imulator")
+    /// - no all-digit segment of 3+ between separators: dates and numbers (`CVE-2024-3094-x`)
+    /// - the character class (lower, upper, digit, other) changes at 40% or more of positions:
+    ///   random text changes about 62% of the time, camelCase about 20%
+    static func looksLikeShortSecret(_ s: String) -> Bool {
+        let chars = Array(s)
+        guard chars.count >= 2, chars.contains(where: \.isNumber), !chars.contains(".") else { return false }
+        if base64FilePrefixes.contains(where: { s.hasPrefix($0) }) { return false }
+        // Longest run of lowercase ASCII letters.
+        var run = 0, longest = 0
+        for c in chars { run = (c.isASCII && c.isLowercase) ? run + 1 : 0; longest = max(longest, run) }
+        if longest > 5 { return false }
+        let segments = s.split(whereSeparator: { "-_/+=".contains($0) })
+        if segments.contains(where: { $0.count >= 3 && $0.allSatisfy(\.isNumber) }) { return false }
+        // Share of adjacent pairs whose character class differs.
+        func kind(_ c: Character) -> Int { c.isLowercase ? 0 : c.isUppercase ? 1 : c.isNumber ? 2 : 3 }
+        let changes = zip(chars, chars.dropFirst()).filter { kind($0) != kind($1) }.count
+        if Double(changes) / Double(chars.count - 1) < 0.4 { return false }
+        return entropy(s) >= 0.84 * log2(Double(chars.count))
     }
 }
