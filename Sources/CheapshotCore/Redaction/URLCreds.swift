@@ -22,7 +22,8 @@ import Foundation
 /// 3. A URL opens with a quote or bracket when the character before its scheme is `"`, `'`,
 ///    backtick, `<` or `(`. Its closer character is raw unless escaped (`\"` in JSON) or, for a
 ///    quote or backtick, doubled (`''` in SQL). A raw closer is real when the end, whitespace
-///    or a delimiter follows (`, ; : . ! ) ] } > " '`, backtick, `( [ { <`). A real closer stops
+///    or a delimiter follows (`, ; : . ! ) ] } > " '`, backtick, `( [ { <`; after a quote or
+///    backtick closer, another quote does not count: `'a'"'"'b'` is shell concatenation). A real closer stops
 ///    the URL only when no later `@` followed by a host character can be reached without
 ///    crossing whitespace, `?`, `#`, `://`, or the start of another item (a raw quote for a
 ///    quoted URL, the opening bracket for a bracketed one). So `(pg://u:p@ss).w0rd@host/db)` keeps
@@ -67,7 +68,9 @@ public enum URLCreds {
             let o = esc(closers.first { $0.closer == closer }!.opener)
             // A raw closer, consumed: not escaped, and for a quote not doubled.
             let raw = quote ? "(?<![\\\\" + c + "])" + c + "(?!" + c + ")" : "(?<!\\\\)" + c
-            let real = raw + "(?=$|[" + followers + "])"
+            // After a quote closer, another quote is shell concatenation ('a'"'"'b'), not a
+            // delimiter, so quote branches leave the quotes out of the followers.
+            let real = raw + "(?=$|[" + (quote ? #"\s,;:.!)\]}>(\[{<"# : followers) + "])"
             // One character between a real closer and a later "@": no whitespace, ? or #, no
             // "://", and no raw quote (quoted URL) or opening bracket (bracketed URL).
             let notRaw = "(?<=\\\\)" + c + "|(?<=" + c + ")" + c + "|" + c + "(?=" + c + ")"
@@ -241,6 +244,8 @@ public enum URLCreds {
     /// Swift: rule 3, a raw closer followed by the end, whitespace or a delimiter.
     private static func isRealCloser(_ u: [UInt16], _ i: Int, _ closer: UInt16) -> Bool {
         guard isRawCloser(u, i, closer) else { return false }
+        // A quote right after a quote closer is shell concatenation ('a'"'"'b'), not a new item.
+        if isQuote(closer), i + 1 < u.count, isQuote(u[i + 1]) { return false }
         return i + 1 == u.count || isWhitespace(u[i + 1]) || closerFollowers.contains(u[i + 1])
     }
 

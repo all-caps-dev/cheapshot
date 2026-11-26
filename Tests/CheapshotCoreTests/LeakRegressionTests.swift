@@ -326,6 +326,37 @@ final class LeakRegressionTests: XCTestCase {
         }
     }
 
+    // MARK: Opus review of ce3b734
+
+    func testShellQuoteConcatenationAndDoubledQuotes() {
+        let a = "Zq9k", b = "Pw7x"
+        let cases: [(String, String)] = [
+            // Shell's '"'"' idiom puts a quote inside a single-quoted value.
+            ("DATABASE_URL='postgres://user:\(a)'\"'\"'\(b)@host/db'", "DATABASE_URL='postgres://[URL_CREDS]@host/db'"),
+            ("proxy='http://user:\(a)'\"'\"'\(b)@proxy:3128'", "proxy='http://[URL_CREDS]@proxy:3128'"),
+            ("\"postgres://u:\(a)\"'\"'\"\(b)@h/db\"", "\"postgres://[URL_CREDS]@h/db\""),
+            // A doubled quote is escaped on either side (mutants U6 and U7).
+            ("'pg://u:\(a)'',Q2://mW7p@db'", "'pg://[URL_CREDS]@db'"),
+            ("'pg://u:\(a)''Q2://mW7p@db'", "'pg://[URL_CREDS]@db'"),
+            ("\"pg://u:\(a)\"\",Q2://mW7p@db\"", "\"pg://[URL_CREDS]@db\""),
+            ("\"pg://u:\(a)\"\"Q2://mW7p@db\"", "\"pg://[URL_CREDS]@db\""),
+            // A doubled quote after a real closer is still escaped, so it does not cut the
+            // password before the later "@" (mutant U7 on the reach-ahead).
+            ("'pg://u:\(a)',b''\(b)@db'", "'pg://[URL_CREDS]@db'"),
+            ("\"pg://u:\(a)\",b\"\"\(b)@db\"", "\"pg://[URL_CREDS]@db\""),
+            // A quoted URL whose scheme is longer than 8 characters still finds its opener.
+            (#"{"api":"postgresql://localhost:5432","owner":"me@example.com"}"#,
+             #"{"api":"postgresql://localhost:5432","owner":"[EMAIL]"}"#),
+            // ")" after a quote closer and "\"" after a bracket closer make the closer real, so
+            // the next quoted or bracketed item is not folded into the password.
+            ("(\"pg://u:\(a)\(b)@h1\")\"x@db\"", "(\"pg://[URL_CREDS]@h1\")\"x@db\""),
+            ("[\"(pg://u:\(a)\(b)@h1)\",\"(x@db)\"]", "[\"(pg://[URL_CREDS]@h1)\",\"(x@db)\"]"),
+        ]
+        for (input, want) in cases {
+            XCTAssertEqual(r.redact(input).text, want, input)
+        }
+    }
+
     // MARK: Random-secret harness
 
     /// Swift: seeded random secrets in every leak template. None may survive in the output.
