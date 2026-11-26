@@ -180,6 +180,55 @@ final class LeakRegressionTests: XCTestCase {
         }
     }
 
+    // MARK: Fable final review of 801ab86
+
+    /// Independent expected outputs (the differential test shares its design with its oracle).
+    func testFableReviewURLShapes() {
+        let pw = "Aa1b" + "Zz9y"
+        let cases: [(String, String)] = [
+            // A raw "@" before a closer that is not followed by a delimiter.
+            ("(postgres://u:p@ss)w0" + "rd@host/db)", "(postgres://[URL_CREDS]@host/db)"),
+            ("'postgres://u:p@ss'w0" + "rd@host/db'", "'postgres://[URL_CREDS]@host/db'"),
+            ("[db](postgres://u:P@ss)w0" + "rd@host/db)", "[db](postgres://[URL_CREDS]@host/db)"),
+            // A JSON-escaped quote is not the closer.
+            (#"{"url":"postgres://u:p@ss\"w0"# + #"rd@host/db"}"#, #"{"url":"postgres://[URL_CREDS]@host/db"}"#),
+            // Digits before the closer are a port; only the address is redacted.
+            (#"{"api":"http://localhost:8080","status":"ok","items":[1,2,3],"owner":"me@example.com"}"#,
+             #"{"api":"http://localhost:8080","status":"ok","items":[1,2,3],"owner":"[EMAIL]"}"#),
+            // The closer ends a host.
+            ("(pg://u:\(pw)@db)", "(pg://[URL_CREDS]@db)"),
+            ("\"pg://u:\(pw)@db\"", "\"pg://[URL_CREDS]@db\""),
+            ("<pg://u:\(pw)@db>", "<pg://[URL_CREDS]@db>"),
+            ("`pg://u:\(pw)@db`", "`pg://[URL_CREDS]@db`"),
+            ("'pg://u:\(pw)@db'", "'pg://[URL_CREDS]@db'"),
+            // Two URLs per line for each closer pair.
+            ("(pg://u:\(pw)@h1) (pg://v:\(pw)@h2)", "(pg://[URL_CREDS]@h1) (pg://[URL_CREDS]@h2)"),
+            ("(pg://u:\(pw)@h1)(pg://v:\(pw)@h2)", "(pg://[URL_CREDS]@h1)(pg://[URL_CREDS]@h2)"),
+            ("<pg://u:\(pw)@h1>,<pg://v:\(pw)@h2>", "<pg://[URL_CREDS]@h1>,<pg://[URL_CREDS]@h2>"),
+            ("`pg://u:\(pw)@h1`,`pg://v:\(pw)@h2`", "`pg://[URL_CREDS]@h1`,`pg://[URL_CREDS]@h2`"),
+            ("['pg://u:\(pw)@h1','pg://v:\(pw)@h2']", "['pg://[URL_CREDS]@h1','pg://[URL_CREDS]@h2']"),
+            (#"["pg://u:\#(pw)@h1","pg://v:\#(pw)@h2"]"#, #"["pg://[URL_CREDS]@h1","pg://[URL_CREDS]@h2"]"#),
+            // No username length cap.
+            ("pg://" + String(repeating: "u", count: 129) + ":Qsecret7z@db/x", "pg://[URL_CREDS]@db/x"),
+            ("pg://" + String(repeating: "u", count: 2000) + ":Qsecret7z@db/x", "pg://[URL_CREDS]@db/x"),
+        ]
+        for (input, want) in cases {
+            XCTAssertEqual(r.redact(input).text, want, input)
+        }
+    }
+
+    func testFableReviewKeysInsideAcceptedValues() {
+        let pw = "hunter" + "2x9"
+        let long = String(repeating: "a1", count: 70)
+        let out1 = r.redact("secrets:   password: \(long)token: \(pw)").text
+        XCTAssertFalse(out1.contains(pw), out1)
+        let out2 = r.redact(#"secrets:  password: "prod, token": "Zx9kQ2"# + #"mW7p""#).text
+        XCTAssertFalse(out2.contains("Zx9kQ2mW7p"), out2)
+        // A value that holds its own assignment is one hit, not two.
+        XCTAssertEqual(r.redact("secrets: token=Zx8k2" + "Lm9Qp7").text, "secrets: [SECRET]")
+        XCTAssertEqual(r.redact("password: token:abc1" + "23xyz").text, "password: [SECRET]")
+    }
+
     // MARK: Random-secret harness
 
     /// Swift: seeded random secrets in every leak template. None may survive in the output.

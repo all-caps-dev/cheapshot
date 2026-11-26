@@ -13,12 +13,10 @@ public struct Redactor {
     public let compileFailures: [Rule]
     private let compiled: [Compiled]
 
-    /// A rule with its regexes built once.
+    /// A rule with its regex built once.
     private struct Compiled {
         let rule: Rule
         let re: NSRegularExpression
-        /// The ``Rule/NextKey`` regexes, when the rule has that step and both compile.
-        let nextKey: NSRegularExpression?
     }
 
     public struct CompileError: Error, Equatable, CustomStringConvertible {
@@ -39,14 +37,7 @@ public struct Redactor {
             guard let re = try? NSRegularExpression(pattern: rule.pattern, options: rule.options) else {
                 failures.append(rule); continue
             }
-            var nextKey: NSRegularExpression?
-            if let nk = rule.nextKey {
-                guard let p = try? NSRegularExpression(pattern: nk.pattern, options: rule.options) else {
-                    failures.append(rule); continue
-                }
-                nextKey = p
-            }
-            compiled.append(Compiled(rule: rule, re: re, nextKey: nextKey))
+            compiled.append(Compiled(rule: rule, re: re))
         }
         self.compiled = compiled
         self.compileFailures = failures
@@ -94,7 +85,7 @@ public struct Redactor {
                 return r
             }
         }
-        if let nk = c.nextKey { return chainedHits(c.re, nk, rule, in: text) }
+        if rule.rescansValues && rule.replacesCaptureGroup { return rescanningHits(c.re, rule, in: text) }
         var out: [Range<String.Index>] = []
         let ns = text as NSString
         for m in c.re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
@@ -115,19 +106,18 @@ public struct Redactor {
         return out
     }
 
-    /// Swift: the ``Rule/NextKey`` scan. Same matches as `matches(in:)`, except that after each
-    /// hit the captured value is checked for being the key of the next assignment; if so, and
-    /// that assignment's value passes the validator, both are redacted and the scan resumes
-    /// after the value. It only ever adds hits to what `matches(in:)` finds.
+    /// Swift: the scan for a rule with ``Rule/rescansValues``. Same matches as `matches(in:)`,
+    /// except where it resumes: at the start of an accepted value (so a key inside or right
+    /// after it is found), and at the start of a refused value of at most 128 characters.
+    /// A hit wholly inside a span already redacted is dropped; one that starts inside it keeps
+    /// only its tail.
     ///
-    /// Linear: every step of the inner loop moves `cap` strictly right to a value that starts
-    /// after the previous one ends, and each anchored try reads only a bounded key prefix (128),
-    /// the key, its gap and the run of value characters after it. When that value is accepted
-    /// the outer scan resumes after it; when it is refused the outer scan resumes just after
-    /// `cap` and reads it once more. So each character is read a bounded number of times.
-    private func chainedHits(_ re: NSRegularExpression,
-                             _ nextKey: NSRegularExpression,
-                             _ rule: Rule, in text: String) -> [Range<String.Index>] {
+    /// Linear: the resume point always moves right (a value starts after its key). An accepted
+    /// value is read again once: hits found inside it are dropped and resume after themselves,
+    /// and a hit that only overlaps its tail resumes after itself too. A refused value is read
+    /// again only when it is at most 128 characters. Each character is read a bounded number of
+    /// times.
+    private func rescanningHits(_ re: NSRegularExpression, _ rule: Rule, in text: String) -> [Range<String.Index>] {
         // One NSString for every call below, so no call bridges or copies the text again.
         let ns = NSString(string: text)
         let str = ns as String
@@ -136,37 +126,30 @@ public struct Redactor {
         // before the search range, exactly as they do in a whole-string scan.
         let opts: NSRegularExpression.MatchingOptions = [.withTransparentBounds, .withoutAnchoringBounds]
         var out: [Range<String.Index>] = []
-        // Swift: the span of `g` in `text` when it passes the validator, else nil.
-        func valid(_ g: NSRange) -> Range<String.Index>? {
-            guard let r = Range(g, in: text) else { return nil }
-            if let v = rule.validator, !v(String(text[r])) { return nil }
-            return r
-        }
+        var redactedTo = 0          // end (UTF-16) of the last redacted span
         var pos = 0
         while pos < len,
               let m = re.firstMatch(in: str, options: opts, range: NSRange(location: pos, length: len - pos)) {
-            var end = NSMaxRange(m.range)
-            guard var cap = Self.firstGroup(m) else { pos = end; continue }
-            var capSpan = valid(cap)
-            while let m2 = nextKey.firstMatch(in: str, options: opts.union(.anchored),
-                                                 range: NSRange(location: cap.location, length: len - cap.location)),
-                  let next = Self.firstGroup(m2), next.location >= NSMaxRange(cap) {
-                // `cap` is wholly the next assignment's key and separator. When that
-                // assignment's value is not a secret, stop and resume the plain scan where it
-                // would have resumed (just after `cap`), so nothing inside the value is skipped.
-                guard let nextSpan = valid(next) else {
-                    end = NSMaxRange(cap)
-                    break
-                }
-                // Otherwise redact both. `cap` reads as a key, but a password can too
-                // (`admin_pass:`), so it is never kept in the clear.
-                if let s = capSpan { out.append(s) }
-                cap = next
-                capSpan = nextSpan
-                end = NSMaxRange(m2.range)
+            let end = NSMaxRange(m.range)
+            guard let cap = Self.firstGroup(m), let r = Range(cap, in: text) else { pos = end; continue }
+            let capEnd = NSMaxRange(cap)
+            // Already redacted as part of an earlier value.
+            if capEnd <= redactedTo { pos = end; continue }
+            if let v = rule.validator, !v(String(text[r])) {
+                pos = cap.length <= 128 ? cap.location : end
+                continue
             }
-            if let s = capSpan { out.append(s) }
-            pos = end
+            if cap.location >= redactedTo {
+                out.append(r)
+                pos = cap.location
+            } else {
+                // Overlaps the tail of the last span: redact the rest, and do not read it again.
+                if let tail = Range(NSRange(location: redactedTo, length: capEnd - redactedTo), in: text) {
+                    out.append(tail)
+                }
+                pos = end
+            }
+            redactedTo = capEnd
         }
         return out
     }

@@ -179,7 +179,7 @@ final class RedactorTests: XCTestCase {
             "Cookie: " + String(repeating: "a=b; ", count: n / 5),
             "password" + String(repeating: "\t", count: n),
             String(repeating: "password\t \t", count: n / 11),
-            // NOV-161: the next-key step after an empty field. Chains of keys, keys with
+            // NOV-161: values scanned again after an empty field. Chains of keys, keys with
             // prefixes, an overlapping value, and a long numeric tail after a password key.
             String(repeating: "secrets: password: ", count: n / 19),
             String(repeating: "token: ", count: n / 7),
@@ -199,6 +199,22 @@ final class RedactorTests: XCTestCase {
             "://u:" + String(repeating: "@a", count: n / 2),
             String(repeating: #"{"a":"postgres://u:pw@h1","b":"mysql://u:pw@h2"},"#, count: n / 50),
             String(repeating: "://a:b\"", count: n / 7),
+            // Fable review of 801ab86: values scanned again (refused nesting, keys inside long or
+            // quoted values, alternating quotes), real and fake closers, escaped quotes, long
+            // usernames with no length cap.
+            "token: " + String(repeating: "process.env.token=", count: n / 18),
+            String(repeating: "token=process.env.", count: n / 18),
+            String(repeating: "password: " + String(repeating: "a1", count: 70) + "token: x1y2z3w4 ", count: n / 170),
+            String(repeating: #"password: "prod, token": "#, count: n / 26),
+            "password: '" + String(repeating: "\"token: '", count: n / 10),
+            String(repeating: "pass: pass:x", count: n / 12),
+            String(repeating: "(pg://u:p@ss)w", count: n / 14),
+            String(repeating: #""pg://u:p@ss\"w","#, count: n / 18),
+            String(repeating: "(a://b:c@d)\"e://f:g@h\"<i://j:k@l>`m://n:o@p`'q://r:s@t'", count: n / 55),
+            String(repeating: "('\"<`x://u:", count: n / 11),
+            "pg://" + String(repeating: "u", count: n),
+            String(repeating: "x://" + String(repeating: "u", count: 200), count: n / 204),
+            String(repeating: "(x://u:1", count: n / 8),
         ]
         let redactor = Redactor()
         var slowest = (0.0, "")

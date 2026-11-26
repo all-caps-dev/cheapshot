@@ -22,25 +22,16 @@ public struct Rule: Sendable {
     /// When set, this finds the hits instead of `pattern` (which is then documentation only).
     /// For a rule a regex cannot express in linear time; see ``URLCreds``.
     public let matcher: (@Sendable (String) -> [NSRange])?
-    /// When set (with `replacesCaptureGroup`), a captured value that is itself the key of the
-    /// next assignment is followed to that assignment's value. See ``NextKey``.
-    public let nextKey: NextKey?
-
-    /// The empty-field step for a keyword assignment rule. In aligned YAML an empty field sits
-    /// right before the next one (`secrets:        password: hunter2x9`), so the rule reads
-    /// `password:` as the value of `secrets:`. Matches cannot overlap, so without this step the
-    /// real value after it was never looked at.
+    /// With `replacesCaptureGroup`: after an accepted value, the scan resumes at the start of
+    /// that value instead of after it, and hits inside a span already redacted are dropped. A
+    /// refused value of at most 128 characters is scanned again the same way.
     ///
-    /// After each hit, `pattern` is tried anchored at the start of the captured value. When it
-    /// matches, its own value starts after the captured one ends, and that value passes the
-    /// rule's validator, both are redacted and the step repeats from the new value. The captured
-    /// text is never kept in the clear just because it reads as a key: `admin_pass:` can be a
-    /// password. When the next value fails the validator, the scan resumes right after the
-    /// captured text, as it would without this step.
-    public struct NextKey: Sendable {
-        public let pattern: String
-        public init(pattern: String) { self.pattern = pattern }
-    }
+    /// Why: in aligned YAML an empty field sits right before the next one
+    /// (`secrets:        password: hunter2x9`), so the rule reads `password:` as the value of
+    /// `secrets:`. Matches cannot overlap, so the real value after it was never looked at. A key
+    /// can also sit inside a long value (`password: <140 chars>token: x`) or a quoted one
+    /// (`"prod, token": "x"`). Scanning the value again finds those keys. It only ever adds hits.
+    public let rescansValues: Bool
 
     public init(name: String, pattern: String,
                 options: NSRegularExpression.Options = [.caseInsensitive],
@@ -48,10 +39,10 @@ public struct Rule: Sendable {
                 retryShorter: Bool = false,
                 replacesCaptureGroup: Bool = false,
                 matcher: (@Sendable (String) -> [NSRange])? = nil,
-                nextKey: NextKey? = nil) {
+                rescansValues: Bool = false) {
         self.name = name; self.pattern = pattern; self.options = options; self.validator = validator
         self.retryShorter = retryShorter; self.replacesCaptureGroup = replacesCaptureGroup
-        self.matcher = matcher; self.nextKey = nextKey
+        self.matcher = matcher; self.rescansValues = rescansValues
     }
 
     /// Keywords that mark the value after them as a credential: `password=`, `api_key:`,
@@ -106,13 +97,6 @@ public struct Rule: Sendable {
         let value = #"(?:"([^"\r\n]{4,})"|'([^'\r\n]{4,})'|["']?([^\s"'`,;&]{4,}))"#
         return key + gap + numericOnlyAfterPassword + value
     }
-
-    /// The empty-field step for SECRET (see ``NextKey``). The next key may have any prefix made
-    /// of value characters (`db_password`, `MyPassword`, `{password`, a long Spring property
-    /// path), as on the main pattern. It is matched anchored at the captured value and the lazy
-    /// prefix is capped at 128, so the step costs a bounded amount per hit.
-    private static let secretNextKey = NextKey(
-        pattern: #"[^\s"'`,;&]{0,128}?"# + assignment(#"(?:=>?|:=?)"#))
 
     /// Ordered most specific first, so a key is not eaten by a looser rule. The validators are
     /// passed as non-capturing closures: an unapplied reference to a static method is not a
@@ -187,7 +171,7 @@ public struct Rule: Sendable {
         // Only the value goes. The validator drops placeholders, code references such as
         // process.env.X, and values another rule already replaced.
         Rule(name: "SECRET",      pattern: assignment(#"(?:=>?|:=?)"#),
-             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true, nextKey: secretNextKey),
+             validator: { Validators.secretValue($0) }, replacesCaptureGroup: true, rescansValues: true),
         // Long command-line flags with a space instead of "=": `--password X`, `--token X`,
         // `--api-key X`, `--http-password X`. A value that starts with "-" is the next flag.
         Rule(name: "SECRET",
