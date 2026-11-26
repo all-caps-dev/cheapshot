@@ -6,11 +6,15 @@
 # The savings line also goes out as a top-level systemMessage, since stderr on exit 0 is not
 # shown to the user.
 #
-# Every exit is 0. By default a failure lets the Read through (fail open) and says so in a
-# systemMessage. With CHEAPSHOT_STRICT=1 a failure denies the Read instead (fail closed), so
-# pixels never reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the
-# session, or `cheapshot allow <path>` from a terminal) or the image has no text to redact
-# (Fleet #290 item 4). "No text" passes only when the binary says so for a photo (ocr_status
+# Every exit is 0. A failed OCR run on an image (missing binary, non-zero exit, empty, truncated
+# or non-JSON output, results that are not an array) denies the Read in every mode (NOV-160;
+# Ryan, 2026-11-25: "Block in default too"). The user message says how to fix the install or
+# use `cheapshot allow`; the model's reason names neither. For a PDF, and for the failures that
+# are not an OCR run (a path starting with "-", a PDF over 20 pages, a missing jq), the default
+# still lets the Read through (fail open) and says so in a systemMessage. With CHEAPSHOT_STRICT=1
+# every failure denies (fail closed), so pixels never reach the model unless a person chose that
+# (CHEAPSHOT_PASSTHROUGH=1 for the session, or `cheapshot allow <path>` from a terminal) or the
+# image has no text to redact (Fleet #290 item 4). "No text" passes only when the binary says so for a photo (ocr_status
 # "empty", retried false, text "", screenshot_like false or absent) or for a PDF. A screenshot
 # still blank after the cold-start retry, an unknown or malformed status, and any empty image
 # from a binary that does not report ocr_status (added in v0.6.0; it cannot tell a photo from a
@@ -76,12 +80,19 @@ note() {
 errf=$(mktemp "$tmp/cheapshot-err.XXXXXX") || errf=/dev/null
 trap '[ "$errf" = /dev/null ] || rm -f "$errf"' EXIT
 
-# A failure: deny in strict mode, otherwise let the Read through with a visible hint. A rules
-# file error denies in every mode, since the pixels would also skip the built-in redaction.
+# A failure: deny for an image in every mode (NOV-160), and in strict mode for a PDF too;
+# otherwise let the Read through with a visible hint. A rules file error denies in every mode,
+# since the pixels would also skip the built-in redaction.
 failed() {
   if /usr/bin/grep -Eq '^cheapshot: (cannot read rules file|rules file|rule |duplicate rule|CHEAPSHOT_RULES)' "$errf" 2>/dev/null; then
     deny "cheapshot could not load its redaction rules, so $path was not read. Tell the user; do not retry another way." \
          "cheapshot: the rules file named by CHEAPSHOT_RULES is broken ($(/usr/bin/grep -m1 '^cheapshot: ' "$errf" | cut -c12-200)). Denied the Read of $path; fix the file or unset CHEAPSHOT_RULES."
+  elif [ "$ext" != pdf ]; then
+    # The user can fix the install, or look at the image and allow it once. `cheapshot allow`
+    # needs the binary to start, which a crash during OCR does not rule out.
+    qpath=$(jq -rn --arg p "$path" '$p | @sh')
+    deny "cheapshot could not read $path, so the pixels were kept out. Tell the user; do not retry another way." \
+         "cheapshot: $1 Denied the Read of $path. Fix the install (brew reinstall all-caps-dev/tap/cheapshot; run cheapshot $qpath in a terminal to see the error), or look at the image and, to show the agent the pixels, run in a terminal: cheapshot allow $qpath"
   elif [ "$strict" = 1 ]; then
     deny "cheapshot could not read $path, and strict mode keeps the pixels out. Tell the user; do not retry another way." \
          "cheapshot: $1 Strict mode denied the Read of $path."
@@ -113,6 +124,14 @@ case "$path" in
 esac
 
 if ! command -v cheapshot >/dev/null 2>&1; then
+  # An image is denied in every mode (NOV-160). `cheapshot allow` cannot help here (it needs the
+  # binary, and the allowlist is only read once the binary is found), so the user message offers
+  # the install and the session-wide CHEAPSHOT_PASSTHROUGH=1 instead.
+  if [ "$ext" != pdf ]; then
+    deny "cheapshot is not installed, so the pixels were kept out. Tell the user." \
+         "cheapshot: binary not found; denied the Read of $path. Install it: brew install all-caps-dev/tap/cheapshot (or set CHEAPSHOT_PASSTHROUGH=1 for the session to read images as pixels)."
+    exit 0
+  fi
   if [ "$strict" = 1 ]; then
     deny "cheapshot is not installed, and strict mode keeps the pixels out. Tell the user." \
          "cheapshot: binary not found; strict mode denied the Read of $path. Install it: brew install all-caps-dev/tap/cheapshot"

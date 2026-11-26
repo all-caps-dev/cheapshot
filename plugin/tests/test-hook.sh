@@ -29,6 +29,22 @@ run_hook() { PATH="$fake:$PATH" sh "$hook"; }
 # Octal permission bits of a file, on GNU (CI runs on Linux) or BSD/macOS stat. BSD `stat -f`
 # means "filesystem status" on Linux, so try GNU's `-c` first.
 mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+denied() {
+  # $1 label; $o holds the hook output (captured by the caller, not piped in, so this runs in
+  # the main shell and a failure is counted).
+  [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "$1 is denied" || fail "$1 is denied: $o"
+}
+# NOV-160 (Ryan, 2026-11-25: "Block in default too"): a failed OCR run on an image is denied in
+# every mode. The user is told how to fix it; the model is told neither the fix nor the allow.
+fail_closed() {
+  # $1 label; $o holds the hook output; $2 a string the user message must contain
+  denied "$1"
+  r=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+  m=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+  case "$m" in *"$2"*) pass "$1: user message says how to fix it";; *) fail "$1: user message lacks '$2': $m";; esac
+  case "$r" in *"cheapshot allow"*|*"brew "*|*"CHEAPSHOT_PASSTHROUGH"*) fail "$1: model reason names a fix or bypass: $r";; *) pass "$1: model reason names no fix or bypass";; esac
+  grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "$1: a deny is not a pass-through" || pass "$1: not recorded as a pass-through"
+}
 # A PATH that has jq but no cheapshot, whatever the machine has installed.
 nobin=$(mktemp -d "$ROOT/nobin.XXXXXX"); ln -s "$(command -v jq)" "$nobin/jq"
 NOBIN_PATH="$nobin:/usr/bin:/bin"
@@ -70,10 +86,16 @@ out=$(input /tmp/shot.png | CHEAPSHOT_PASSTHROUGH=1 run_hook 2>/dev/null); code=
 [ "$code" = 0 ] && [ -z "$out" ] && pass "CHEAPSHOT_PASSTHROUGH=1 passes through" || fail "CHEAPSHOT_PASSTHROUGH=1 passes through"
 grep -qx -- '--note-passthrough passthrough_env' "$FAKE_LOG" && pass "passthrough env recorded in the ledger" || fail "passthrough env recorded: $(cat "$FAKE_LOG")"
 
-# 5. binary missing: pass through (no decision), one hint per session on stdout (systemMessage) and stderr
+# 5. binary missing. An image is denied every time, in default mode too (NOV-160), and the user
+# message names the brew install and CHEAPSHOT_PASSTHROUGH (an allow entry needs the binary).
+fresh
+o=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null); fail_closed "missing binary, image" "brew install all-caps-dev/tap/cheapshot"
+case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *"CHEAPSHOT_PASSTHROUGH=1"*) pass "missing binary, image: names the session bypass";; *) fail "missing binary bypass: $o";; esac
+o=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null); denied "missing binary, second image Read"
+# A PDF keeps the old default: pass through, one hint per session on stdout (systemMessage) and stderr.
 fresh
 err=$(mktemp "$ROOT/err.XXXXXX")
-out=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>"$err"); code=$?
+out=$(input /tmp/report.pdf | PATH="$NOBIN_PATH" sh "$hook" 2>"$err"); code=$?
 dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')
 [ "$code" = 0 ] && [ -z "$dec" ] && pass "missing binary passes through" || fail "missing binary passes through (code=$code out=$out)"
 grep -q 'brew install all-caps-dev/tap/cheapshot' "$err" && pass "missing binary hint names brew" || fail "missing binary hint names brew"
@@ -81,10 +103,10 @@ grep -q 'brew install all-caps-dev/tap/cheapshot' "$err" && pass "missing binary
 msg=$(printf '%s' "$out" | jq -r '.systemMessage // empty')
 case "$msg" in *"brew install all-caps-dev/tap/cheapshot"*) pass "missing binary emits systemMessage";; *) fail "missing binary emits systemMessage: $out";; esac
 err2=$(mktemp "$ROOT/err.XXXXXX")
-out2=$(input /tmp/shot.png | PATH="$NOBIN_PATH" sh "$hook" 2>"$err2")
+out2=$(input /tmp/report.pdf | PATH="$NOBIN_PATH" sh "$hook" 2>"$err2")
 [ ! -s "$err2" ] && [ -z "$out2" ] && pass "hint printed once per session" || fail "hint printed once per session"
 err3=$(mktemp "$ROOT/err.XXXXXX")
-out3=$(input /tmp/shot.png "" s2 | PATH="$NOBIN_PATH" sh "$hook" 2>"$err3")
+out3=$(input /tmp/report.pdf "" s2 | PATH="$NOBIN_PATH" sh "$hook" 2>"$err3")
 [ -s "$err3" ] && [ -n "$out3" ] && pass "new session gets the hint again" || fail "new session gets the hint again"
 
 # 6. allowlist: a live entry is consumed once, an expired entry is ignored. A plain (hashless)
@@ -260,24 +282,36 @@ grep -q -- '--json --stats' "$FAKE_LOG" && fail "big pdf never fully run" || pas
 msg=$(printf '%s' "$out" | jq -r '.systemMessage // empty')
 case "$msg" in *"42"*"--pages 1-5 /tmp/report.pdf"*) pass "big pdf systemMessage names --pages 1-5";; *) fail "big pdf systemMessage: $out";; esac
 
-# 9. binary failure passes through, reported where the user can see it (systemMessage) and recorded
+# 9. binary failure on an image: denied in default mode too (NOV-160), the reason and the fix on
+# stderr and in the systemMessage, nothing recorded as a pass-through
 fresh
 err=$(mktemp "$ROOT/err.XXXXXX")
-out=$(input /tmp/shot.png | FAKE_EXIT=1 run_hook 2>"$err"); code=$?
-[ "$code" = 0 ] && [ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" ] && pass "binary failure passes through" || fail "binary failure passes through: $out"
-grep -q 'cheapshot' "$err" && pass "failure reported on stderr" || fail "failure reported on stderr"
-case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *"could not read /tmp/shot.png (exit 1)"*) pass "failure is a visible systemMessage";; *) fail "failure systemMessage: $out";; esac
-grep -qx -- '--note-passthrough error' "$FAKE_LOG" && pass "failure recorded in the ledger" || fail "failure recorded: $(cat "$FAKE_LOG")"
+o=$(input /tmp/shot.png | FAKE_EXIT=1 run_hook 2>"$err"); fail_closed "binary failure, image" "cheapshot allow '/tmp/shot.png'"
+case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *"could not read /tmp/shot.png (exit 1)"*"brew reinstall all-caps-dev/tap/cheapshot"*) pass "binary failure: user message names the exit code and the reinstall";; *) fail "binary failure user message: $o";; esac
+grep -q 'could not read /tmp/shot.png (exit 1)' "$err" && pass "failure reported on stderr" || fail "failure reported on stderr: $(cat "$err")"
+# A PDF keeps the old default: the failure passes through, visible and recorded.
+fresh
+out=$(input /tmp/report.pdf 1-2 | FAKE_EXIT=1 run_hook 2>/dev/null); code=$?
+[ "$code" = 0 ] && [ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" ] && pass "binary failure on a PDF passes through" || fail "binary failure on a PDF: $out"
+case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *"could not read /tmp/report.pdf (exit 1)"*) pass "PDF failure is a visible systemMessage";; *) fail "PDF failure systemMessage: $out";; esac
+grep -qx -- '--note-passthrough error' "$FAKE_LOG" && pass "PDF failure recorded in the ledger" || fail "PDF failure recorded: $(cat "$FAKE_LOG")"
 
-# 9b. binary exits 0 with output that is not the JSON shape: pass through with a stderr line
+# 9b. binary exits 0 with output that is not the JSON shape: an image is denied in default mode
+# too (NOV-160), with a stderr line
 fresh
 err=$(mktemp "$ROOT/err.XXXXXX")
-out=$(input /tmp/shot.png | FAKE_RAW='not json' run_hook 2>"$err"); code=$?
-[ "$code" = 0 ] && [ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" ] && pass "non-JSON output passes through" || fail "non-JSON output passes through (code=$code out=$out)"
+o=$(input /tmp/shot.png | FAKE_RAW='not json' run_hook 2>"$err"); fail_closed "non-JSON output" "cheapshot allow '/tmp/shot.png'"
 grep -q 'unreadable output' "$err" && pass "non-JSON output reported on stderr" || fail "non-JSON output reported on stderr: $(cat "$err")"
 fresh
-out=$(input /tmp/shot.png | FAKE_RAW='' run_hook 2>/dev/null); code=$?
-[ "$code" = 0 ] && [ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" ] && pass "empty output passes through" || fail "empty output passes through (code=$code out=$out)"
+o=$(input /tmp/shot.png | FAKE_RAW='' run_hook 2>/dev/null); fail_closed "empty output" "cheapshot allow '/tmp/shot.png'"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/shot.png","text":"hel' run_hook 2>/dev/null); fail_closed "truncated JSON" "cheapshot allow '/tmp/shot.png'"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":{"text":"hello"}}' run_hook 2>/dev/null); fail_closed "results not an array" "cheapshot allow '/tmp/shot.png'"
+# A PDF keeps the old default for unreadable output.
+fresh
+out=$(input /tmp/report.pdf 1-2 | FAKE_RAW='not json' run_hook 2>/dev/null)
+[ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')" ] && pass "non-JSON output on a PDF passes through" || fail "non-JSON PDF: $out"
 
 # 9c. NOV-160: the binary says the image read empty without a retry (ocr_status "empty",
 # retried false): a photo or a small image, so the pixels are the content. Pass through, recorded.
@@ -297,11 +331,6 @@ grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "empty text recorde
 # 9d. NOV-160: OCR that is still empty after the cold-start retry must never fall through to the
 # pixel path. Deny in every mode, tell the user about `cheapshot allow` and `cheapshot mask`, and
 # never tell the model how to approve its own raw access.
-denied() {
-  # $1 label; $o holds the hook output (captured by the caller, not piped in, so this runs in
-  # the main shell and a failure is counted).
-  [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "$1 is denied" || fail "$1 is denied: $o"
-}
 # 9d-a. empty + retried: a screenshot that still read blank
 fresh
 err=$(mktemp "$ROOT/err.XXXXXX")
@@ -369,8 +398,7 @@ o=$(input /tmp/shot.png | FAKE_RAW='{"version":"0.6.0","results":[],"image_token
 fresh
 o=$(input /tmp/shot.png | FAKE_RAW="$(ocr_result 5 '"yes"' 'hello')" run_hook 2>/dev/null); denied "malformed field types with text"
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello"*"may be missing"*) pass "malformed fields with text are flagged";; *) fail "malformed fields flag: $o";; esac
-# Output that is not JSON at all is still the existing failure path (test 9b: fails open by
-# default, denied under CHEAPSHOT_STRICT=1); NOV-160 does not change it.
+# Output that is not JSON at all is the failure path (test 9b): denied for an image in every mode.
 # 9d-g. NOV-160 review: "blank" (a photo) needs text "" and, when the field is there,
 # screenshot_like false. Anything else that reads empty is denied.
 fresh
@@ -429,7 +457,7 @@ out=$(printf '{"session_id":"s1","tool_name":"Read","tool_input":{}}' | run_hook
 
 # 10b. session id with path characters is sanitised into the marker name
 fresh
-out=$(input /tmp/shot.png "" '../../evil id' | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null)
+out=$(input /tmp/report.pdf "" '../../evil id' | PATH="$NOBIN_PATH" sh "$hook" 2>/dev/null)
 [ -n "$out" ] && [ -e "$TMPDIR/cheapshot-missing-.._.._evil_id" ] && pass "marker name sanitised" || fail "marker name sanitised: $(ls "$TMPDIR")"
 
 # 10c. Fleet #15 review: a model-supplied path that starts with "-" would parse as a flag.
@@ -528,8 +556,9 @@ case "$reason" in *"cheapshot mask"*) fail "pdf reason must not offer mask: $rea
 fresh
 o=$(input /tmp/shot.png | FAKE_EXIT=2 FAKE_STDERR='cheapshot: cannot read rules file /x.json: missing' run_hook 2>/dev/null)
 [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "broken named rules file denies in default mode" || fail "broken rules: $o"
-o=$(input /tmp/shot.png | FAKE_EXIT=2 run_hook 2>/dev/null)
-[ -z "$(printf '%s' "$o" | jq -r '.hookSpecificOutput // empty')" ] && pass "other exit 2 still fails open in default mode" || fail "other exit 2: $o"
+o=$(input /tmp/shot.png | FAKE_EXIT=2 run_hook 2>/dev/null); denied "other exit 2 on an image, default mode"
+o=$(input /tmp/report.pdf 1-2 | FAKE_EXIT=2 run_hook 2>/dev/null)
+[ -z "$(printf '%s' "$o" | jq -r '.hookSpecificOutput // empty')" ] && pass "other exit 2 on a PDF still fails open in default mode" || fail "other exit 2 PDF: $o"
 
 echo "$fails failure(s)"
 [ "$fails" = 0 ]

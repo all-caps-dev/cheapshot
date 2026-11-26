@@ -45,7 +45,7 @@ Settings the user controls (never set or unset them yourself):
 | Variable | Effect |
 |---|---|
 | `CHEAPSHOT_PASSTHROUGH=1` | The Read hook steps aside for the session. |
-| `CHEAPSHOT_STRICT=1` | The Read hook denies the Read on any failure (missing binary or `jq`, a binary error, a PDF over 20 pages with no range) instead of passing the pixels through. An image OCR read as blank that is not a plain photo (a screenshot still blank after the retry, or a binary that does not report `ocr_status`) is denied with or without it. |
+| `CHEAPSHOT_STRICT=1` | The Read hook denies the Read on any failure (missing binary or `jq`, a binary error, a PDF over 20 pages with no range) instead of passing the pixels through. On an image, a failed OCR run (missing binary, a binary error, unreadable output) and a blank read that is not a plain photo (a screenshot still blank after the retry, or a binary that does not report `ocr_status`) are denied with or without it. |
 | `CHEAPSHOT_ALLOW_RAW=1` | The MCP tools accept `raw: true` (cheapshot-mcp 0.1.3 or later). |
 | `CHEAPSHOT_RULES=<file>` | Extra redaction rules for runs without `--rules` (the hook, the MCP server); else `rules.json` next to the ledger. A broken named file denies the Read; a broken default file is skipped with a warning. Needs cheapshot 0.6.0. |
 
@@ -65,8 +65,8 @@ Settings the user controls (never set or unset them yourself):
    upright, with no GPS position, camera make or model, capture date, IPTC or XMP. A PDF arrives
    as the file itself. The allowance lasts five minutes and is used once. The same
    applies when the hook denied a Read because OCR found no text in what looks like a
-   screenshot: the text may have been missed, so tell the user and let them look first; do not
-   retry or read it another way. The MCP
+   screenshot, or because cheapshot failed or is missing: the text may have been missed or never
+   read, so tell the user and let them look first; do not retry or read it another way. The MCP
    tools' `raw` argument is refused unless the user set `CHEAPSHOT_ALLOW_RAW=1`. These stop
    cheapshot offering you the bypass; they are not a sandbox, and routing around them (faking
    a terminal, writing the allow file) is exactly what the user said no to. Do not.
