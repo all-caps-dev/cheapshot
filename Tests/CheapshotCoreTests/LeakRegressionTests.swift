@@ -229,6 +229,103 @@ final class LeakRegressionTests: XCTestCase {
         XCTAssertEqual(r.redact("password: token:abc1" + "23xyz").text, "password: [SECRET]")
     }
 
+    // MARK: Fable re-review of e90d1a2
+
+    /// Row 1: a very long value used to make the SECRET regex give up, and every later
+    /// assignment in the document leaked.
+    func testLongValueDoesNotStopLaterRedaction() {
+        let m = "Zq9kQ2" + "mW7p"
+        for n in [80_000, 100_000, 400_000] {
+            for head in ["token=" + String(repeating: "a", count: n),
+                         "password=\"" + String(repeating: "a,", count: n / 2),
+                         "token: '" + String(repeating: "b", count: n),
+                         "password: " + String(repeating: "1", count: n)] {
+                let out = r.redact(head + "\npassword=" + m).text
+                XCTAssertTrue(out.hasSuffix("\npassword=[SECRET]"), "\(head.prefix(12))... at \(n): \(out.suffix(40))")
+            }
+        }
+    }
+
+    /// Row 2: a refused long value whose key was itself read as the previous value.
+    func testRefusedLongValueAfterKeyShapedValue() {
+        let m = "Zq9kQ2" + "mW7p"
+        let line = "credentials:   secret_url: jdbc:postgresql://my-production-database-instance.cluster-ro-"
+            + "abcdefghijkl.us-east-1.rds.amazonaws.com:5432/application_production?password=\(m)"
+        let out = r.redact(line).text
+        XCTAssertFalse(out.contains(m), out)
+    }
+
+    /// Fuzz row (seed 161): a long refused value found only by reading an accepted value
+    /// again must not move the scan past where the plain scan resumed.
+    func testRescanFoundRefusedValueResumesAtPlainEnd() {
+        let m = "ZquTuu" + "68d5"
+        let line = #"- session_id: $HOMEpasswd: "db_password_credentials': 'https://example.com/"#
+            + String(repeating: "a", count: 130) + #"; token:   ""# + m + #"""#
+        let out = r.redact(line).text
+        XCTAssertFalse(out.contains(m), out)
+    }
+
+    /// The 128-character bound on scanning a refused value again. At 128 a key inside it is
+    /// found; at 129 the value is skipped whole, as e8c5749 skips every refused value.
+    func testRefusedValueRescanBoundIs128() {
+        let m = "Zq9kQ2" + "mW7p"
+        func line(_ length: Int) -> String {
+            let tail = "token=" + m
+            return "password: process.env." + String(repeating: "a", count: length - 12 - tail.count) + tail
+        }
+        // The refused value is everything after "password: ".
+        XCTAssertEqual(line(128).count - "password: ".count, 128)
+        XCTAssertFalse(r.redact(line(128)).text.contains(m))
+        XCTAssertTrue(r.redact(line(129)).text.contains(m), "129 is past the bound")
+    }
+
+    /// Row 5: a hit that overlaps only the tail of the last redacted span; the tail is redacted
+    /// and scanned, so a key after it is still found.
+    func testOverlapTail() {
+        let m = "Zq9kQ2" + "mW7p"
+        let out = r.redact(#"password: "x1 token: 'abc"de_secret' = "# + m).text
+        XCTAssertFalse(out.contains(m), out)
+        XCTAssertFalse(out.contains("de_secret"), out)
+    }
+
+    func testFableReReviewURLShapes() {
+        let pw = "Zq9kQ2" + "mW7p"
+        let cases: [(String, String)] = [
+            // Row 3: a username holding the closer character, not a real closer.
+            ("(pg://us)er:\(pw)@host/db)", "(pg://[URL_CREDS]@host/db)"),
+            // Row 4: a real closer after "@host" chars, then more password and a later "@".
+            ("(postgres://u:p@ss).w0rd\(pw)@host/db)", "(postgres://[URL_CREDS]@host/db)"),
+            ("'postgres://u:p@ss''w0rd\(pw)@host/db'", "'postgres://[URL_CREDS]@host/db'"),
+            (#""pg://u:p@ss\",w0rd"# + pw + #"@host/db""#, #""pg://[URL_CREDS]@host/db""#),
+            // A real closer does not stop when any "@" before a host character lies ahead in the
+            // same item, even one whose host ends oddly (fuzz row: "@host:]").
+            (#"url="s3://u:Zq9k!",x"# + pw + #"@host:]."#, #"url="s3://[URL_CREDS]@host:]."#),
+            // A stopping closer right after the colon is an empty password, not a credential.
+            (#""pg://u:","b@db""#, #""pg://u:","b@db""#),
+            // An escaped quote is password text even before a delimiter and another escape.
+            (#"{"u":"pg://u:p\",\"x9"# + pw + #"@db"}"#, #"{"u":"pg://[URL_CREDS]@db"}"#),
+            // A stray ")" between a real closer and the "@" stays in the password; a new "("
+            // starts another item. Doubled backticks are escaped.
+            ("(s3://u:" + pw + "@h1))!x" + pw + "@db/x)", "(s3://[URL_CREDS]@db/x)"),
+            ("(pg://u:\(pw)@h1),(me@example.com)", "(pg://[URL_CREDS]@h1),([EMAIL])"),
+            ("`mysql://u:" + pw + "``@ss>x" + pw + "@db.internal?x=1`", "`mysql://[URL_CREDS]@db.internal?x=1`"),
+            // Row 7: the bare-URL fallback no longer runs past a real closing quote.
+            (#"{"url":"http://localhost:port","email":"me@example.com"}"#,
+             #"{"url":"http://localhost:port","email":"[EMAIL]"}"#),
+            (#"{"a":"pg://u:","b":"me@example.com"}"#, #"{"a":"pg://u:","b":"[EMAIL]"}"#),
+            // "." after a closer makes it real, so these stay two URLs.
+            ("(pg://u:\(pw)@h1).(pg://v:\(pw)@h2)", "(pg://[URL_CREDS]@h1).(pg://[URL_CREDS]@h2)"),
+            // A host of 253 characters ends a password; the "@" before it is the end.
+            ("pg://u:Aa1b@" + String(repeating: "a", count: 253) + "/x@db/y",
+             "pg://[URL_CREDS]@" + String(repeating: "a", count: 253) + "/x@db/y"),
+            // A "://" inside the password is one hit, not two.
+            ("pg://u:a://b:c@h/x", "pg://[URL_CREDS]@h/x"),
+        ]
+        for (input, want) in cases {
+            XCTAssertEqual(r.redact(input).text, want, input)
+        }
+    }
+
     // MARK: Random-secret harness
 
     /// Swift: seeded random secrets in every leak template. None may survive in the output.

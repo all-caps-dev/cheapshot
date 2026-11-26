@@ -106,17 +106,25 @@ public struct Redactor {
         return out
     }
 
-    /// Swift: the scan for a rule with ``Rule/rescansValues``. Same matches as `matches(in:)`,
-    /// except where it resumes: at the start of an accepted value (so a key inside or right
-    /// after it is found), and at the start of a refused value of at most 128 characters.
+    /// Swift: the scan for a rule with ``Rule/rescansValues``. Same matching as `matches(in:)`;
+    /// only the resume point differs, and it is never later than the end of the match, where
+    /// `matches(in:)` resumes:
+    /// - an accepted value: its start, so a key inside or right after it is found;
+    /// - a refused value of at most 128 characters: its start;
+    /// - a longer refused value found only by reading an earlier value again (its match began
+    ///   before the end of the last match the plain scan would also have found): that end, where
+    ///   the plain scan resumed;
+    /// - a hit that overlaps only the tail of the last span: the old end of that span.
     /// A hit wholly inside a span already redacted is dropped; one that starts inside it keeps
     /// only its tail.
     ///
-    /// Linear: the resume point always moves right (a value starts after its key). An accepted
-    /// value is read again once: hits found inside it are dropped and resume after themselves,
-    /// and a hit that only overlaps its tail resumes after itself too. A refused value is read
-    /// again only when it is at most 128 characters. Each character is read a bounded number of
-    /// times.
+    /// Linear: the resume point always moves right of the match start (a value starts after its
+    /// key, and a redacted span ends after the match began). An accepted value is read again
+    /// once: hits inside it are dropped and resume at their own end, and a tail is read again
+    /// once from where it starts. A refused value is read again only when it is at most 128
+    /// characters, or from the end of the last plain match (that end only grows, so each
+    /// stretch is read again a bounded number of times). Each character is read a bounded
+    /// number of times.
     private func rescanningHits(_ re: NSRegularExpression, _ rule: Rule, in text: String) -> [Range<String.Index>] {
         // One NSString for every call below, so no call bridges or copies the text again.
         let ns = NSString(string: text)
@@ -127,27 +135,42 @@ public struct Redactor {
         let opts: NSRegularExpression.MatchingOptions = [.withTransparentBounds, .withoutAnchoringBounds]
         var out: [Range<String.Index>] = []
         var redactedTo = 0          // end (UTF-16) of the last redacted span
+        var plainEnd = 0            // end of the last match the plain scan would also have
+                                    // found (one that began at or after the previous such end)
         var pos = 0
         while pos < len,
               let m = re.firstMatch(in: str, options: opts, range: NSRange(location: pos, length: len - pos)) {
             let end = NSMaxRange(m.range)
+            let began = m.range.location
+            // A match that began before plainEnd was found only by reading a value again.
+            let foundByRescan = began < plainEnd
+            let plainResume = plainEnd
+            if !foundByRescan { plainEnd = end }
             guard let cap = Self.firstGroup(m), let r = Range(cap, in: text) else { pos = end; continue }
             let capEnd = NSMaxRange(cap)
             // Already redacted as part of an earlier value.
             if capEnd <= redactedTo { pos = end; continue }
             if let v = rule.validator, !v(String(text[r])) {
-                pos = cap.length <= 128 ? cap.location : end
+                if cap.length <= 128 {
+                    pos = cap.location           // short: read it again for keys inside
+                } else if foundByRescan {
+                    pos = plainResume            // found by reading an earlier value again: go
+                                                 // back to where the plain scan resumed after it
+                } else {
+                    pos = end
+                }
                 continue
             }
             if cap.location >= redactedTo {
                 out.append(r)
                 pos = cap.location
             } else {
-                // Overlaps the tail of the last span: redact the rest, and do not read it again.
+                // Overlaps the tail of the last span: redact the rest and read it again from
+                // there, so a key in the tail is still found.
                 if let tail = Range(NSRange(location: redactedTo, length: capEnd - redactedTo), in: text) {
                     out.append(tail)
                 }
-                pos = end
+                pos = redactedTo
             }
             redactedTo = capEnd
         }

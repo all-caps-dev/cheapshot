@@ -218,11 +218,15 @@ final class RedactorTests: XCTestCase {
         ]
         let redactor = Redactor()
         var slowest = (0.0, "")
+        // Liveness: a regex that gives up on a shape is fast and redacts nothing after it, so
+        // every shape is followed by a password line that must still be redacted.
+        let marker = "Zq9kQ2" + "mW7p"
         for shape in shapes {
             let start = Date()
-            _ = redactor.redact(shape)
+            let out = redactor.redact(shape + "\npassword=" + marker).text
             let elapsed = Date().timeIntervalSince(start)
             XCTAssertLessThan(elapsed, 1.0, "\(shape.prefix(16))... took \(elapsed)s")
+            XCTAssertTrue(out.hasSuffix("\npassword=[SECRET]"), "\(shape.prefix(16))... stopped redacting")
             if elapsed > slowest.0 { slowest = (elapsed, String(shape.prefix(24))) }
         }
         print("slowest 100k shape: \(slowest.1.debugDescription) \(String(format: "%.3f", slowest.0))s")

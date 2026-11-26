@@ -30,7 +30,8 @@ public struct Rule: Sendable {
     /// (`secrets:        password: hunter2x9`), so the rule reads `password:` as the value of
     /// `secrets:`. Matches cannot overlap, so the real value after it was never looked at. A key
     /// can also sit inside a long value (`password: <140 chars>token: x`) or a quoted one
-    /// (`"prod, token": "x"`). Scanning the value again finds those keys. It only ever adds hits.
+    /// (`"prod, token": "x"`). Scanning the value again finds those keys. The scan never resumes
+    /// later than the end of the match, where the plain scan resumes; see `rescanningHits`.
     public let rescansValues: Bool
 
     public init(name: String, pattern: String,
@@ -94,7 +95,11 @@ public struct Rule: Sendable {
         // A number is a value only after a password key. The lookbehind runs once per keyword hit.
         let numericOnlyAfterPassword = "(?:(?<=" + passwordKeys + gap + ")"
             + #"|(?!["']?[0-9][0-9.,_+\-]*(?:["'\s`;&]|$)))"#
-        let value = #"(?:"([^"\r\n]{4,})"|'([^'\r\n]{4,})'|["']?([^\s"'`,;&]{4,}))"#
+        // Each run is written `{3}` then `+`, never `{4,}`: ICU keeps a backtrack frame per
+        // iteration of a counted loop, so a value of ~80,000 characters overflowed its stack, the
+        // match failed in silence and every later assignment in the document went unredacted.
+        // A `+` over one character set is a simple loop with a single frame.
+        let value = #"(?:"([^"\r\n]{3}[^"\r\n]+)"|'([^'\r\n]{3}[^'\r\n]+)'|["']?([^\s"'`,;&]{3}[^\s"'`,;&]+))"#
         return key + gap + numericOnlyAfterPassword + value
     }
 
