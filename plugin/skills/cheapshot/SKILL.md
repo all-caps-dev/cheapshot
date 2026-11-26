@@ -45,7 +45,7 @@ Settings the user controls (never set or unset them yourself):
 | Variable | Effect |
 |---|---|
 | `CHEAPSHOT_PASSTHROUGH=1` | The Read hook steps aside for the session. |
-| `CHEAPSHOT_STRICT=1` | The Read hook denies the Read on any failure (missing binary or `jq`, a binary error, a PDF over 20 pages with no range) instead of passing the pixels through. On an image, a failed OCR run (missing binary, a binary error, unreadable output) and a blank read that is not a plain photo (a screenshot still blank after the retry, or a binary that does not report `ocr_status`) are denied with or without it. |
+| `CHEAPSHOT_STRICT=1` | The Read hook denies the Read on any failure (missing binary or `jq`, a binary error, a PDF over 20 pages with no range) instead of passing the pixels through. On an image, a broken install or failed OCR run (missing binary or `jq`, a binary error, unreadable output) and a blank read that is not a plain photo (a screenshot still blank after the retry, or a binary that does not report `ocr_status`) are denied with or without it. |
 | `CHEAPSHOT_ALLOW_RAW=1` | The MCP tools accept `raw: true` (cheapshot-mcp 0.1.3 or later). |
 | `CHEAPSHOT_RULES=<file>` | Extra redaction rules for runs without `--rules` (the hook, the MCP server); else `rules.json` next to the ledger. A broken named file denies the Read; a broken default file is skipped with a warning. Needs cheapshot 0.6.0. |
 

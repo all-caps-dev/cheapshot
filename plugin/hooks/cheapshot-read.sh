@@ -6,15 +6,16 @@
 # The savings line also goes out as a top-level systemMessage, since stderr on exit 0 is not
 # shown to the user.
 #
-# Every exit is 0. A failed OCR run on an image (missing binary, non-zero exit, empty, truncated
-# or non-JSON output, results that are not an array) denies the Read in every mode (NOV-160;
-# Ryan, 2026-11-25: "Block in default too"). The user message says how to fix the install or
-# use `cheapshot allow`; the model's reason names neither. For a PDF, and for the failures that
-# are not an OCR run (a path starting with "-", a PDF over 20 pages, a missing jq), the default
-# still lets the Read through (fail open) and says so in a systemMessage. With CHEAPSHOT_STRICT=1
-# every failure denies (fail closed), so pixels never reach the model unless a person chose that
-# (CHEAPSHOT_PASSTHROUGH=1 for the session, or `cheapshot allow <path>` from a terminal) or the
-# image has no text to redact (Fleet #290 item 4). "No text" passes only when the binary says so for a photo (ocr_status
+# Every exit is 0. A broken install or a failed OCR run on an image (missing jq, missing binary,
+# non-zero exit, empty, truncated or non-JSON output, results that are not an array) denies the
+# Read in every mode (NOV-160; Ryan, 2026-11-25: "Block in default too"). The user message says
+# how to fix it, or names `cheapshot allow` or CHEAPSHOT_PASSTHROUGH=1; the model's reason names
+# none of them. A path starting with "-" is read like any other, after "--". For a PDF, and for a
+# PDF over 20 pages, the default still lets the Read through (fail open) and says so in a
+# systemMessage. With CHEAPSHOT_STRICT=1 every failure denies (fail closed), so pixels never
+# reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the session, or
+# `cheapshot allow <path>` from a terminal) or the image has no text to redact (Fleet #290 item
+# 4). "No text" passes only when the binary says so for a photo (ocr_status
 # "empty", retried false, text "", screenshot_like false or absent) or for a PDF. A screenshot
 # still blank after the cold-start retry, an unknown or malformed status, and any empty image
 # from a binary that does not report ocr_status (added in v0.6.0; it cannot tell a photo from a
@@ -31,15 +32,21 @@ strict=0
 [ "${CHEAPSHOT_STRICT:-0}" = "1" ] && strict=1
 
 if ! command -v jq >/dev/null 2>&1; then
-  # No jq means no JSON parsing. In strict mode, still refuse image and PDF Reads, found with a
-  # plain pattern match, so a missing tool cannot become a silent bypass. Static JSON only.
+  # No jq means no JSON parsing, and is a broken install. An image Read is denied in every mode
+  # (NOV-160); a PDF Read only in strict mode, as before. Without jq the file type comes from a
+  # plain pattern match on the file_path extension in the raw hook JSON, not from the parsed
+  # path: this is the one place the hook decides image versus PDF that way. Static JSON only.
   # CHEAPSHOT_PASSTHROUGH=1 is still honoured; a `cheapshot allow` entry is not, since matching
   # it needs the parsed path (the deny message says to install jq).
   [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ] && exit 0
   # The path pattern allows JSON escapes (\" and friends), so a quote in a file name cannot
-  # end the match early and slip past the deny.
-  if [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|heic|heif|tiff?|bmp|pdf)"'; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this image was not read (CHEAPSHOT_STRICT=1). Tell the user."},"systemMessage":"cheapshot: jq is missing; strict mode denied an image Read. Install it: brew install jq"}'
+  # end the match early and slip past the deny. The model's reason names neither the fix nor
+  # the bypass; the user's systemMessage (and stderr) carries both.
+  if printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|heic|heif|tiff?|bmp)"'; then
+    echo "cheapshot: jq is missing, so the image Read was denied. Install it: brew install jq (or set CHEAPSHOT_PASSTHROUGH=1 for the session to read images as pixels)." >&2
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this image was not read. Tell the user."},"systemMessage":"cheapshot: jq is missing, so the image Read was denied. Install it: brew install jq (or set CHEAPSHOT_PASSTHROUGH=1 for the session to read images as pixels)."}'
+  elif [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.pdf"'; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this PDF was not read (CHEAPSHOT_STRICT=1). Tell the user."},"systemMessage":"cheapshot: jq is missing; strict mode denied a PDF Read. Install it: brew install jq"}'
   fi
   exit 0
 fi
@@ -108,20 +115,13 @@ if [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ]; then
   exit 0
 fi
 
-# The model supplies file_path, so it can start with "-" and parse as a flag. The binary has no
-# "--" marker to lean on (older builds reject it), so never hand such a path to it. By default
-# the Read shows pixels; strict mode denies it like any other failure.
-case "$path" in
-  -*)
-    if [ "$strict" = 1 ]; then
-      deny "cheapshot will not read $path: it starts with \"-\" and would parse as a flag. Tell the user; do not retry another way." \
-           "cheapshot: $path starts with \"-\"; strict mode denied the Read."
-    else
-      note error
-      hint "cheapshot: $path starts with \"-\", so it would parse as a flag. Reading it as pixels."
-    fi
-    exit 0 ;;
-esac
+# The model supplies file_path, so it can start with "-" and parse as a flag. Such a path goes to
+# the binary after "--", which ends option parsing (cheapshot 0.6.0, #290), so it is read and
+# redacted like any other (NOV-160: it used to pass as pixels). Only a dash path gets "--": an
+# older binary rejects "--" as an unknown option, which is a failed run (denied for an image),
+# while every normal path is called exactly as before and keeps working on older binaries.
+sep=""
+case "$path" in -*) sep="--" ;; esac
 
 if ! command -v cheapshot >/dev/null 2>&1; then
   # An image is denied in every mode (NOV-160). `cheapshot allow` cannot help here (it needs the
@@ -239,7 +239,7 @@ fi
 pages=$(printf '%s' "$input" | jq -r '.tool_input.pages // empty')
 if [ "$ext" = pdf ] && [ -z "$pages" ]; then
   # Cheap probe: one page, no ledger line, just to learn the page count.
-  probe=$(cheapshot --json --no-ledger --pages 1-1 "$path" 2>"$errf") || failed "could not probe the page count (exit $?)."
+  probe=$(cheapshot --json --no-ledger --pages 1-1 ${sep:+"$sep"} "$path" 2>"$errf") || failed "could not probe the page count (exit $?)."
   count=$(printf '%s' "$probe" | jq -r '.results[0].source.pages // 0')
   if [ "$count" -gt 20 ] 2>/dev/null; then
     if [ "$strict" = 1 ]; then
@@ -254,9 +254,9 @@ if [ "$ext" = pdf ] && [ -z "$pages" ]; then
 fi
 
 if [ -n "$pages" ]; then
-  out=$(cheapshot --json --stats --pages "$pages" "$path" 2>"$errf")
+  out=$(cheapshot --json --stats --pages "$pages" ${sep:+"$sep"} "$path" 2>"$errf")
 else
-  out=$(cheapshot --json --stats "$path" 2>"$errf")
+  out=$(cheapshot --json --stats ${sep:+"$sep"} "$path" 2>"$errf")
 fi
 code=$?
 [ "$code" = 0 ] || failed "could not read $path (exit $code)."

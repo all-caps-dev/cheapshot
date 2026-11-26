@@ -461,16 +461,28 @@ out=$(input /tmp/report.pdf "" '../../evil id' | PATH="$NOBIN_PATH" sh "$hook" 2
 [ -n "$out" ] && [ -e "$TMPDIR/cheapshot-missing-.._.._evil_id" ] && pass "marker name sanitised" || fail "marker name sanitised: $(ls "$TMPDIR")"
 
 # 10c. Fleet #15 review: a model-supplied path that starts with "-" would parse as a flag.
-# Refuse it, let the Read show pixels, and never call the binary.
+# NOV-160 (Ryan: "fail closed everywhere"): it no longer passes as pixels. The hook hands it to
+# the binary after "--" (end of options, cheapshot 0.6.0), so it is read and redacted like any
+# other path, and is never recorded as a pass-through.
 fresh
-err=$(mktemp "$ROOT/err.XXXXXX")
-out=$(input "-dash.png" | run_hook 2>"$err"); code=$?
-dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')
-[ "$code" = 0 ] && [ -z "$dec" ] && pass "dash path passes through" || fail "dash path passes through (code=$code out=$out)"
-grep -q 'starts with "-"' "$err" && pass "dash path reported on stderr" || fail "dash path reported on stderr: $(cat "$err")"
-case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *'starts with "-"'*) pass "dash path is a visible systemMessage";; *) fail "dash path systemMessage: $out";; esac
-# The binary is called once, to record the pass-through, and never with the path.
-[ "$(cat "$FAKE_LOG")" = "--note-passthrough error" ] && pass "dash path recorded, never handed to the binary" || fail "dash path binary calls: $(cat "$FAKE_LOG")"
+o=$(input "-dash.png" | run_hook 2>/dev/null); denied "dash path"
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello world"*) pass "dash path: the redacted text comes back";; *) fail "dash path text: $o";; esac
+grep -qx -- '--json --stats -- -dash.png' "$FAKE_LOG" && pass "dash path: binary called with -- before the path" || fail "dash path argv: $(cat "$FAKE_LOG")"
+grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "dash path: not a pass-through" || pass "dash path: not recorded as a pass-through"
+# An older binary rejects "--" (exit 2, unknown option): that is a failed run, denied for an image.
+fresh
+o=$(input "-dash.png" | FAKE_EXIT=2 FAKE_STDERR='cheapshot: unknown option --' run_hook 2>/dev/null); denied "dash path, binary rejects --"
+# A normal path is called exactly as before, with no "--", so older binaries keep working.
+fresh
+o=$(input /tmp/shot.png | run_hook 2>/dev/null)
+grep -qx -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "normal path: argv unchanged, no --" || fail "normal path argv: $(cat "$FAKE_LOG")"
+# PDFs: the page-count probe and the page-range run both put "--" before a dash path.
+fresh
+o=$(input "-r.pdf" | FAKE_PAGES=3 run_hook 2>/dev/null)
+grep -qx -- '--json --no-ledger --pages 1-1 -- -r.pdf' "$FAKE_LOG" && grep -qx -- '--json --stats -- -r.pdf' "$FAKE_LOG" && pass "dash PDF: probe and run use --" || fail "dash PDF argv: $(cat "$FAKE_LOG")"
+fresh
+o=$(input "-r.pdf" 2-3 | run_hook 2>/dev/null)
+grep -qx -- '--json --stats --pages 2-3 -- -r.pdf' "$FAKE_LOG" && pass "dash PDF with pages: run uses --" || fail "dash PDF pages argv: $(cat "$FAKE_LOG")"
 
 # 11. Ruling 3: the hook runs as an executable (no leading sh) from a plugin root that has a space,
 # invoked the way hooks.json may spell it: "${CLAUDE_PLUGIN_ROOT}"/hooks/cheapshot-read.sh and unquoted.
@@ -509,8 +521,23 @@ o=$(input /tmp/shot.PNG | CHEAPSHOT_STRICT=1 PATH="$nojq" /bin/sh "$hook" 2>/dev
 case "$o" in *'"permissionDecision":"deny"'*) pass "strict: missing jq denies an image";; *) fail "strict: missing jq denies an image: $o";; esac
 o=$(input /tmp/main.swift | CHEAPSHOT_STRICT=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
 [ -z "$o" ] && pass "strict: missing jq leaves a source file alone" || fail "strict: missing jq leaves a source file alone: $o"
+# NOV-160: missing jq is a broken install, so an image is denied in default mode too. Without jq
+# the image is told apart by the file_path extension in the raw hook JSON (pattern match).
 o=$(input /tmp/shot.png | PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
-[ -z "$o" ] && pass "default: missing jq still passes through" || fail "default: missing jq still passes through: $o"
+case "$o" in *'"permissionDecision":"deny"'*) pass "default: missing jq denies an image";; *) fail "default: missing jq denies an image: $o";; esac
+case "$o" in *'"systemMessage":"'*'brew install jq'*'CHEAPSHOT_PASSTHROUGH=1'*) pass "default: missing jq user message names brew install jq and the session bypass";; *) fail "missing jq user message: $o";; esac
+r=${o#*permissionDecisionReason\":\"}; r=${r%%\"*}
+case "$r" in *brew*|*CHEAPSHOT_PASSTHROUGH*|*"cheapshot allow"*) fail "missing jq: model reason names a fix or bypass: $r";; "$o") fail "missing jq: no reason found: $o";; *) pass "missing jq: model reason names no fix or bypass";; esac
+o=$(printf '%s' '{"session_id":"s1","tool_name":"Read","tool_input":{"file_path":"/tmp/a\"b.JPEG"}}' | PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
+case "$o" in *'"permissionDecision":"deny"'*) pass "default: missing jq denies an image with a quote in its name";; *) fail "default missing jq, quoted name: $o";; esac
+o=$(input /tmp/report.pdf | PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
+[ -z "$o" ] && pass "default: missing jq still passes a PDF through" || fail "default: missing jq, PDF: $o"
+o=$(input /tmp/report.pdf | CHEAPSHOT_STRICT=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
+case "$o" in *'"permissionDecision":"deny"'*) pass "strict: missing jq denies a PDF";; *) fail "strict: missing jq, PDF: $o";; esac
+o=$(input /tmp/main.swift | PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
+[ -z "$o" ] && pass "default: missing jq leaves a source file alone" || fail "default: missing jq, source file: $o"
+o=$(input /tmp/shot.png | CHEAPSHOT_PASSTHROUGH=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
+[ -z "$o" ] && pass "default: missing jq still honours CHEAPSHOT_PASSTHROUGH=1" || fail "default: missing jq ignored passthrough: $o"
 o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 CHEAPSHOT_PASSTHROUGH=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
 [ -z "$o" ] && pass "strict: missing jq still honours CHEAPSHOT_PASSTHROUGH=1" || fail "strict: missing jq ignored passthrough: $o"
 o=$(printf '%s' '{"session_id":"s1","tool_name":"Read","tool_input":{"file_path":"/tmp/a\"b.png"}}' | CHEAPSHOT_STRICT=1 PATH="$nojq" /bin/sh "$hook" 2>/dev/null)
@@ -524,10 +551,10 @@ printf '%s\t/tmp/shot.pdf\n' "$((now + 200))" > "$TMPDIR/cheapshot-allow"
 o=$(input /tmp/shot.pdf | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null)
 [ -z "$o" ] && pass "strict: an allow entry still passes through" || fail "strict: allow entry: $o"
 fresh
-# A path starting with "-" is denied in strict mode and still never reaches the binary.
+# A path starting with "-" is denied in strict mode too, and reaches the binary only after "--".
 o=$(input "-dash.png" | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null)
 [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "strict: dash path is denied" || fail "strict: dash path is denied: $o"
-[ ! -s "$FAKE_LOG" ] && pass "strict: dash path never reaches the binary" || fail "strict: dash path reached the binary: $(cat "$FAKE_LOG")"
+grep -qx -- '--json --stats -- -dash.png' "$FAKE_LOG" && pass "strict: dash path reaches the binary only after --" || fail "strict: dash path argv: $(cat "$FAKE_LOG")"
 fresh
 # A good read is unchanged by strict mode.
 dec=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason')

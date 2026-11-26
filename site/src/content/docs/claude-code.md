@@ -53,13 +53,12 @@ the ledger, and `cheapshot --ledger` counts them:
 - `CHEAPSHOT_PASSTHROUGH=1` is set in the environment.
 - `cheapshot` is not on `PATH` and the file is a PDF. The hook prints the brew
   command once per session, to stderr and as a system message, and steps aside.
-- `jq` is not on `PATH`. The hook steps aside with no message, so install it
-  with `brew install jq`.
+- `jq` is not on `PATH` and the file is a PDF. The hook steps aside with no
+  message, so install it with `brew install jq`. Without `jq` the hook tells a
+  PDF from an image by the extension in the raw request; an image is denied.
 - The path is on the one-shot allowlist (below).
 - The binary fails on a PDF. The hook says so in a system message and lets the
   pixels through rather than blocking the agent.
-- The path starts with `-`, so it would parse as a flag. The hook never hands
-  it to the binary and says so in a system message.
 - OCR finds no text in a photo or a small image (`ocr_status` `"empty"` with no
   retry), or in a PDF. There is nothing to redact, so the pixels are the content.
 
@@ -72,21 +71,27 @@ v0.6.0), which cannot tell a photo from a failed read. Look at the image yoursel
 any text it finds blacked out. When text was found but OCR was retried, the
 redacted text is still returned, with a note that some lines may be missing.
 
-A failed OCR run on an image is denied in every mode too: `cheapshot` missing
-from `PATH`, the binary exiting with an error, and output that is empty,
+A failed OCR run on an image is denied in every mode too: `jq` or `cheapshot`
+missing from `PATH`, the binary exiting with an error, and output that is empty,
 truncated, not JSON, or has no `results` array. A broken install blocks image
 Reads until it is fixed. The system message says how: reinstall with
 `brew reinstall all-caps-dev/tap/cheapshot` (or install it, if it is missing),
 or look at the image and run `cheapshot allow <path>` in a terminal. With no
-binary at all, `cheapshot allow` cannot run, so the message offers
-`CHEAPSHOT_PASSTHROUGH=1` for the session instead. The agent is told neither.
+binary or no `jq`, `cheapshot allow` cannot help, so the message offers
+`brew install jq` or the binary's install, and `CHEAPSHOT_PASSTHROUGH=1` for the
+session. The agent is told none of these.
+
+A path that starts with `-` is read like any other: the hook passes it to the
+binary after `--`, which ends option parsing, so it cannot act as a flag. Only
+such a path gets `--`; a binary too old to know `--` fails the run, which denies
+an image.
 
 ## Strict mode
 
-Set `CHEAPSHOT_STRICT=1` and every failure above (missing `jq`, a PDF over 20
-pages with no range, a path that starts with `-`, and a missing binary, a binary
-error or unreadable output on a PDF) denies the Read instead of passing the
-pixels through. On an image those last three are denied in both modes (above).
+Set `CHEAPSHOT_STRICT=1` and every failure above on a PDF (missing `jq`, a PDF
+over 20 pages with no range, a missing binary, a binary error or unreadable
+output) denies the Read instead of passing the pixels through. On an image every
+failure is denied in both modes (above).
 `CHEAPSHOT_PASSTHROUGH=1` and `cheapshot allow` still work, because those are
 your decisions. Strict mode still lets a photo or a PDF with no recognised text
 through: that is not a failure, and there is no text to redact. It is recorded in
