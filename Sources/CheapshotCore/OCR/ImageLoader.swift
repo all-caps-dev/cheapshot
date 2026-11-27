@@ -105,8 +105,12 @@ public enum ImageLoader {
     /// always accepted those through NSImage, so macOS keeps them. iOS has no fallback.
     static func appKitFallback(path: String) -> (image: CGImage, size: (width: Int, height: Int))? {
         #if canImport(AppKit)
+        // With no hints, NSImage renders a vector image at the main screen's backing scale, so an
+        // SVG came out 2x on a Retina Mac and 1x elsewhere. An identity transform pins it to 1x
+        // (one pixel per point) on every host, like the ImageIO path, which never scales.
+        let oneX: [NSImageRep.HintKey: Any] = [.ctm: NSAffineTransform()]
         guard let img = NSImage(contentsOfFile: path),
-              let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let cg = img.cgImage(forProposedRect: nil, context: nil, hints: oneX),
               let rep = img.representations.first else { return nil }
         return (cg, (rep.pixelsWide, rep.pixelsHigh))
         #else
