@@ -138,11 +138,12 @@ if [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ]; then
   exit 0
 fi
 
-# The model supplies file_path, so it can start with "-" and parse as a flag. Such a path goes to
-# the binary after "--", which ends option parsing (cheapshot 0.6.0, #290), so it is read and
-# redacted like any other (NOV-160: it used to pass as pixels). Only a dash path gets "--": an
-# older binary rejects "--" as an unknown option, which is a failed run (denied for an image),
-# while every normal path is called exactly as before and keeps working on older binaries.
+# The binary is called with $rpath, the path Read will open (resolved against .cwd), so OCR reads
+# the same file the Read does (PR #21 second review). $rpath is absolute and cannot parse as a
+# flag; "--" stays before a dash path as a backstop, which ends option parsing (cheapshot 0.6.0,
+# #290), so it is read and redacted like any other (NOV-160: it used to pass as pixels). Only a
+# dash path gets "--": an older binary rejects "--" as an unknown option, which is a failed run
+# (denied for an image), while every normal path keeps working on older binaries.
 sep=""
 case "$path" in -*) sep="--" ;; esac
 # The commands printed for a person (allow, mask, a plain run) take no "--" form for allow, so a
@@ -268,7 +269,7 @@ fi
 pages=$(printf '%s' "$input" | jq -r '.tool_input.pages // empty')
 if [ "$ext" = pdf ] && [ -z "$pages" ]; then
   # Cheap probe: one page, no ledger line, just to learn the page count.
-  probe=$(cheapshot --json --no-ledger --pages 1-1 ${sep:+"$sep"} "$path" 2>"$errf") || failed "could not probe the page count (exit $?)."
+  probe=$(cheapshot --json --no-ledger --pages 1-1 ${sep:+"$sep"} "$rpath" 2>"$errf") || failed "could not probe the page count (exit $?)."
   count=$(printf '%s' "$probe" | jq -r '.results[0].source.pages // 0')
   if [ "$count" -gt 20 ] 2>/dev/null; then
     if [ "$strict" = 1 ]; then
@@ -283,9 +284,9 @@ if [ "$ext" = pdf ] && [ -z "$pages" ]; then
 fi
 
 if [ -n "$pages" ]; then
-  out=$(cheapshot --json --stats --pages "$pages" ${sep:+"$sep"} "$path" 2>"$errf")
+  out=$(cheapshot --json --stats --pages "$pages" ${sep:+"$sep"} "$rpath" 2>"$errf")
 else
-  out=$(cheapshot --json --stats ${sep:+"$sep"} "$path" 2>"$errf")
+  out=$(cheapshot --json --stats ${sep:+"$sep"} "$rpath" 2>"$errf")
 fi
 code=$?
 [ "$code" = 0 ] || failed "could not read $path (exit $code)."

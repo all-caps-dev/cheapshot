@@ -467,7 +467,7 @@ out=$(input /tmp/report.pdf "" '../../evil id' | PATH="$NOBIN_PATH" sh "$hook" 2
 fresh
 o=$(input "-dash.png" | run_hook 2>/dev/null); denied "dash path"
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello world"*) pass "dash path: the redacted text comes back";; *) fail "dash path text: $o";; esac
-grep -qx -- '--json --stats -- -dash.png' "$FAKE_LOG" && pass "dash path: binary called with -- before the path" || fail "dash path argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--json --stats -- $PWD/-dash.png" "$FAKE_LOG" && pass "dash path: binary called with -- before the path" || fail "dash path argv: $(cat "$FAKE_LOG")"
 grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "dash path: not a pass-through" || pass "dash path: not recorded as a pass-through"
 # An older binary rejects "--" (exit 2, unknown option): that is a failed run, denied for an image.
 fresh
@@ -498,6 +498,10 @@ fresh
 mkdir "$T/sess"; : > "$T/sess/real.png"
 o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"real.png"}}' "$T/sess" \
   | FAKE_EXIT=1 FAKE_STDERR="cheapshot: no such file real.png" run_hook 2>/dev/null); denied "relative image present only in .cwd"
+# PR #21 second review: OCR reads the copy Read will open (.cwd), not the hook's $PWD copy.
+fresh
+o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"x.png"}}' "$T/sess" | run_hook 2>/dev/null)
+grep -qx -- "--json --stats $T/sess/x.png" "$FAKE_LOG" && pass "relative path: binary reads the .cwd copy" || fail "relative path argv: $(cat "$FAKE_LOG")"
 # The dash path's printed commands and allowlist match use .cwd too.
 fresh
 o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"-dash.png"}}' "$T" | run_hook 2>/dev/null)
@@ -512,10 +516,10 @@ grep -qx -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "normal path: arg
 # PDFs: the page-count probe and the page-range run both put "--" before a dash path.
 fresh
 o=$(input "-r.pdf" | FAKE_PAGES=3 run_hook 2>/dev/null)
-grep -qx -- '--json --no-ledger --pages 1-1 -- -r.pdf' "$FAKE_LOG" && grep -qx -- '--json --stats -- -r.pdf' "$FAKE_LOG" && pass "dash PDF: probe and run use --" || fail "dash PDF argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--json --no-ledger --pages 1-1 -- $PWD/-r.pdf" "$FAKE_LOG" && grep -qx -- "--json --stats -- $PWD/-r.pdf" "$FAKE_LOG" && pass "dash PDF: probe and run use --" || fail "dash PDF argv: $(cat "$FAKE_LOG")"
 fresh
 o=$(input "-r.pdf" 2-3 | run_hook 2>/dev/null)
-grep -qx -- '--json --stats --pages 2-3 -- -r.pdf' "$FAKE_LOG" && pass "dash PDF with pages: run uses --" || fail "dash PDF pages argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--json --stats --pages 2-3 -- $PWD/-r.pdf" "$FAKE_LOG" && pass "dash PDF with pages: run uses --" || fail "dash PDF pages argv: $(cat "$FAKE_LOG")"
 
 # 11. Ruling 3: the hook runs as an executable (no leading sh) from a plugin root that has a space,
 # invoked the way hooks.json may spell it: "${CLAUDE_PLUGIN_ROOT}"/hooks/cheapshot-read.sh and unquoted.
@@ -587,7 +591,7 @@ fresh
 # A path starting with "-" is denied in strict mode too, and reaches the binary only after "--".
 o=$(input "-dash.png" | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null)
 [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "strict: dash path is denied" || fail "strict: dash path is denied: $o"
-grep -qx -- '--json --stats -- -dash.png' "$FAKE_LOG" && pass "strict: dash path reaches the binary only after --" || fail "strict: dash path argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--json --stats -- $PWD/-dash.png" "$FAKE_LOG" && pass "strict: dash path reaches the binary only after --" || fail "strict: dash path argv: $(cat "$FAKE_LOG")"
 fresh
 # A good read is unchanged by strict mode.
 dec=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason')
