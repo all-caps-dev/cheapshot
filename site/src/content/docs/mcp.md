@@ -112,7 +112,7 @@ declare them to the model like built-in tools.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `cheapshot_ocr` | One of `paths` (string[], absolute) or `newest` ({`dir` required; `count` integer >= 1, default 1}); optional `raw` (boolean, refused unless `CHEAPSHOT_ALLOW_RAW=1` is set for the server), `min_confidence` (0 to 1, default 0.3), `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox`, PDF `source` and `pages`) |
+| `cheapshot_ocr` | One of `paths` (string[], absolute) or `newest` ({`dir` required; `count` integer >= 1, default 1}); optional `raw` (boolean, refused unless `CHEAPSHOT_ALLOW_RAW=1` is set for the server), `min_confidence` (0 to 1, default 0.3), `pages` ("N" or "N-M", PDFs only) | Redacted text; `structuredContent` is the binary's `--json` payload (`results[]` with `text`, `lines[]` with `bbox` and `confidence`, `redactions` as rule name to hit count, PDF `source` and `pages`; the [use page](/cheapshot/use/#json-output) documents every field). A non-empty `redactions` means the image held a secret; use the text, not the pixels |
 | `cheapshot_video` | `path` (required); optional `scene` (0 to 1, default 0.25), `max_frames` (integer >= 1, default 200), `dedupe` (0 to 1, default 0.90), `raw` (boolean, same opt-in) | Timestamped transcript; `structuredContent` is the `--json` payload with `segments[]` |
 | `cheapshot_ledger` | `days` (integer >= 1, optional; default all time), `by_mode` (boolean, optional) | The ledger summary as text and as `structuredContent`. With `by_mode`, one extra text line per mode and a `modes` array in the payload |
 

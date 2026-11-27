@@ -55,6 +55,70 @@ as JSON `[{name, pattern, caseInsensitive}]`.
 `--json` emits JSON instead of plain text. `--stats` prints the token savings
 to stderr, so it composes with either output form.
 
+### JSON output
+
+The payload is one object: `version`, `results[]`, and the run totals
+`image_tokens` and `text_tokens`. Each `results[]` entry is one input:
+
+| Field | Meaning |
+|---|---|
+| `file` | The input path, as given on the command line. |
+| `text` | The full text after redaction, one recognized line per newline. |
+| `image_tokens` | The estimated token cost of the image. |
+| `text_tokens` | The token cost of the text instead. |
+| `redactions` | Map of redaction rule name to hit count. `{}` means nothing was redacted. |
+| `lines[]` | One object per recognized line: `n` (1-based), `text`, `bbox`, `confidence`. |
+| `error` | On a failed input, an error message. A failed entry carries only `file` and `error`. |
+
+`bbox` is `[minX, minY, maxX, maxY]` in image pixels, top left origin.
+`confidence` runs 0 to 1; lines under `--min-conf` (default `0.3`) are dropped,
+from `lines[]` and from `text` alike.
+
+Image results also carry three fields, 0.6.0 and later:
+
+- `ocr_status`: `ok` when the pass found text, `empty` otherwise.
+- `retried`: true when a second OCR pass ran (the cold start retry).
+- `screenshot_like`: the image heuristic that gated that retry.
+
+`empty` with `retried` true is a screenshot-like image that still read blank.
+Treat it as a likely OCR failure, not as a photo with no text in it.
+
+```json
+{
+  "version": "0.6.0",
+  "results": [{
+    "file": "shot.png",
+    "text": "build ok\nkey [AWS_KEY]",
+    "image_tokens": 1018,
+    "text_tokens": 37,
+    "redactions": { "AWS_KEY": 1 },
+    "lines": [
+      { "n": 1, "text": "build ok", "bbox": [22, 30, 350, 54], "confidence": 0.98 },
+      { "n": 2, "text": "key [AWS_KEY]", "bbox": [22, 90, 482, 116], "confidence": 0.91 }
+    ],
+    "ocr_status": "ok",
+    "retried": false,
+    "screenshot_like": true
+  }],
+  "image_tokens": 1018,
+  "text_tokens": 37
+}
+```
+
+PDF results carry `source` and `pages` instead of the image fields. See
+[PDF](/cheapshot/pdf/).
+
+:::tip
+Layout question, no pixels? Compare `lines[].bbox`: find the line you care
+about, then the lines whose boxes sit next to it or under it. Arrows and shapes
+are not text, so this is inference from word positions, not sight. Say so when
+you answer.
+:::
+
+A `redactions` count above 0 means the image held a secret: use the `text`,
+and never send that image's pixels to a model. The pixels carry the secret
+the redaction hid.
+
 ## Recognition
 
 `--min-conf <f>` sets the confidence floor for a recognized line; the default
