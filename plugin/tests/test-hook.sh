@@ -472,6 +472,20 @@ grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "dash path: not a pass-throu
 # An older binary rejects "--" (exit 2, unknown option): that is a failed run, denied for an image.
 fresh
 o=$(input "-dash.png" | FAKE_EXIT=2 FAKE_STDERR='cheapshot: unknown option --' run_hook 2>/dev/null); denied "dash path, binary rejects --"
+# Pre-push review: the commands printed for the user spell a dash path "./-name", since `allow`
+# has no "--" form and refuses an argument that starts with "-".
+case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *"cheapshot allow './-dash.png'"*) pass "dash path: user's allow command uses ./";; *) fail "dash path allow command: $o";; esac
+fresh
+o=$(input "-dash.png" | run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask './-dash.png'"*) pass "dash path: model's mask command uses ./";; *) fail "dash path mask command: $o";; esac
+# Pre-push review: a missing image ("cannot read" and no file) is not a broken install. The Read
+# runs and reports the missing file; one that exists but will not decode stays denied.
+fresh
+o=$(input "$T/missing.png" | FAKE_EXIT=1 FAKE_STDERR="cheapshot: cannot read $T/missing.png" run_hook 2>/dev/null)
+[ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = "" ] && pass "missing image: the Read runs" || fail "missing image: the Read runs: $o"
+fresh
+: > "$T/corrupt.png"
+o=$(input "$T/corrupt.png" | FAKE_EXIT=1 FAKE_STDERR="cheapshot: cannot read $T/corrupt.png" run_hook 2>/dev/null); denied "undecodable image that exists"
 # A normal path is called exactly as before, with no "--", so older binaries keep working.
 fresh
 o=$(input /tmp/shot.png | run_hook 2>/dev/null)

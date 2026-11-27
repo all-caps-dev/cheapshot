@@ -94,10 +94,17 @@ failed() {
   if /usr/bin/grep -Eq '^cheapshot: (cannot read rules file|rules file|rule |duplicate rule|CHEAPSHOT_RULES)' "$errf" 2>/dev/null; then
     deny "cheapshot could not load its redaction rules, so $path was not read. Tell the user; do not retry another way." \
          "cheapshot: the rules file named by CHEAPSHOT_RULES is broken ($(/usr/bin/grep -m1 '^cheapshot: ' "$errf" | cut -c12-200)). Denied the Read of $path; fix the file or unset CHEAPSHOT_RULES."
+  elif [ "$ext" != pdf ] && [ "$strict" != 1 ] && [ ! -e "$path" ] && [ ! -L "$path" ] \
+       && /usr/bin/grep -q '^cheapshot: cannot read ' "$errf" 2>/dev/null; then
+    # The binary said it could not read the image and there is no file: no pixels to keep out.
+    # Let the Read run and report the missing file itself, instead of a deny that blames the
+    # install. A file that exists but will not decode stays denied.
+    note error
+    hint "cheapshot: $path does not exist; letting the Read report it."
   elif [ "$ext" != pdf ]; then
     # The user can fix the install, or look at the image and allow it once. `cheapshot allow`
     # needs the binary to start, which a crash during OCR does not rule out.
-    qpath=$(jq -rn --arg p "$path" '$p | @sh')
+    qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
     deny "cheapshot could not read $path, so the pixels were kept out. Tell the user; do not retry another way." \
          "cheapshot: $1 Denied the Read of $path. Fix the install (brew reinstall all-caps-dev/tap/cheapshot; run cheapshot $qpath in a terminal to see the error), or look at the image and, to show the agent the pixels, run in a terminal: cheapshot allow $qpath"
   elif [ "$strict" = 1 ]; then
@@ -122,6 +129,10 @@ fi
 # while every normal path is called exactly as before and keeps working on older binaries.
 sep=""
 case "$path" in -*) sep="--" ;; esac
+# The commands printed for a person (allow, mask, a plain run) take no "--" form for allow, so a
+# dash path is spelled "./-name" there, which every subcommand reads as a path.
+cpath="$path"
+case "$path" in -*) cpath="./$path" ;; esac
 
 if ! command -v cheapshot >/dev/null 2>&1; then
   # An image is denied in every mode (NOV-160). `cheapshot allow` cannot help here (it needs the
@@ -306,7 +317,7 @@ if [ -z "$text" ]; then
   # OCR missed, so they never reach the model unless a person looks first and allows them. The
   # model is not told about `cheapshot allow` or `cheapshot mask` (Fleet #290 item 3): mask runs
   # with no approval and, on an image it also reads as blank, would paint nothing.
-  qpath=$(jq -rn --arg p "$path" '$p | @sh')
+  qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
   extra=""
   case " $ocr " in
     *" blank_retried "*)
@@ -338,7 +349,7 @@ tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 # (Fleet #290 item 3). The user's copy, the systemMessage, carries the command.
 # Shell-quoted so a person (or the agent's Bash tool) can paste it: macOS screenshot names
 # carry spaces and U+202F.
-qpath=$(jq -rn --arg p "$path" '$p | @sh')
+qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
 if [ "$ext" = pdf ]; then
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
 else
