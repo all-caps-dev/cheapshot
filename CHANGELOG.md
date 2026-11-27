@@ -2,6 +2,13 @@
 
 Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mcp. Versions follow semver. Dates are UTC.
 
+## Unreleased
+
+### Claude Code hook
+
+- The Claude Code hook honours `ocr_status` and `retried` (NOV-160). An image with no text is passed as pixels only when the binary reports `"empty"` without a retry, with text `""` and `screenshot_like` false or absent (a photo or small image). A screenshot still empty after the retry, a missing or malformed status, and any empty image from a binary that does not report `ocr_status` (builds before v0.6.0's cold-start retry, including dev builds that call themselves 0.6.0) are denied in every mode, with `cheapshot allow` and `cheapshot mask` named to the user only. Text found after a retry is returned with a note that some lines may be missing. PDFs are unchanged.
+- The Claude Code hook fails closed on images in default mode too. A failed OCR run on an image (missing binary, non-zero exit, empty, truncated or non-JSON output, results not an array) denies the Read, as strict mode already did; the user message says how to fix the install or use `cheapshot allow` (or `CHEAPSHOT_PASSTHROUGH=1` when the binary is missing), and the model's reason names neither. A missing `jq` also denies an image Read in every mode (without `jq` the file type comes from the extension in the raw request), and a path starting with `-` is no longer passed as pixels: the hook hands it to the binary after `--`, and the commands it prints for the user spell such a path absolute, which a `cheapshot allow` entry then matches. In default mode an image that does not exist (the binary says `no such file` and there is no file) is let through so the Read reports the missing file; one that exists but will not decode stays denied. PDFs and a PDF over 20 pages keep the old default.
+
 ## 0.6.0 (unreleased)
 
 Security hardening from Fleet #290 and a larger redaction rule set from Fleet #319. Ships with cheapshot-mcp 0.1.3 and plugin 0.1.1. PRs [#15](https://github.com/all-caps-dev/cheapshot/pull/15) and [#16](https://github.com/all-caps-dev/cheapshot/pull/16).

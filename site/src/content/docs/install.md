@@ -13,7 +13,8 @@ description: What you need, then install with Homebrew, ask your agent, or build
 - Node 22 or later for the MCP server, which runs through `npx`. The Claude Code
   plugin needs it too, since the plugin bundles that server.
 - `jq` on the PATH for the Claude Code hook (`brew install jq`). Without it the
-  hook does nothing, and images and PDFs reach the agent as they are.
+  hook denies image Reads until you install it, and PDFs reach the agent as they
+  are.
 - Xcode, only if you build from source.
 
 ## Install with Homebrew

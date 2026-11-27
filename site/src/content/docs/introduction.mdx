@@ -15,7 +15,7 @@ with redactions itself. [Redaction](/cheapshot/redaction/) explains what gets
 redacted and what it can miss.
 </Aside>
 
-When the Claude Code plugin finds no text in an image, it lets the image load the normal way. When an image has some text and the
+When the Claude Code plugin finds no text in a photo, it lets the image load the normal way; a screenshot that still reads blank after a retry is denied instead, since OCR likely failed. When an image has some text and the
 visual matters, the agent can ask for the image with
 [`cheapshot allow`](/cheapshot/claude-code/#the-escape-hatch). A model with no
 vision still can't interpret the visual.

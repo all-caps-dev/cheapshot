@@ -6,13 +6,25 @@
 # The savings line also goes out as a top-level systemMessage, since stderr on exit 0 is not
 # shown to the user.
 #
-# Every exit is 0. By default a failure lets the Read through (fail open) and says so in a
-# systemMessage. With CHEAPSHOT_STRICT=1 a failure denies the Read instead (fail closed), so
-# pixels never reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the
-# session, or `cheapshot allow <path>` from a terminal) or the image has no text to redact
-# (Fleet #290 item 4). A broken rules file named by $CHEAPSHOT_RULES denies in both modes:
-# passing the pixels would skip the built-in redaction as well as the custom rules. (A broken
-# default rules.json never gets here: the binary warns and keeps its built-in rules.)
+# Every exit is 0. A broken install or a failed OCR run on an image (missing jq, missing binary,
+# non-zero exit, empty, truncated or non-JSON output, results that are not an array) denies the
+# Read in every mode (NOV-160; Ryan, 2026-11-25: "Block in default too"). The user message says
+# how to fix it, or names `cheapshot allow` or CHEAPSHOT_PASSTHROUGH=1; the model's reason names
+# none of them. A path starting with "-" is read like any other, after "--". For a PDF, and for a
+# PDF over 20 pages, the default still lets the Read through (fail open) and says so in a
+# systemMessage. With CHEAPSHOT_STRICT=1 every failure denies (fail closed), so pixels never
+# reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the session, or
+# `cheapshot allow <path>` from a terminal) or the image has no text to redact (Fleet #290 item
+# 4). "No text" passes only when the binary says so for a photo (ocr_status
+# "empty", retried false, text "", screenshot_like false or absent) or for a PDF. A screenshot
+# still blank after the cold-start retry, an unknown or malformed status, and any empty image
+# from a binary that does not report ocr_status (added in v0.6.0; it cannot tell a photo from a
+# failed read) are denied in every mode (NOV-160). Known limit: the binary only retries an image
+# that looks like a screenshot, so a photo or JPEG scan whose text Vision drops on a cold start
+# reads as "empty", retried false, screenshot_like false, and passes as pixels in every mode. A broken rules file named by $CHEAPSHOT_RULES
+# denies in both modes: passing the pixels would skip the built-in redaction as well as the
+# custom rules. (A broken default rules.json never gets here: the binary warns and keeps its
+# built-in rules.)
 #
 # Every pass-through of an image or PDF is recorded in the ledger as a zero-token line with a
 # reason and no path (`cheapshot --note-passthrough <reason>`). Needs jq.
@@ -22,21 +34,32 @@ strict=0
 [ "${CHEAPSHOT_STRICT:-0}" = "1" ] && strict=1
 
 if ! command -v jq >/dev/null 2>&1; then
-  # No jq means no JSON parsing. In strict mode, still refuse image and PDF Reads, found with a
-  # plain pattern match, so a missing tool cannot become a silent bypass. Static JSON only.
+  # No jq means no JSON parsing, and is a broken install. An image Read is denied in every mode
+  # (NOV-160); a PDF Read only in strict mode, as before. Without jq the file type comes from a
+  # plain pattern match on the file_path extension in the raw hook JSON, not from the parsed
+  # path: this is the one place the hook decides image versus PDF that way. Static JSON only.
   # CHEAPSHOT_PASSTHROUGH=1 is still honoured; a `cheapshot allow` entry is not, since matching
   # it needs the parsed path (the deny message says to install jq).
   [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ] && exit 0
   # The path pattern allows JSON escapes (\" and friends), so a quote in a file name cannot
-  # end the match early and slip past the deny.
-  if [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|heic|heif|tiff?|bmp|pdf)"'; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this image was not read (CHEAPSHOT_STRICT=1). Tell the user."},"systemMessage":"cheapshot: jq is missing; strict mode denied an image Read. Install it: brew install jq"}'
+  # end the match early and slip past the deny. The model's reason names neither the fix nor
+  # the bypass; the user's systemMessage (and stderr) carries both.
+  if printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.(png|jpe?g|webp|gif|heic|heif|tiff?|bmp)"'; then
+    echo "cheapshot: jq is missing, so the image Read was denied. Install it: brew install jq (or set CHEAPSHOT_PASSTHROUGH=1 for the session to read images as pixels)." >&2
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this image was not read. Tell the user."},"systemMessage":"cheapshot: jq is missing, so the image Read was denied. Install it: brew install jq (or set CHEAPSHOT_PASSTHROUGH=1 for the session to read images as pixels)."}'
+  elif [ "$strict" = 1 ] && printf '%s' "$input" | /usr/bin/grep -Eiq '"file_path" *: *"([^"\\]|\\.)*\.pdf"'; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"cheapshot: jq is missing, so this PDF was not read (CHEAPSHOT_STRICT=1). Tell the user."},"systemMessage":"cheapshot: jq is missing; strict mode denied a PDF Read. Install it: brew install jq"}'
   fi
   exit 0
 fi
 
 path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -n "$path" ] || exit 0
+# Read resolves a relative file_path against the session's working directory, which the hook
+# input carries as .cwd. Checks and printed commands use that base (the hook's own $PWD only when
+# .cwd is absent), so they look at the file the Read will open (PR #21 review).
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
+case "$path" in /*) rpath="$path" ;; *) rpath="${cwd:-$PWD}/$path" ;; esac
 ext=$(printf '%s' "${path##*.}" | tr 'A-Z' 'a-z')
 # The same image types `cheapshot allow` strips (NOV-117), so an allowed HEIC is rewritten too.
 case "$ext" in png|jpg|jpeg|webp|gif|heic|heif|tif|tiff|bmp|pdf) ;; *) exit 0 ;; esac
@@ -71,12 +94,35 @@ note() {
 errf=$(mktemp "$tmp/cheapshot-err.XXXXXX") || errf=/dev/null
 trap '[ "$errf" = /dev/null ] || rm -f "$errf"' EXIT
 
-# A failure: deny in strict mode, otherwise let the Read through with a visible hint. A rules
-# file error denies in every mode, since the pixels would also skip the built-in redaction.
+# A failure: deny for an image in every mode (NOV-160), and in strict mode for a PDF too;
+# otherwise let the Read through with a visible hint. A rules file error denies in every mode,
+# since the pixels would also skip the built-in redaction.
 failed() {
   if /usr/bin/grep -Eq '^cheapshot: (cannot read rules file|rules file|rule |duplicate rule|CHEAPSHOT_RULES)' "$errf" 2>/dev/null; then
     deny "cheapshot could not load its redaction rules, so $path was not read. Tell the user; do not retry another way." \
          "cheapshot: the rules file named by CHEAPSHOT_RULES is broken ($(/usr/bin/grep -m1 '^cheapshot: ' "$errf" | cut -c12-200)). Denied the Read of $path; fix the file or unset CHEAPSHOT_RULES."
+  elif [ "$ext" != pdf ] && [ "$strict" != 1 ] && [ ! -e "$path" ] && [ ! -L "$path" ] \
+       && [ ! -e "$rpath" ] && [ ! -L "$rpath" ] \
+       && /usr/bin/grep -q '^cheapshot: no such file ' "$errf" 2>/dev/null; then
+    # The binary said there is no such file, and there is none, neither where the binary looked
+    # nor where the Read will look (.cwd): no pixels to keep out. Let the Read run and report the
+    # missing file itself, instead of a deny that blames the install. A file that exists but will
+    # not decode stays denied. Known limit: a file created between this check and the Read
+    # passes unredacted (a small check-then-use window on a fail-open path).
+    note error
+    hint "cheapshot: $path does not exist; letting the Read report it."
+  elif [ "$ext" != pdf ] && [ -n "${sep:-}" ] && /usr/bin/grep -q 'unknown option --' "$errf" 2>/dev/null; then
+    # A dash path on a binary older than 0.6.0, which does not know "--": a reinstall of the
+    # same version will not help, an update will (PR #21 review).
+    qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
+    deny "cheapshot could not read $path, so the pixels were kept out. Tell the user; do not retry another way." \
+         "cheapshot: this cheapshot binary is too old for a path that starts with \"-\" (it does not know \"--\"). Denied the Read of $path. Update it (brew upgrade all-caps-dev/tap/cheapshot), or look at the image and, to show the agent the pixels, run in a terminal: cheapshot allow $qpath"
+  elif [ "$ext" != pdf ]; then
+    # The user can fix the install, or look at the image and allow it once. `cheapshot allow`
+    # needs the binary to start, which a crash during OCR does not rule out.
+    qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
+    deny "cheapshot could not read $path, so the pixels were kept out. Tell the user; do not retry another way." \
+         "cheapshot: $1 Denied the Read of $path. Fix the install (brew reinstall all-caps-dev/tap/cheapshot; run cheapshot $qpath in a terminal to see the error), or look at the image and, to show the agent the pixels, run in a terminal: cheapshot allow $qpath"
   elif [ "$strict" = 1 ]; then
     deny "cheapshot could not read $path, and strict mode keeps the pixels out. Tell the user; do not retry another way." \
          "cheapshot: $1 Strict mode denied the Read of $path."
@@ -92,22 +138,30 @@ if [ "${CHEAPSHOT_PASSTHROUGH:-0}" = "1" ]; then
   exit 0
 fi
 
-# The model supplies file_path, so it can start with "-" and parse as a flag. The binary has no
-# "--" marker to lean on (older builds reject it), so never hand such a path to it. By default
-# the Read shows pixels; strict mode denies it like any other failure.
-case "$path" in
-  -*)
-    if [ "$strict" = 1 ]; then
-      deny "cheapshot will not read $path: it starts with \"-\" and would parse as a flag. Tell the user; do not retry another way." \
-           "cheapshot: $path starts with \"-\"; strict mode denied the Read."
-    else
-      note error
-      hint "cheapshot: $path starts with \"-\", so it would parse as a flag. Reading it as pixels."
-    fi
-    exit 0 ;;
-esac
+# The binary is called with $rpath, the path Read will open (resolved against .cwd), so OCR reads
+# the same file the Read does (PR #21 second review). $rpath is absolute and cannot parse as a
+# flag; "--" stays before a dash path as a backstop, which ends option parsing (cheapshot 0.6.0,
+# #290), so it is read and redacted like any other (NOV-160: it used to pass as pixels). Only a
+# dash path gets "--": an older binary rejects "--" as an unknown option, which is a failed run
+# (denied for an image), while every normal path keeps working on older binaries.
+sep=""
+case "$path" in -*) sep="--" ;; esac
+# The commands printed for a person (allow, mask, a plain run) take no "--" form for allow, so a
+# dash path (always relative) is spelled absolute there, from the session's working directory
+# (.cwd), which Read resolves it against. `cheapshot allow` stores that same absolute path, and
+# the allowlist below matches a relative path by it too.
+cpath="$path"
+case "$path" in -*) cpath="$rpath" ;; esac
 
 if ! command -v cheapshot >/dev/null 2>&1; then
+  # An image is denied in every mode (NOV-160). `cheapshot allow` cannot help here (it needs the
+  # binary, and the allowlist is only read once the binary is found), so the user message offers
+  # the install and the session-wide CHEAPSHOT_PASSTHROUGH=1 instead.
+  if [ "$ext" != pdf ]; then
+    deny "cheapshot is not installed, so the pixels were kept out. Tell the user." \
+         "cheapshot: binary not found; denied the Read of $path. Install it: brew install all-caps-dev/tap/cheapshot (or set CHEAPSHOT_PASSTHROUGH=1 for the session to read images as pixels)."
+    exit 0
+  fi
   if [ "$strict" = 1 ]; then
     deny "cheapshot is not installed, and strict mode keeps the pixels out. Tell the user." \
          "cheapshot: binary not found; strict mode denied the Read of $path. Install it: brew install all-caps-dev/tap/cheapshot"
@@ -139,8 +193,8 @@ fi
 # that NOV-95's Known limits named, and an image allow shows the stripped copy, never the original.
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
-  alt="$path"
-  case "$path" in /private/*) alt="${path#/private}" ;; esac
+  alt="$rpath"
+  case "$alt" in /private/*) alt="${alt#/private}" ;; esac
   now=$(date +%s)
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
@@ -215,7 +269,7 @@ fi
 pages=$(printf '%s' "$input" | jq -r '.tool_input.pages // empty')
 if [ "$ext" = pdf ] && [ -z "$pages" ]; then
   # Cheap probe: one page, no ledger line, just to learn the page count.
-  probe=$(cheapshot --json --no-ledger --pages 1-1 "$path" 2>"$errf") || failed "could not probe the page count (exit $?)."
+  probe=$(cheapshot --json --no-ledger --pages 1-1 ${sep:+"$sep"} "$rpath" 2>"$errf") || failed "could not probe the page count (exit $?)."
   count=$(printf '%s' "$probe" | jq -r '.results[0].source.pages // 0')
   if [ "$count" -gt 20 ] 2>/dev/null; then
     if [ "$strict" = 1 ]; then
@@ -230,22 +284,83 @@ if [ "$ext" = pdf ] && [ -z "$pages" ]; then
 fi
 
 if [ -n "$pages" ]; then
-  out=$(cheapshot --json --stats --pages "$pages" "$path" 2>"$errf")
+  out=$(cheapshot --json --stats --pages "$pages" ${sep:+"$sep"} "$rpath" 2>"$errf")
 else
-  out=$(cheapshot --json --stats "$path" 2>"$errf")
+  out=$(cheapshot --json --stats ${sep:+"$sep"} "$rpath" 2>"$errf")
 fi
 code=$?
 [ "$code" = 0 ] || failed "could not read $path (exit $code)."
 
 printf '%s' "$out" | jq -e '.results | type == "array"' >/dev/null 2>&1 || failed "unreadable output for $path."
 
-text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")')
+text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2>/dev/null)
+
+# NOV-160: how sure the binary is that OCR worked, from `ocr_status` and `retried` on each image
+# result (cheapshot 0.6.0 and later). One word per distinct verdict, space separated:
+#   ok             text found on the first pass
+#   retried        text found, but a second pass ran (empty or short cold start): lines may be missing
+#   blank          empty with no retry, text exactly "", and screenshot_like false or absent
+#                  (null is not absent: it denies):
+#                  a photo or small image, the pixels are the content
+#   blank_retried  a screenshot-like image that still read empty after the retry: a likely OCR failure
+#   legacy         neither field present: a binary without them (any build before v0.6.0's
+#                  cold-start retry, including dev builds that call themselves 0.6.0), which
+#                  cannot tell a photo from a failure
+#   unknown        a status this hook does not know, fields of the wrong type, only one of the two
+#                  fields, or an "empty" result that does not look like a photo
+# Empty output (non-object results, an empty array, a jq error) counts as unknown below.
+# PDF results carry neither field and keep the old handling.
+ocr=""
+if [ "$ext" != pdf ]; then
+  ocr=$(printf '%s' "$out" | jq -r '
+    [.results[] |
+      if (has("ocr_status") or has("retried")) | not then "legacy"
+      elif (.ocr_status | type) != "string" or (.retried | type) != "boolean" then "unknown"
+      elif .ocr_status == "ok" then (if .retried then "retried" else "ok" end)
+      elif .ocr_status == "empty" and .retried then "blank_retried"
+      elif .ocr_status == "empty" and .text == "" and ((has("screenshot_like") | not) or .screenshot_like == false) then "blank"
+      else "unknown" end
+    ] | unique | join(" ")' 2>/dev/null)
+fi
+
 if [ -z "$text" ]; then
-  # Nothing recognised: there are no tokens to save, the pixels are the content. Not a failure,
-  # so strict mode lets it through too (documented), but it is still a pass-through and is recorded.
-  note no_text
-  echo "cheapshot: no text in $path, reading it as pixels." >&2
+  # Nothing recognised. For a PDF, or an image the binary says read empty without a retry (a
+  # photo), there are no tokens to save and the pixels are the content: not a failure, so strict
+  # mode lets it through too (documented), but it is still a pass-through and is recorded.
+  if [ "$ext" = pdf ] || [ "$ocr" = blank ]; then
+    note no_text
+    echo "cheapshot: no text in $path, reading it as pixels." >&2
+    exit 0
+  fi
+  # Any other empty image result fails closed, in every mode: the pixels may hold a secret that
+  # OCR missed, so they never reach the model unless a person looks first and allows them. The
+  # model is not told about `cheapshot allow` or `cheapshot mask` (Fleet #290 item 3): mask runs
+  # with no approval and, on an image it also reads as blank, would paint nothing.
+  qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
+  extra=""
+  case " $ocr " in
+    *" blank_retried "*)
+      why="OCR read no text from $path even after a retry, though it looks like a screenshot (a likely OCR failure)" ;;
+    *" legacy "*)
+      why="no text in $path; this cheapshot binary does not report ocr_status (added in v0.6.0), so it cannot say whether OCR failed"
+      extra=" Or update to a cheapshot release that includes it (brew upgrade all-caps-dev/tap/cheapshot)." ;;
+    *)
+      why="no text in $path, and cheapshot did not report a usable OCR status" ;;
+  esac
+  deny "cheapshot: $why, so the pixels were kept out. Tell the user; do not read it another way." \
+       "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath (or cheapshot mask $qpath for a copy with any text it finds blacked out).$extra"
   exit 0
+fi
+
+# Text was found but OCR was retried, or its status is unclear: the redacted text still goes to
+# the model as usual, flagged so neither side mistakes it for the whole image. A legacy binary
+# with text is left exactly as before.
+flag=""
+if [ "$ext" != pdf ]; then
+  case " $ocr " in
+    *" retried "*|*" blank_retried "*|*" unknown "*|"  ")
+      flag="OCR on this image was retried or reported no clear status, so some lines may be missing." ;;
+  esac
 fi
 it=$(printf '%s' "$out" | jq -r '.image_tokens // 0')
 tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
@@ -253,7 +368,7 @@ tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 # (Fleet #290 item 3). The user's copy, the systemMessage, carries the command.
 # Shell-quoted so a person (or the agent's Bash tool) can paste it: macOS screenshot names
 # carry spaces and U+202F.
-qpath=$(jq -rn --arg p "$path" '$p | @sh')
+qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
 if [ "$ext" = pdf ]; then
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
 else
@@ -266,6 +381,11 @@ user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the
 # A plain allow line for an image was refused above: it came from an older binary, so another
 # `cheapshot allow` from that binary would loop. Say so (PR #19 second review).
 [ "${stale:-0}" = 1 ] && user_line="$user_line (The allow entry for this file came from an older cheapshot binary and was not honoured; update cheapshot, then run allow again.)"
+# NOV-160: the flag goes first on both lines, so the deny reason still ends with the savings line.
+if [ -n "$flag" ]; then
+  model_line="cheapshot: $flag ${model_line#cheapshot: }"
+  user_line="cheapshot: $flag ${user_line#cheapshot: }"
+fi
 echo "$user_line" >&2
 jq -n --arg text "$text" --arg line "$model_line" --arg m "$user_line" \
   '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: ($text + "\n\n" + $line)}, systemMessage: $m}'
