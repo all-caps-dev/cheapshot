@@ -95,8 +95,8 @@ failed() {
     deny "cheapshot could not load its redaction rules, so $path was not read. Tell the user; do not retry another way." \
          "cheapshot: the rules file named by CHEAPSHOT_RULES is broken ($(/usr/bin/grep -m1 '^cheapshot: ' "$errf" | cut -c12-200)). Denied the Read of $path; fix the file or unset CHEAPSHOT_RULES."
   elif [ "$ext" != pdf ] && [ "$strict" != 1 ] && [ ! -e "$path" ] && [ ! -L "$path" ] \
-       && /usr/bin/grep -q '^cheapshot: cannot read ' "$errf" 2>/dev/null; then
-    # The binary said it could not read the image and there is no file: no pixels to keep out.
+       && /usr/bin/grep -q '^cheapshot: no such file ' "$errf" 2>/dev/null; then
+    # The binary said there is no such file, and there is none: no pixels to keep out.
     # Let the Read run and report the missing file itself, instead of a deny that blames the
     # install. A file that exists but will not decode stays denied.
     note error
@@ -130,9 +130,11 @@ fi
 sep=""
 case "$path" in -*) sep="--" ;; esac
 # The commands printed for a person (allow, mask, a plain run) take no "--" form for allow, so a
-# dash path is spelled "./-name" there, which every subcommand reads as a path.
+# dash path (always relative) is spelled absolute there, from the session's working directory,
+# which Read resolves it against. `cheapshot allow` stores that same absolute path, and the
+# allowlist below matches a relative path by it too.
 cpath="$path"
-case "$path" in -*) cpath="./$path" ;; esac
+case "$path" in -*) cpath="$PWD/$path" ;; esac
 
 if ! command -v cheapshot >/dev/null 2>&1; then
   # An image is denied in every mode (NOV-160). `cheapshot allow` cannot help here (it needs the
@@ -175,7 +177,8 @@ fi
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
   alt="$path"
-  case "$path" in /private/*) alt="${path#/private}" ;; esac
+  case "$path" in /*) ;; *) alt="$PWD/$path" ;; esac
+  case "$alt" in /private/*) alt="${alt#/private}" ;; esac
   now=$(date +%s)
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")
   hit=0
