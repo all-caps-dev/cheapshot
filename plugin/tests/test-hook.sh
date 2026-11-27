@@ -624,5 +624,40 @@ o=$(input /tmp/shot.png | FAKE_EXIT=2 run_hook 2>/dev/null); denied "other exit 
 o=$(input /tmp/report.pdf 1-2 | FAKE_EXIT=2 run_hook 2>/dev/null)
 [ -z "$(printf '%s' "$o" | jq -r '.hookSpecificOutput // empty')" ] && pass "other exit 2 on a PDF still fails open in default mode" || fail "other exit 2 PDF: $o"
 
+# 15. CS-03: the result shape, not the file name, decides PDF. A PDF result carries
+# .source.pages; an image result does not. A x.pdf holding an image gets the NOV-160 checks;
+# a .png holding a PDF result is handled as a PDF.
+pdfshape() {
+  # $1 text (JSON-escaped), $2 page count for .source.pages. A PDF result: source.pages, no
+  # ocr_status, like the real binary writes.
+  printf '{"version":"0.6.0","results":[{"file":"/tmp/doc","text":"%s","redactions":{},"image_tokens":2200,"text_tokens":%s,"source":{"path":"/tmp/doc","sha256":"ab12","pages":%s},"pages":[]}],"image_tokens":2200,"text_tokens":%s}' \
+    "$1" "${#1}" "$2" "${#1}"
+}
+# 15a. a file named .pdf whose result is an image result: ocr_status "" (unknown) and
+# retried true, no text. The NOV-160 empty-image deny applies; never the pixel path.
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(ocr_result '""' true '')" run_hook 2>/dev/null); denied "x.pdf with an image result, unknown status, empty"
+reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+case "$reason" in *"cheapshot allow"*|*"cheapshot mask"*) fail "x.pdf image result: deny reason names allow or mask: $reason";; *) pass "x.pdf image result: deny reason names neither allow nor mask";; esac
+grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "x.pdf image result: a deny is not a pass-through" || pass "x.pdf image result: not recorded as a pass-through"
+# 15b. a real PDF result (has .source.pages) that read empty keeps the PDF pass-through, in
+# default mode and in strict mode.
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
+[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "empty PDF result passes through" || fail "empty PDF result: $o $(cat "$FAKE_LOG")"
+fresh
+o=$(input /tmp/x.pdf | CHEAPSHOT_STRICT=1 FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
+[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "strict: empty PDF result still passes through" || fail "strict empty PDF result: $o $(cat "$FAKE_LOG")"
+# 15c. a .PNG whose result carries .source.pages is a PDF result: the shape decides. Empty
+# passes as pixels; with text the deny carries the PDF ask-the-user line, never mask.
+fresh
+o=$(input /tmp/shot.PNG | FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
+[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass ".PNG with a PDF result and no text passes through" || fail ".PNG with a PDF result, empty: $o $(cat "$FAKE_LOG")"
+fresh
+o=$(input /tmp/shot.png | FAKE_RAW="$(pdfshape 'hello' 3)" run_hook 2>/dev/null); denied ".PNG with a PDF result and text"
+reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+case "$reason" in *"ask the user to approve it.") pass ".PNG with a PDF result: PDF ask-the-user line";; *) fail ".PNG with a PDF result line: $reason";; esac
+case "$reason" in *"cheapshot mask"*) fail ".PNG with a PDF result: reason must not offer mask: $reason";; *) pass ".PNG with a PDF result: no mask in the reason";; esac
+
 echo "$fails failure(s)"
 [ "$fails" = 0 ]
