@@ -339,6 +339,11 @@ public enum CLI {
         scratchURL(for: path, folder: "cheapshot-masked", tag: "masked", io)
     }
 
+    /// Mask runs sweep the default folder of copies older than this before writing a new one
+    /// (CS-18): an hour covers the five-minute allow window several times over, and keeps
+    /// $TMPDIR/cheapshot-masked from filling with copies no entry will ever use again.
+    static let maskSweepAge: TimeInterval = 3600
+
     /// $TMPDIR/<folder>/<name>-<tag>-<time>-<rand>.png: the masked copy, or the stripped copy
     /// `allow` writes for an image (NOV-117).
     static func scratchURL(for path: String, folder: String, tag: String, _ io: CLIIO) -> URL {
@@ -372,13 +377,21 @@ public enum CLI {
         guard dest.standardizedFileURL.path != URL(fileURLWithPath: absolutePath(path)).standardizedFileURL.path else {
             return fail("--out is the source image; mask never overwrites it")
         }
+        // CS-18: the default folder's stale copies go before a new one lands. Only that folder
+        // is ever swept; an explicit --out directory is the caller's, and is left alone.
+        if out == nil {
+            sweepStale(in: dest.deletingLastPathComponent(), olderThan: maskSweepAge)
+        }
         let digest: String
         do {
             try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
             let png = try Masker.pngData(result.image)
-            // withoutOverwriting: an existing file at --out (the source, or anything else) is an error.
-            try png.write(to: dest, options: .withoutOverwriting)
+            // writePrivateFile: mode 0600, O_EXCL refuses an existing file (the source, or
+            // anything already at --out) and O_NOFOLLOW a symlink, so nothing is overwritten.
+            if let why = writePrivateFile(png, to: dest) {
+                return fail("cannot write \(dest.path): \(why)")
+            }
             digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
         } catch { return fail("cannot write \(dest.path): \(error.localizedDescription)") }
 

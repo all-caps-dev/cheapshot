@@ -206,6 +206,88 @@ final class MaskTests: XCTestCase {
                        "a failed mask must not allow anything")
     }
 
+    // MARK: - CS-18: private copies, stale sweep
+
+    /// The file's low 9 permission bits, or -1 when it cannot be statted.
+    func mode(_ path: String) -> Int {
+        var st = stat()
+        guard stat(path, &st) == 0 else { return -1 }
+        return Int(st.st_mode) & 0o777
+    }
+
+    /// CS-18: a masked copy is a redacted image of the screen, so only its owner reads it:
+    /// mode 0600, at --out and at the default scratch spot alike.
+    func testMaskedCopyIsMode0600() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let out = tmp.appendingPathComponent("explicit.png")
+        let a = await run(["mask", "--json", "--out", out.path, fx.url.path])
+        XCTAssertEqual(a.code, 0, a.err)
+        XCTAssertEqual(mode(out.path), 0o600, out.path)
+
+        let b = await run(["mask", fx.url.path])
+        XCTAssertEqual(b.code, 0, b.err)
+        let line = try XCTUnwrap(b.out.split(separator: "\n").first { $0.hasPrefix("masked: ") })
+        let defaulted = String(line.dropFirst("masked: ".count))
+        XCTAssertEqual(mode(defaulted), 0o600, defaulted)
+    }
+
+    /// CS-18: the sweeper takes only regular files older than the age it is given, in the one
+    /// folder it is given, and leaves symlinks and newer files alone.
+    func testSweepTakesOnlyOldRegularFilesInTheGivenFolder() throws {
+        let dir = tmp.appendingPathComponent("sweep-standin")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let old = dir.appendingPathComponent("old.png")
+        let recent = dir.appendingPathComponent("recent.png")
+        try Data("o".utf8).write(to: old)
+        try Data("n".utf8).write(to: recent)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
+                                              ofItemAtPath: old.path)
+        let link = dir.appendingPathComponent("link.png")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: old.path)
+        let sub = dir.appendingPathComponent("older-dir")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
+                                              ofItemAtPath: sub.path)
+
+        CLI.sweepStale(in: dir, olderThan: 3600)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recent.path), "a recent file stays")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path), "an old regular file goes")
+        XCTAssertNotNil(try? FileManager.default.destinationOfSymbolicLink(atPath: link.path), "a symlink stays")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sub.path), "a subdirectory stays")
+    }
+
+    /// CS-18: a mask run into the default folder sweeps that folder's stale copies first. An
+    /// explicit --out never has its folder swept.
+    func testMaskRunSweepsTheDefaultFolderOnly() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let maskedDir = tmp.appendingPathComponent("cheapshot-masked")
+        try FileManager.default.createDirectory(at: maskedDir, withIntermediateDirectories: true)
+        let old = maskedDir.appendingPathComponent("old-masked.png")
+        let recent = maskedDir.appendingPathComponent("recent-masked.png")
+        try Data("o".utf8).write(to: old)
+        try Data("n".utf8).write(to: recent)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
+                                              ofItemAtPath: old.path)
+
+        let defaulted = await run(["mask", fx.url.path])
+        XCTAssertEqual(defaulted.code, 0, defaulted.err)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recent.path), "the recent copy stays")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path), "the stale copy is swept")
+
+        // An explicit --out elsewhere: a stale file beside it is not touched.
+        let outDir = tmp.appendingPathComponent("out-elsewhere")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        let staleBeside = outDir.appendingPathComponent("stale.png")
+        try Data("s".utf8).write(to: staleBeside)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
+                                              ofItemAtPath: staleBeside.path)
+        let explicit = await run(["mask", "--out", outDir.appendingPathComponent("new.png").path, fx.url.path])
+        XCTAssertEqual(explicit.code, 0, explicit.err)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staleBeside.path),
+                      "an --out folder is never swept")
+    }
+
     func testUsageErrors() async throws {
         for args in [["mask"], ["mask", "--raw", "a.png"], ["mask", "a.png", "b.png"],
                      ["mask", "--out", "x.jpg", "a.png"], ["mask", "--min-conf", "2", "a.png"],
