@@ -108,6 +108,57 @@ final class MaskTests: XCTestCase {
         return n
     }
 
+    /// A plain colour canvas, no text anywhere: the blank-image fixture for the fail-closed
+    /// checks. `size` also picks the branch under test: 200 x 200 or more with one flat colour is
+    /// screenshot-like (`OCR.isScreenshotLike`), anything under 200 px on a side is not.
+    func makeBlankFixture(width: Int, height: Int, name: String = "blank.png") throws -> URL {
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let img = try XCTUnwrap(ctx.makeImage())
+        let url = tmp.appendingPathComponent(name)
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return url
+    }
+
+    func allowContents() -> String {
+        (try? String(contentsOf: tmp.appendingPathComponent("cheapshot-allow"), encoding: .utf8)) ?? ""
+    }
+
+    /// CHE-24: a screenshot-like image that OCR reads as blank even after the cold-start retry
+    /// must fail closed: no copy on disk, no allow entry, non-zero exit, the error on stderr and
+    /// in the --json error object. A silent copy of the original would hand the model raw pixels
+    /// while claiming they were masked.
+    func testBlankScreenshotLikeImageFailsClosed() async throws {
+        let blank = try makeBlankFixture(width: 480, height: 360)
+        XCTAssertTrue(OCR.isScreenshotLike(try XCTUnwrap(Masker.loadPixels(path: blank.path))),
+                      "the fixture must be screenshot-like or this test proves nothing")
+        let out = tmp.appendingPathComponent("blank-masked.png")
+        let r = await run(["mask", "--json", "--out", out.path, blank.path])
+        XCTAssertNotEqual(r.code, 0, "blank screenshot-like input must fail closed: \(r.out)")
+        XCTAssertTrue(r.err.contains("cheapshot:"), r.err)
+        let j = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(r.out.utf8)) as? [String: Any])
+        XCTAssertNotNil(j["error"], "\(j)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: out.path), "no copy may be written")
+        XCTAssertFalse(allowContents().contains(out.path), "no allow entry may be written")
+    }
+
+    /// A blank image below the screenshot heuristic's size floor keeps the old behaviour: masked
+    /// like any photo, exit 0, copy written (CHE-24 gates only screenshot-like blanks).
+    func testBlankSmallImageKeepsTheOldPath() async throws {
+        let blank = try makeBlankFixture(width: 100, height: 100, name: "small.png")
+        XCTAssertFalse(OCR.isScreenshotLike(try XCTUnwrap(Masker.loadPixels(path: blank.path))))
+        let out = tmp.appendingPathComponent("small-masked.png")
+        let r = await run(["mask", "--out", out.path, blank.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: out.path))
+        XCTAssertTrue(allowContents().contains(out.path))
+    }
+
     func testMaskPaintsSecretsAndLeavesNormalTextAlone() async throws {
         let normal = "Settings General Appearance"
         let token = "token " + Self.fakeToken

@@ -197,8 +197,18 @@ public enum Masker {
     /// added and painted too, up to `maxRounds`. If the last re-read still finds something new,
     /// this throws rather than hand back a copy that may still show a secret.
     public static func mask(_ image: CGImage, redactor: Redactor, minConfidence: Float) throws -> MaskResult {
+        // The same checked OCR the read path uses, cold-start retry included (CHE-24).
+        let checked = try OCR.recognizeLayoutChecked(image: image, minConfidence: minConfidence)
+        // A screenshot-like image that still read blank after the retry is a likely OCR failure,
+        // not a text-free image: masking on would paint nothing and allow a copy that is the
+        // original, so the model would get the raw pixels the mask was meant to keep from it.
+        // Fail closed instead: no copy, no allow entry. A non-screenshot-like image (a photo) is
+        // not retried and not gated: an empty read there is an answer, not a failure.
+        if checked.retried, checked.status == .empty {
+            throw Failure(message: "OCR found no text in what looks like a screenshot, even after a retry; nothing was masked or written")
+        }
         // The counts the user sees match a plain `cheapshot --json` run of the same image.
-        let shown = try OCR.recognizeLayout(image: image, minConfidence: minConfidence)
+        let shown = checked.lines
         let report = redactor.redact(Layout.text(shown)).report
 
         var boxes = try findBoxes(in: image, redactor: redactor, minConfidence: minConfidence)
