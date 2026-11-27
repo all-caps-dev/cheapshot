@@ -19,7 +19,9 @@
 # "empty", retried false, text "", screenshot_like false or absent) or for a PDF. A screenshot
 # still blank after the cold-start retry, an unknown or malformed status, and any empty image
 # from a binary that does not report ocr_status (added in v0.6.0; it cannot tell a photo from a
-# failed read) are denied in every mode (NOV-160). A broken rules file named by $CHEAPSHOT_RULES
+# failed read) are denied in every mode (NOV-160). Known limit: the binary only retries an image
+# that looks like a screenshot, so a photo or JPEG scan whose text Vision drops on a cold start
+# reads as "empty", retried false, screenshot_like false, and passes as pixels in every mode. A broken rules file named by $CHEAPSHOT_RULES
 # denies in both modes: passing the pixels would skip the built-in redaction as well as the
 # custom rules. (A broken default rules.json never gets here: the binary warns and keeps its
 # built-in rules.)
@@ -53,6 +55,11 @@ fi
 
 path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
 [ -n "$path" ] || exit 0
+# Read resolves a relative file_path against the session's working directory, which the hook
+# input carries as .cwd. Checks and printed commands use that base (the hook's own $PWD only when
+# .cwd is absent), so they look at the file the Read will open (PR #21 review).
+cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
+case "$path" in /*) rpath="$path" ;; *) rpath="${cwd:-$PWD}/$path" ;; esac
 ext=$(printf '%s' "${path##*.}" | tr 'A-Z' 'a-z')
 # The same image types `cheapshot allow` strips (NOV-117), so an allowed HEIC is rewritten too.
 case "$ext" in png|jpg|jpeg|webp|gif|heic|heif|tif|tiff|bmp|pdf) ;; *) exit 0 ;; esac
@@ -95,12 +102,21 @@ failed() {
     deny "cheapshot could not load its redaction rules, so $path was not read. Tell the user; do not retry another way." \
          "cheapshot: the rules file named by CHEAPSHOT_RULES is broken ($(/usr/bin/grep -m1 '^cheapshot: ' "$errf" | cut -c12-200)). Denied the Read of $path; fix the file or unset CHEAPSHOT_RULES."
   elif [ "$ext" != pdf ] && [ "$strict" != 1 ] && [ ! -e "$path" ] && [ ! -L "$path" ] \
+       && [ ! -e "$rpath" ] && [ ! -L "$rpath" ] \
        && /usr/bin/grep -q '^cheapshot: no such file ' "$errf" 2>/dev/null; then
-    # The binary said there is no such file, and there is none: no pixels to keep out.
-    # Let the Read run and report the missing file itself, instead of a deny that blames the
-    # install. A file that exists but will not decode stays denied.
+    # The binary said there is no such file, and there is none, neither where the binary looked
+    # nor where the Read will look (.cwd): no pixels to keep out. Let the Read run and report the
+    # missing file itself, instead of a deny that blames the install. A file that exists but will
+    # not decode stays denied. Known limit: a file created between this check and the Read
+    # passes unredacted (a small check-then-use window on a fail-open path).
     note error
     hint "cheapshot: $path does not exist; letting the Read report it."
+  elif [ "$ext" != pdf ] && [ -n "${sep:-}" ] && /usr/bin/grep -q 'unknown option --' "$errf" 2>/dev/null; then
+    # A dash path on a binary older than 0.6.0, which does not know "--": a reinstall of the
+    # same version will not help, an update will (PR #21 review).
+    qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
+    deny "cheapshot could not read $path, so the pixels were kept out. Tell the user; do not retry another way." \
+         "cheapshot: this cheapshot binary is too old for a path that starts with \"-\" (it does not know \"--\"). Denied the Read of $path. Update it (brew upgrade all-caps-dev/tap/cheapshot), or look at the image and, to show the agent the pixels, run in a terminal: cheapshot allow $qpath"
   elif [ "$ext" != pdf ]; then
     # The user can fix the install, or look at the image and allow it once. `cheapshot allow`
     # needs the binary to start, which a crash during OCR does not rule out.
@@ -130,11 +146,11 @@ fi
 sep=""
 case "$path" in -*) sep="--" ;; esac
 # The commands printed for a person (allow, mask, a plain run) take no "--" form for allow, so a
-# dash path (always relative) is spelled absolute there, from the session's working directory,
-# which Read resolves it against. `cheapshot allow` stores that same absolute path, and the
-# allowlist below matches a relative path by it too.
+# dash path (always relative) is spelled absolute there, from the session's working directory
+# (.cwd), which Read resolves it against. `cheapshot allow` stores that same absolute path, and
+# the allowlist below matches a relative path by it too.
 cpath="$path"
-case "$path" in -*) cpath="$PWD/$path" ;; esac
+case "$path" in -*) cpath="$rpath" ;; esac
 
 if ! command -v cheapshot >/dev/null 2>&1; then
   # An image is denied in every mode (NOV-160). `cheapshot allow` cannot help here (it needs the
@@ -176,8 +192,7 @@ fi
 # that NOV-95's Known limits named, and an image allow shows the stripped copy, never the original.
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
-  alt="$path"
-  case "$path" in /*) ;; *) alt="$PWD/$path" ;; esac
+  alt="$rpath"
   case "$alt" in /private/*) alt="${alt#/private}" ;; esac
   now=$(date +%s)
   keep=$(mktemp "$tmp/cheapshot-allow.XXXXXX")

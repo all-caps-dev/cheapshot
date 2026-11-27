@@ -472,6 +472,9 @@ grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "dash path: not a pass-throu
 # An older binary rejects "--" (exit 2, unknown option): that is a failed run, denied for an image.
 fresh
 o=$(input "-dash.png" | FAKE_EXIT=2 FAKE_STDERR='cheapshot: unknown option --' run_hook 2>/dev/null); denied "dash path, binary rejects --"
+# PR #21 review: the user is told to update, not reinstall; the model is told neither.
+case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *"brew upgrade all-caps-dev/tap/cheapshot"*) pass "dash path, old binary: user told to update";; *) fail "dash path old binary message: $o";; esac
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *brew*|*"cheapshot allow"*) fail "dash path old binary: model reason names a fix: $o";; *) pass "dash path, old binary: model reason names no fix";; esac
 # Pre-push review: the commands printed for the user spell a dash path absolute (from the
 # working directory), since `allow` has no "--" form and refuses an argument that starts with "-".
 case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *"cheapshot allow '$PWD/-dash.png'"*) pass "dash path: user's allow command is absolute";; *) fail "dash path allow command: $o";; esac
@@ -489,6 +492,16 @@ case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')
 fresh
 o=$(input "$T/missing.png" | FAKE_EXIT=1 FAKE_STDERR="cheapshot: no such file $T/missing.png" run_hook 2>/dev/null)
 [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = "" ] && pass "missing image: the Read runs" || fail "missing image: the Read runs: $o"
+# PR #21 review: a relative path missing from the hook's $PWD but present in the session's .cwd
+# (where Read resolves it) is a real image: denied, not passed as pixels.
+fresh
+mkdir "$T/sess"; : > "$T/sess/real.png"
+o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"real.png"}}' "$T/sess" \
+  | FAKE_EXIT=1 FAKE_STDERR="cheapshot: no such file real.png" run_hook 2>/dev/null); denied "relative image present only in .cwd"
+# The dash path's printed commands and allowlist match use .cwd too.
+fresh
+o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"-dash.png"}}' "$T" | run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask '$T/-dash.png'"*) pass "dash path: mask command uses .cwd";; *) fail "dash path .cwd mask command: $o";; esac
 fresh
 : > "$T/corrupt.png"
 o=$(input "$T/corrupt.png" | FAKE_EXIT=1 FAKE_STDERR="cheapshot: cannot read $T/corrupt.png" run_hook 2>/dev/null); denied "undecodable image that exists"

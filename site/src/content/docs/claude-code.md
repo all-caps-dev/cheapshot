@@ -71,6 +71,11 @@ v0.6.0), which cannot tell a photo from a failed read. Look at the image yoursel
 any text it finds blacked out. When text was found but OCR was retried, the
 redacted text is still returned, with a note that some lines may be missing.
 
+Known limit: the binary only retries an image that looks like a screenshot. A
+photo or a JPEG scan of a document whose text Vision drops on a cold start reads
+as `"empty"` with no retry and `"screenshot_like": false`, so it passes as pixels
+in every mode, strict mode included, like a photo with no text.
+
 A failed OCR run on an image is denied in every mode too: `jq` or `cheapshot`
 missing from `PATH`, the binary exiting with an error, and output that is empty,
 truncated, not JSON, or has no `results` array. A broken install blocks image
@@ -84,7 +89,7 @@ session. The agent is told none of these.
 A path that starts with `-` is read like any other: the hook passes it to the
 binary after `--`, which ends option parsing, so it cannot act as a flag. Only
 such a path gets `--`; a binary too old to know `--` fails the run, which denies
-an image.
+an image, and the system message says to update cheapshot.
 
 ## Strict mode
 
