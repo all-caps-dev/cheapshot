@@ -62,12 +62,12 @@ The payload is one object: `version`, `results[]`, and the run totals
 
 | Field | Meaning |
 |---|---|
-| `file` | The input path, as given on the command line. |
-| `text` | The full text after redaction, one recognized line per newline. |
+| `file` | The input path. |
+| `text` | The full text after redaction. Lines are joined by newlines, and a block read as code is wrapped in triple-backtick fence lines. |
 | `image_tokens` | The estimated token cost of the image. |
-| `text_tokens` | The token cost of the text instead. |
+| `text_tokens` | The estimated token cost of the text instead. |
 | `redactions` | Map of redaction rule name to hit count. `{}` means nothing was redacted. |
-| `lines[]` | One object per recognized line: `n` (1-based), `text`, `bbox`, `confidence`. |
+| `lines[]` | Images only. One object per recognized line: `n` (1-based), `text`, `bbox`, `confidence`. |
 | `error` | On a failed input, an error message. A failed entry carries only `file` and `error`. |
 
 `bbox` is `[minX, minY, maxX, maxY]` in image pixels, top left origin.
@@ -90,23 +90,23 @@ Treat it as a likely OCR failure, not as a photo with no text in it.
     "file": "shot.png",
     "text": "build ok\nkey [AWS_KEY]",
     "image_tokens": 1018,
-    "text_tokens": 37,
+    "text_tokens": 6,
     "redactions": { "AWS_KEY": 1 },
     "lines": [
-      { "n": 1, "text": "build ok", "bbox": [22, 30, 350, 54], "confidence": 0.98 },
-      { "n": 2, "text": "key [AWS_KEY]", "bbox": [22, 90, 482, 116], "confidence": 0.91 }
+      { "n": 1, "text": "build ok", "bbox": [22, 30, 350, 54], "confidence": 1 },
+      { "n": 2, "text": "key [AWS_KEY]", "bbox": [22, 90, 482, 116], "confidence": 0.5 }
     ],
     "ocr_status": "ok",
     "retried": false,
     "screenshot_like": true
   }],
   "image_tokens": 1018,
-  "text_tokens": 37
+  "text_tokens": 6
 }
 ```
 
-PDF results carry `source` and `pages` instead of the image fields. See
-[PDF](/cheapshot/pdf/).
+PDF results carry `source` and `pages[]` in place of `lines[]` and the three
+0.6.0 fields. Each page has its own `lines[]`. See [PDF](/cheapshot/pdf/).
 
 :::tip
 Layout question, no pixels? Compare `lines[].bbox`: find the line you care
