@@ -96,6 +96,10 @@ final class RedactionGapTests: XCTestCase {
     // today, 2026-11-27.
     func testSkKeyOfShortLowercaseWordsIsRedacted() {
         let key = Self.assemble("sk-my-super-secret" + Self.m + "-litellm-key")
+        // Control: a key of about the same length that is not lowercase words is caught by
+        // OPENAI_KEY, so the expected failure below is the word veto, not the rule itself.
+        let mixed = Self.assemble("sk-Ab3dEf6Hh9" + Self.m + "Kk2Ll5Oo8Pp1Qq")
+        XCTAssertEqual(Redactor().redact("Your key \(mixed)").text, "Your key [OPENAI_KEY]")
         XCTExpectFailure("CS-05 gap 5: the CSS-class veto also refuses lowercase-word keys", strict: true) {
             let out = Redactor().redact("Your key \(key)").text
             XCTAssertEqual(out, "Your key [OPENAI_KEY]")
