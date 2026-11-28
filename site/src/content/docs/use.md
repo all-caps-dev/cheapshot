@@ -74,14 +74,25 @@ The payload is one object: `version`, `results[]`, and the run totals
 `confidence` runs 0 to 1; lines under `--min-conf` (default `0.3`) are dropped,
 from `lines[]` and from `text` alike.
 
-Image results also carry three fields, 0.6.0 and later:
+Image results can also carry three more fields:
 
 - `ocr_status`: `ok` when the pass found text, `empty` otherwise.
 - `retried`: true when a second OCR pass ran (the cold start retry).
 - `screenshot_like`: the image heuristic that gated that retry.
 
+Check for the fields, not the version number. Some dev builds report
+`0.6.0` without them, and `make build` reports `0.6.0+<sha>.<date>`. An image
+result with empty `text` and no `ocr_status` comes from a binary that cannot
+say whether OCR failed: treat it like `empty` with `retried` true. The Claude
+Code hook does the same.
+
 `empty` with `retried` true is a screenshot-like image that still read blank.
 Treat it as a likely OCR failure, not as a photo with no text in it.
+
+`ok` with `retried` true happens too. The retry also runs when a slow cold
+pass (over 3 seconds) returns fewer than 85% of the lines a fast probe
+counted. The text is the better of the two passes, but some lines may still
+be missing.
 
 ```json
 {
@@ -106,7 +117,12 @@ Treat it as a likely OCR failure, not as a photo with no text in it.
 ```
 
 PDF results carry `source` and `pages[]` in place of `lines[]` and the three
-0.6.0 fields. Each page has its own `lines[]`. See [PDF](/cheapshot/pdf/).
+OCR status fields. `source` is an object: `path`, `sha256` and `pages` (the
+document's page count). Each `pages[]` entry has `n`, `lane` (`text` or
+`scan`), `width` and `height` (the page rendered at 2x, in pixels) and its own
+`lines[]`. On a text lane page, `bbox` is in PDF points and `confidence` is
+always `1`. On a scan lane page, `bbox` is in pixels of the 2x render. See
+[PDF](/cheapshot/pdf/).
 
 :::tip
 Layout question, no pixels? Compare `lines[].bbox`: find the line you care
@@ -118,6 +134,11 @@ you answer.
 A `redactions` count above 0 means the image held a secret: use the `text`,
 and never send that image's pixels to a model. The pixels carry the secret
 the redaction hid.
+
+The converse is not true. `redactions: {}` does not make the pixels safe.
+Lines under `--min-conf` are dropped before redaction, so they are never
+checked, and neither is text that OCR did not see. To share the pixels, run
+`cheapshot mask` and share the masked copy.
 
 ## Recognition
 
