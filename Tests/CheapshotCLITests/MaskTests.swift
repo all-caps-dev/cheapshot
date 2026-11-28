@@ -460,6 +460,7 @@ extension MaskTests {
         XCTAssertEqual(r.code, 1, "blank screenshot-like input must fail closed: \(r.out)")
         XCTAssertTrue(r.err.hasPrefix("cheapshot: "), r.err)
         XCTAssertTrue(r.err.contains(Self.blankMessage), r.err)
+        XCTAssertTrue(r.err.contains("cheapshot allow"), "the refusal names the way out: \(r.err)")
         XCTAssertEqual(r.out, "", "nothing may claim a masked copy")
         XCTAssertEqual(defaultMaskFolderContents(), [], "no copy may be written")
         XCTAssertFalse(FileManager.default.fileExists(atPath: allowURL.path), "no allow entry may be written")
@@ -496,6 +497,62 @@ extension MaskTests {
         let r = await run(["mask", "--out", out.path, blank.path])
         XCTAssertEqual(r.code, 0, r.err)
         XCTAssertTrue(FileManager.default.fileExists(atPath: out.path))
+        let allow = (try? String(contentsOf: allowURL, encoding: .utf8)) ?? ""
+        XCTAssertTrue(allow.contains(out.path), allow)
+    }
+}
+
+// MARK: - CHE-24 review: faint text under the floor is masked, not refused
+extension MaskTests {
+    /// A 900 x 300 white canvas with `lines` drawn in light grey: Vision reads the words, but
+    /// every line comes back under a high confidence floor. White dominates, so it stays screenshot-like.
+    func makeFaintFixture(lines: [String], grey: CGFloat, name: String) throws -> URL {
+        let w = 900, h = 300
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        let font = CTFontCreateWithName("Helvetica" as CFString, 22, nil)
+        for (i, s) in lines.enumerated() {
+            let attr = NSAttributedString(string: s, attributes: [kCTFontAttributeName as NSAttributedString.Key: font,
+                                                                  kCTForegroundColorAttributeName as NSAttributedString.Key:
+                                                                    CGColor(red: grey, green: grey, blue: grey, alpha: 1)])
+            ctx.textPosition = CGPoint(x: 30, y: CGFloat(h) - CGFloat(60 + i * 50))
+            CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+        }
+        let img = try XCTUnwrap(ctx.makeImage())
+        let url = tmp.appendingPathComponent(name)
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return url
+    }
+
+    /// Faint text only, every line under --min-conf 0.99: the checked read keeps no line, but
+    /// Vision did see text, so this is not a blank read. Before the fix mask refused it with
+    /// "OCR found no text"; it must write a masked copy with each faint line painted as
+    /// low-confidence, and allow that copy.
+    func testFaintTextUnderAHighFloorIsMaskedNotRefused() async throws {
+        let lines = ["qzx7 Kp0w vrrt", "Jh8l mmq3 Zx"]          // nonsense, so Vision is unsure of it
+        let url = try makeFaintFixture(lines: lines, grey: 0.95, name: "faint-shot.png")
+        let img = try Masker.loadPixels(path: url.path)
+        // The preconditions that make this the regression case, or the test proves nothing.
+        XCTAssertTrue(OCR.isScreenshotLike(img))
+        XCTAssertFalse(try OCR.recognizeLayout(image: img, minConfidence: 0).isEmpty, "Vision must see the faint text")
+        XCTAssertTrue(try OCR.recognizeLayoutChecked(image: img, minConfidence: 0.99).lines.isEmpty,
+                      "every line must sit under the 0.99 floor")
+
+        let out = tmp.appendingPathComponent("faint-masked.png")
+        let r = await run(["mask", "--json", "--min-conf", "0.99", "--out", out.path, url.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertFalse(r.err.contains(Self.blankMessage), r.err)
+        let j = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(r.out.utf8)) as? [String: Any], r.out)
+        XCTAssertGreaterThanOrEqual(j["box_count"] as? Int ?? 0, 1, "the faint lines must be painted: \(j)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: out.path), "the masked copy must be written")
+        // The copy differs from the source: the faint lines are under black boxes.
+        let a = try pixels(url), b = try pixels(out)
+        XCTAssertGreaterThan(changed(a, b, in: CGRect(x: 0, y: 0, width: a.w, height: a.h)), 0)
         let allow = (try? String(contentsOf: allowURL, encoding: .utf8)) ?? ""
         XCTAssertTrue(allow.contains(out.path), allow)
     }
