@@ -6,8 +6,8 @@
 import XCTest
 @testable import CheapshotPortable
 
-/// CS-05: one test per redaction gap the v0.6.0 reviews found. The redactor is unchanged here;
-/// each gap's assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
+/// CS-05: one test per redaction gap the v0.6.0 reviews found. Where a gap is still open, its
+/// assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
 /// the suite is green now and the test turns red, on purpose, once the gap is fixed (the
 /// wrapper then reports that no expected failure occurred and the wrap is removed).
 ///
@@ -54,17 +54,31 @@ final class RedactionGapTests: XCTestCase {
         }
     }
 
-    // Gap 3: the unquoted value class in the SECRET assignment contains ".", so the value
-    // match swallows a sentence-final period: `TOKEN=Kk...5.` redacts as `TOKEN=[SECRET]` and
-    // the sentence loses its period. The value must go while the period may stay. Confirmed
-    // red today (the period is consumed), 2026-11-27.
-    func testTokenValueKeepsSentencePeriod() {
+    // Gap 3, closed as intended behaviour (Ryan, 2026-11-28: "A. Keep period inside"): the
+    // unquoted value class in the SECRET assignment contains ".", so `TOKEN=Kk...5.` redacts as
+    // `TOKEN=[SECRET]` and the sentence loses its period. That stays: a password can end in ".",
+    // and handing the character back would show it. A miss is worse than lost punctuation.
+    func testTokenValueTakesSentencePeriodInside() {
         let value = Self.assemble("Kk3Mm9" + Self.m + "Qq2Ww5")
-        // Control: the value itself is redacted; only the period is lost.
         XCTAssertEqual(Redactor().redact("TOKEN=\(value) ok").text, "TOKEN=[SECRET] ok")
-        XCTExpectFailure("CS-05 gap 3: the value match swallows the sentence period", strict: true) {
-            let out = Redactor().redact("TOKEN=\(value).").text
-            XCTAssertEqual(out, "TOKEN=[SECRET].")
+        XCTAssertEqual(Redactor().redact("TOKEN=\(value).").text, "TOKEN=[SECRET]")
+        XCTAssertEqual(Redactor().redact("password: \(value). Next").text, "password: [SECRET] Next")
+    }
+
+    // Gap 3b, CHE-20's own wording, still open: a value named in prose with no `=` or `:`
+    // ("the token is abc123xyz.") is not redacted, with or without the period. SECRET needs a
+    // separator after the keyword, and the TOKEN catch-all needs 20 or more characters with
+    // both cases. The period plays no part. Behaviour is unchanged until Ryan picks a fix.
+    // Confirmed red 2026-11-28.
+    func testTokenNamedInProseWithoutSeparatorIsRedacted() {
+        let value = Self.assemble("abc123" + Self.m + "xyz")
+        // Control: the same value after a separator is caught, period and all.
+        XCTAssertEqual(Redactor().redact("token: \(value).").text, "token: [SECRET]")
+        XCTExpectFailure("CS-05 gap 3b: a token named in prose with no separator is kept", strict: true) {
+            for s in ["the token is \(value).", "the token is \(value)"] {
+                let out = Redactor().redact(s).text
+                XCTAssertFalse(out.contains(value), "the value should not survive: \(out.debugDescription)")
+            }
         }
     }
 

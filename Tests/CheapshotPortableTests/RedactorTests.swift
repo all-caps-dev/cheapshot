@@ -115,6 +115,8 @@ final class RedactorTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("key sk-abcdefghijklmnopqrstuvwx").text, "key [OPENAI_KEY]")
         XCTAssertEqual(Redactor().redact(".sk-cube-grid-container-wrapper { }").text, ".sk-cube-grid-container-wrapper { }")
         XCTAssertEqual(Redactor().redact("pass: data.center.rocks").text, "pass: [SECRET]")
+        // CS-05 gap 3: a sentence period after an unquoted value goes inside [SECRET], on purpose.
+        XCTAssertEqual(Redactor().redact("TOKEN=Kk3Mm9Qq2Ww5.").text, "TOKEN=[SECRET]")
         XCTAssertEqual(Redactor().redact("viewBox=\"0 0 24 24\"").text, "viewBox=\"0 0 24 24\"")
         XCTAssertEqual(
             Redactor().redact("\"cookie\": \"sid=347301ef56e64dc3cd6089065c3146e8; theme=dark\"").text,
