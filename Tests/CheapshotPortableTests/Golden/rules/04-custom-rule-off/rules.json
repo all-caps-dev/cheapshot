@@ -1,0 +1,4 @@
+{"version": 2, "rules": [
+  {"name": "TICKET", "pattern": "\\bINT-[0-9]{6}\\b", "enabled": false},
+  {"name": "BADGE", "pattern": "\\bE-[0-9]{6}\\b", "caseInsensitive": false}
+]}

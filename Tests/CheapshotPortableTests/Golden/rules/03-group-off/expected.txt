@@ -1,0 +1,5 @@
+user [EMAIL] at [IPV4]
+password=[SECRET]
+card 4111 1111 1111 1111
+call [PHONE]
+ticket INT-123456 badge E-654321

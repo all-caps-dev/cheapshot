@@ -6,8 +6,8 @@
 # Usage: scripts/check-redaction-tests.sh [filter]
 # The filter argument exists only to prove the guard: a filter that matches nothing must fail.
 cd "$(dirname "$0")/.." || exit 1
-filter="${1:-CheapshotPortableTests.(GoldenTests|RedactorTests|ValidatorsTests|RuleFileTests|RuleFileV2Tests|RuleCatalogTests)}"
-expected=61   # 2 Golden + 18 Redactor + 15 Validators + 6 RuleFile + 15 RuleFileV2 + 5 RuleCatalog; change when tests are added
+filter="${1:-CheapshotPortableTests.(GoldenTests|GoldenRulesTests|RedactorTests|ValidatorsTests|RuleFileTests|RuleFileV2Tests|RuleCatalogTests)}"
+expected=70   # 2 Golden + 9 GoldenRules + 18 Redactor + 15 Validators + 6 RuleFile + 15 RuleFileV2 + 5 RuleCatalog; change when tests are added
 log="${TMPDIR:-/tmp}/cheapshot-redaction-tests.$$.log"
 
 swift test --filter "$filter" >"$log" 2>&1
