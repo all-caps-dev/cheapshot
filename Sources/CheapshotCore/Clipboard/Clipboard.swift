@@ -31,12 +31,22 @@ public protocol ClipboardSource: AnyObject {
     /// Finder's file reference URLs (`file:///.file/id=...`) are resolved to their paths. Empty
     /// when there are none. Callers that read one input refuse two or more rather than guess.
     func readFileURLs() -> [URL]
+    /// How many clipboard items carry a file URL at all, resolvable or not. Callers count
+    /// copied files with this, never with `readFileURLs().count`: a copied file that was since
+    /// deleted (or whose volume was unmounted) still counts, so two copied files with one gone
+    /// is still two, and one gone file is reported as gone rather than as an empty clipboard.
+    var fileItemCount: Int { get }
     /// Clears the clipboard, then writes `payload` as its only item. False when the write failed,
     /// and the clipboard is then already empty: the old contents are gone either way.
     @discardableResult func replace(with payload: ClipboardPayload) -> Bool
 }
 
 public extension ClipboardSource {
+    /// Default for conformers whose file URLs always resolve: one item per URL.
+    var fileItemCount: Int { readFileURLs().count }
+    /// True when any item carries a file URL; `readImage()` is nil then.
+    var holdsFileItems: Bool { fileItemCount > 0 }
+
     /// The file URL when the clipboard holds exactly one, else nil (none, or two or more).
     func readFileURL() -> URL? {
         let urls = readFileURLs()
@@ -63,11 +73,15 @@ public final class PasteboardClipboard: ClipboardSource {
     public func readImage() -> Data? {
         // File URLs win (see the protocol): any item carrying public.file-url means the image
         // types on the clipboard are Finder's icon or thumbnail, not something to read.
-        if (pasteboard.pasteboardItems ?? []).contains(where: { $0.types.contains(.fileURL) }) { return nil }
+        if holdsFileItems { return nil }
         for type in Self.imageTypes {
             if let data = pasteboard.data(forType: type), !data.isEmpty { return data }
         }
         return nil
+    }
+
+    public var fileItemCount: Int {
+        (pasteboard.pasteboardItems ?? []).filter { $0.types.contains(.fileURL) }.count
     }
 
     public func readFileURLs() -> [URL] {

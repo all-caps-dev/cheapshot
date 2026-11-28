@@ -603,9 +603,15 @@ public enum CLI {
         // as TIFF, and reading that would OCR the icon instead of the file. The seam already
         // hides the image whenever any file URL is present; two or more copied files are refused
         // here outright (one input per run), so the run never falls back to the icon.
+        // Count file items, not resolved URLs: a copied file deleted since still counts, so
+        // two copied files with one gone are refused, and one gone file is reported as gone.
         let fileURLs = clip.readFileURLs()
-        if fileURLs.count > 1 {
+        if clip.fileItemCount > 1 {
             return fail("more than one file is copied to the clipboard; copy one file and try again")
+        }
+        if fileURLs.isEmpty && clip.fileItemCount == 1 {
+            // A file was copied but its reference no longer resolves; the icon stays unread.
+            return fail("the file copied to the clipboard can no longer be found (deleted or on an unmounted volume)")
         }
         if let url = fileURLs.first {
             // A file copied in Finder runs through the normal file readers. Its path came from the
