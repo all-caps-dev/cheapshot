@@ -172,6 +172,17 @@ for v in 0.6.0 0.6.1-dev garbage; do
   case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *"mask entry for this file was not honoured"*"brew upgrade"*) pass "mask entry on $v binary: user told why";; *) fail "mask entry on $v binary: user message: $out";; esac
   case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"brew "*|*"not honoured"*) fail "mask entry on $v binary: model told the bypass detail";; *) pass "mask entry on $v binary: model reason unchanged";; esac
 done
+# The case the fix exists for: the old copy is the unmasked original of a blank screenshot, so
+# OCR reads it blank again and the hook denies on the empty-text path. The note must reach it too.
+fresh
+now=$(date +%s)
+m="$TMPDIR/masked.png"; printf 'masked-bytes' > "$m"
+sum=$(shasum -a 256 "$m" | cut -d' ' -f1)
+printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+out=$(input "$m" | FAKE_VERSION=0.6.0 FAKE_EMPTY_TEXT=1 run_hook 2>/dev/null)
+[ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "mask entry on 0.6.0, blank copy: denied" || fail "mask entry on 0.6.0, blank copy: $out"
+case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *"mask entry for this file was not honoured"*) pass "mask entry on 0.6.0, blank copy: user told why";; *) fail "mask entry on 0.6.0, blank copy: user message: $out";; esac
+case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"not honoured"*|*"brew "*) fail "mask entry on 0.6.0, blank copy: model told the detail";; *) pass "mask entry on 0.6.0, blank copy: model reason unchanged";; esac
 # The same entry on a 0.6.1 binary is still honoured (the 6m behaviour).
 fresh
 now=$(date +%s)

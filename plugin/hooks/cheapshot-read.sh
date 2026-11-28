@@ -81,8 +81,10 @@ hint() {
 
 # A deny: $1 is what the model sees, $2 what the user sees.
 deny() {
-  echo "$2" >&2
-  jq -n --arg r "$1" --arg m "$2" \
+  # A refused old mask entry (set in the allowlist loop) is explained on every deny path.
+  dm="$2"; [ -n "${mask_note:-}" ] && dm="$dm $mask_note"
+  echo "$dm" >&2
+  jq -n --arg r "$1" --arg m "$dm" \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}, systemMessage: $m}'
 }
 
@@ -209,10 +211,15 @@ mask_ok_jq='
 # review): a v0.6.0 mask that read a screenshot blank wrote the unmasked original as its "masked"
 # copy, so hiding the hint is not enough. Asked only when a mask entry matches, so the normal
 # path costs no extra process. `--version` prints the bare version; any failure counts as old.
+# Known limit (PR #43 second review): this asks the cheapshot first on the hook's PATH at Read
+# time, which need not be the binary that wrote the entry (an absolute-path or stale dev build,
+# or an upgrade inside the entry's 5-minute life). Closing that needs the binary to record its
+# version in the mask entry.
 mask_binary_ok() {
   [ "$(cheapshot --version 2>/dev/null | head -n 1 | jq -Rr '{version: .}' 2>/dev/null | jq -r "$mask_ok_jq" 2>/dev/null)" = 1 ]
 }
 oldmask=0
+mask_note=""
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
   alt="$rpath"
@@ -241,6 +248,7 @@ if [ -f "$allow" ]; then
         # A mask entry from a binary below 0.6.1: its copy may be the unmasked original. Used
         # up, never honoured; the Read falls through to the normal redacted handling.
         oldmask=1
+        mask_note="(A cheapshot mask entry for this file was not honoured: this cheapshot binary is older than 0.6.1, whose masked copy can be the unmasked image. Update cheapshot (brew upgrade all-caps-dev/tap/cheapshot), then run mask again.)"
         continue
       fi
       if [ -n "$sum" ]; then
@@ -475,7 +483,7 @@ user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the
 # A plain allow line for an image was refused above: it came from an older binary, so another
 # `cheapshot allow` from that binary would loop. Say so (PR #19 second review).
 [ "${stale:-0}" = 1 ] && user_line="$user_line (The allow entry for this file came from an older cheapshot binary and was not honoured; update cheapshot, then run allow again.)"
-[ "${oldmask:-0}" = 1 ] && user_line="$user_line (A cheapshot mask entry for this file was not honoured: this cheapshot binary is older than 0.6.1, whose masked copy can be the unmasked image. Update cheapshot (brew upgrade all-caps-dev/tap/cheapshot), then run mask again.)"
+[ -n "$mask_note" ] && user_line="$user_line $mask_note"
 # NOV-160: the flag goes first on both lines, so the deny reason still ends with the savings line.
 if [ -n "$flag" ]; then
   model_line="cheapshot: $flag ${model_line#cheapshot: }"
