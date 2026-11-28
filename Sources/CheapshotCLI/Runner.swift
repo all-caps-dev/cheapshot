@@ -589,8 +589,14 @@ public enum CLI {
         var blank: (message: String, code: Int32)? = nil
 
         // A file copied in Finder comes first: Finder also puts the file's icon on the clipboard
-        // as TIFF, and reading that would OCR the icon instead of the file.
-        if let url = clip.readFileURL() {
+        // as TIFF, and reading that would OCR the icon instead of the file. The seam already
+        // hides the image whenever any file URL is present; two or more copied files are refused
+        // here outright (one input per run), so the run never falls back to the icon.
+        let fileURLs = clip.readFileURLs()
+        if fileURLs.count > 1 {
+            return fail("more than one file is copied to the clipboard; copy one file and try again")
+        }
+        if let url = fileURLs.first {
             // A file copied in Finder runs through the normal file readers. Its path came from the
             // clipboard, so messages name "the copied file" and never print the path.
             var isDir: ObjCBool = false
