@@ -698,7 +698,11 @@ public enum CLI {
                 // Masker errors describe the pixels, never a path (it is handed a CGImage).
                 let masked: MaskResult
                 do { masked = try Masker.mask(pixels, redactor: redactor, minConfidence: opts.minConfidence) }
-                catch { return fail("could not make a masked copy that is safe to put back (\(error)); clipboard left untouched", code: 3, entry: entry) }
+                catch {
+                    // Masker's own refusal text points at `allow`, which has no clipboard twin, so
+                    // it is not repeated here. OCR errors inside the mask land here too: unproven.
+                    return fail("OCR could not confirm a safe masked copy (likely a cold start; try again); clipboard left untouched", code: 3, entry: entry)
+                }
                 do { payload = .png(try Masker.pngData(masked.image)) }
                 catch { return fail("could not encode the masked copy; clipboard left untouched", entry: entry) }
                 entryOut["clipboard_out"] = "image"
@@ -710,7 +714,10 @@ public enum CLI {
             guard clip.changeCount == startCount else {
                 return fail("clipboard changed during the read; left untouched", entry: entry)
             }
-            guard clip.replace(with: payload) else { return fail("could not write the clipboard", entry: entry) }
+            // replace clears first, so a failed write has already removed the original: say so.
+            guard clip.replace(with: payload) else {
+                return fail("could not write the clipboard; it is now empty and the original is gone (copy it again)", entry: entry)
+            }
             let what = entryOut["clipboard_out"] as? String == "image" ? "the masked image" : "the redacted text"
             io.err("cheapshot: the clipboard now holds \(what) only (clipboard history and Universal Clipboard may still hold the original)\n")
         }
