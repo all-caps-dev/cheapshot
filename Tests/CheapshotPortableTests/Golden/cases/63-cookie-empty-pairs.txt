@@ -1,0 +1,5 @@
+Cookie: foo=; sid=7f3a9c21d04e⟦⟧b85a6f31c2d9; theme=dark
+Cookie: pref=""; csrftoken=Kq8Zr2Lm5Vt⟦⟧9Xw3Bn6Pd1
+Cookie: a=; b=; session=753eda83d7c5⟦⟧8dfe0d5a0cf3
+Cookie: foo=; theme=dark
+Set-Cookie: sid=; Path=/; HttpOnly

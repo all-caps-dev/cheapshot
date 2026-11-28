@@ -76,8 +76,13 @@ public struct Rule: Sendable {
 
     /// A flag's value: quoted (the quotes stay) or a bare word. Every branch is a capture group.
     private static let flagValue = #"(?:"([^"\r\n]{1,256})"|'([^'\r\n]{1,256})'|([^\s"'`]{1,256}))"#
-    /// A cookie value: quoted, or up to the next ";" or whitespace.
-    private static let cookieValue = #"(?:"([^"\r\n]{1,4096})"|([^;\s"]{1,4096}))"#
+    /// A cookie value: quoted, or up to the next ";" or whitespace. Either may be empty
+    /// (`foo=;`, `foo="";`): the empty capture fails the validator, so nothing is replaced, but
+    /// the match still ends after the pair and the `\G` chain in the Cookie rule goes on to the
+    /// next one. With a one-character floor an empty pair matched nothing, the chain never
+    /// started, and every later value on the line (`Cookie: foo=; sid=<secret>`) was left in
+    /// the clear.
+    private static let cookieValue = #"(?:"([^"\r\n]{0,4096})"|([^;\s"]{0,4096}))"#
 
     /// Builds the SECRET pattern for a keyword assignment with the given separator class. It
     /// matches forward from the keyword and the value is a capture group (the rule sets
