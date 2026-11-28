@@ -234,6 +234,40 @@ final class RulesFlagsTests: XCTestCase {
         XCTAssertEqual(rows.first { $0["name"] as? String == "SECRET" }?["on"] as? Bool, true)
     }
 
+    /// Ryan's pick on the #40 second review: with ROUTING off, BANK_ACCT shows as partial
+    /// (no MICR cue) in --list-rules and in the weakened-run marks; with both off, or both on,
+    /// nothing is partial.
+    func testRoutingOffShowsBankAcctPartial() async throws {
+        let rules = try file("r.json", #"{"disabled": ["ROUTING"]}"#)
+
+        let t = await run(["--list-rules", "--rules", rules])
+        XCTAssertEqual(t.code, 0, t.err)
+        let lines = t.out.split(separator: "\n").map(String.init)
+        XCTAssertTrue(lines[0].hasSuffix("(36 of 37 built-in rules on, 1 partial)"), lines[0])
+        let bank = try XCTUnwrap(lines.first { $0.contains("BANK_ACCT") })
+        XCTAssertTrue(bank.hasPrefix("on ") && bank.hasSuffix("partial (no MICR cue)"), bank)
+        XCTAssertFalse(lines.contains { $0.contains("CARD") && $0.contains("partial") })
+
+        let j = try json(await run(["--list-rules", "--json", "--rules", rules]).out)
+        XCTAssertEqual(j["partial"] as? [String: String], ["BANK_ACCT": "no MICR cue"])
+        let rows = try XCTUnwrap(j["rules"] as? [[String: Any]])
+        XCTAssertEqual(rows.first { $0["name"] as? String == "BANK_ACCT" }?["partial"] as? String, "no MICR cue")
+        XCTAssertEqual(rows.filter { $0["partial"] != nil }.count, 1)
+
+        let r = await run(["--rules", rules, "--json", "--text", "-"], stdin: "x")
+        XCTAssertEqual(r.err, "cheapshot: 1 built-in rule is off (preset everything); BANK_ACCT is partial (no MICR cue)\n")
+        let mark = try XCTUnwrap(try json(r.out)["rules"] as? [String: Any])
+        XCTAssertEqual(mark["partial"] as? [String: String], ["BANK_ACCT": "no MICR cue"])
+
+        // Both off (group:financial): BANK_ACCT is off, not partial.
+        let fin = try file("f.json", #"{"disabled": ["group:financial"]}"#)
+        let g = await run(["--rules", fin, "--json", "--text", "-"], stdin: "x")
+        XCTAssertFalse(g.err.contains("partial"), g.err)
+        XCTAssertNil((try json(g.out)["rules"] as? [String: Any])?["partial"])
+        let none = try json(await run(["--list-rules", "--json"]).out)
+        XCTAssertEqual(none["partial"] as? [String: String], [:])
+    }
+
     func testListRulesDefaultIsAllOnAndAllRulesWins() async throws {
         let a = await run(["--list-rules", "--json"])
         let all = try json(a.out)
