@@ -639,7 +639,12 @@ public enum CLI {
                 var e = imageEntry(read, file: "clipboard")
                 e["source"] = "file_url"
                 (entry, text) = (e, read.text)
-                maskSource = { try Masker.loadPixels(path: url.path) }
+                // The same decoder the read used (ImageIO, then AppKit), so a file the read could
+                // open can be masked too.
+                maskSource = {
+                    guard let image = ImageLoader.load(path: url.path) else { throw Pipeline.ReadError.unreadableImage }
+                    return image
+                }
                 if read.status == .empty {
                     blank = read.retried
                         ? ("no text found in the file copied to the clipboard after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
@@ -685,8 +690,14 @@ public enum CLI {
                 // The same masker `cheapshot mask` uses: every redacted or low-confidence line
                 // painted black, re-read until clean, and a blank screenshot refused (#29). Any
                 // refusal leaves the clipboard alone and exits 3, as an unproven copy.
+                // Loading and masking fail apart. A load failure is an unreadable input (exit 1),
+                // and its error is never printed: for a copied file it could name the path.
+                let pixels: CGImage
+                do { pixels = try source() }
+                catch { return fail("could not load the clipboard image again to mask it; clipboard left untouched", entry: entry) }
+                // Masker errors describe the pixels, never a path (it is handed a CGImage).
                 let masked: MaskResult
-                do { masked = try Masker.mask(try source(), redactor: redactor, minConfidence: opts.minConfidence) }
+                do { masked = try Masker.mask(pixels, redactor: redactor, minConfidence: opts.minConfidence) }
                 catch { return fail("could not make a masked copy that is safe to put back (\(error)); clipboard left untouched", code: 3, entry: entry) }
                 do { payload = .png(try Masker.pngData(masked.image)) }
                 catch { return fail("could not encode the masked copy; clipboard left untouched", entry: entry) }
