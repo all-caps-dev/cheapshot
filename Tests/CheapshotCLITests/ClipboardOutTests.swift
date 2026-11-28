@@ -139,7 +139,8 @@ final class ClipboardOutTests: XCTestCase {
     // MARK: - nothing written
 
     func testClipboardChangedDuringTheReadWritesNothing() async throws {
-        // C3: the user copies something else while OCR runs.
+        // C3: the user copies something else while OCR runs. For image bytes, onRead fires on
+        // the image read, which comes after #34's bracket, so only the write guard catches it.
         let clip = FakeClipboard(image: try png(lines: secretLines))
         clip.onRead = { [unowned clip] in clip.bump() }
         let r = await run(["--clipboard", "--clipboard-out", "--json"], clipboard: clip)
@@ -150,11 +151,43 @@ final class ClipboardOutTests: XCTestCase {
     }
 
     func testClipboardChangedDuringAPDFReadWritesNothing() async throws {
+        // C3 for a copied PDF: the copy lands after #34's bracket closed (during the PDF read),
+        // so the run gets as far as the write and the write guard must refuse it. The message
+        // proves which guard fired: #34's says "while it was being read; try again".
         let clip = FakeClipboard(fileURLs: [try textPDF("plenty of readable text on this page")])
-        clip.onRead = { [unowned clip] in clip.bump() }
+        clip.copyAfterTheBracket = true
         let r = await run(["--clipboard", "--clipboard-out"], clipboard: clip)
         XCTAssertEqual(r.code, 1)
+        XCTAssertTrue(r.err.contains("clipboard changed during the read; left untouched"), r.err)
         XCTAssertTrue(clip.writes.isEmpty)
+        XCTAssertEqual(r.out, "", "no success output when nothing was written")
+    }
+
+    func testClipboardChangedDuringACopiedImageFileReadWritesNothing() async throws {
+        // C3 for a copied image file: the copy lands during OCR and masking.
+        let file = tmp.appendingPathComponent("shot.png")
+        try png(lines: secretLines).write(to: file)
+        let clip = FakeClipboard(fileURLs: [file])
+        clip.copyAfterTheBracket = true
+        let r = await run(["--clipboard", "--clipboard-out", "--json"], clipboard: clip)
+        XCTAssertEqual(r.code, 1)
+        XCTAssertTrue(r.err.contains("clipboard changed during the read; left untouched"), r.err)
+        XCTAssertTrue(clip.writes.isEmpty)
+        XCTAssertNotNil(try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])[0]["error"])
+    }
+
+    func testFakeCopyAfterTheBracketMovesTheCountOnlyAfterTheBracket() {
+        // The hook's own contract: start, bracket open and bracket close all read the same
+        // count; the read after that (the write guard) sees it moved, and only once.
+        let clip = FakeClipboard(fileURLs: [URL(fileURLWithPath: "/tmp/a.pdf")])
+        clip.copyAfterTheBracket = true
+        let start = clip.changeCount, open = clip.changeCount
+        _ = clip.readFileURLs(); _ = clip.fileItemCount
+        XCTAssertEqual(clip.changeCount, open, "the bracket must pass")
+        XCTAssertEqual(start, open)
+        let atWrite = clip.changeCount
+        XCTAssertNotEqual(atWrite, start, "the write guard must see the copy")
+        XCTAssertEqual(clip.changeCount, atWrite, "one copy, not one per read")
     }
 
     func testBlankReadLeavesTheClipboardIdentical() async throws {
@@ -223,6 +256,56 @@ final class ClipboardOutTests: XCTestCase {
         XCTAssertEqual(r.code, 1)
         XCTAssertTrue(r.err.contains("could not write the clipboard"), r.err)
         XCTAssertEqual(r.out, "", "no success output after a failed write")
+    }
+
+    func testJSONThatCannotBeBuiltWritesNothingAndExits1() async throws {
+        // The --json result is built before the write, so a serialization failure stops the run
+        // with the clipboard untouched (exit 1 is honest). After a successful write the run only
+        // prints an already-built string, so it cannot exit 1 with the clipboard replaced.
+        let saved = Output.serialize
+        defer { Output.serialize = saved }
+        Output.serialize = { _ in throw OutputError(message: "injected") }
+        let clip = FakeClipboard(fileURLs: [try textPDF("plenty of readable text on this page")])
+        let r = await run(["--clipboard", "--clipboard-out", "--json"], clipboard: clip)
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(clip.writes.isEmpty, "exit 1 must mean nothing was written")
+        XCTAssertTrue(r.err.contains("could not build the --json result"), r.err)
+        XCTAssertTrue(r.err.contains("clipboard left untouched"), r.err)
+    }
+
+    /// Runs a copied image through --clipboard-out with the masker swapped for one that throws.
+    func runWithFailingMasker(_ failure: Error) async throws -> (code: Int32, out: String, err: String, clip: FakeClipboard) {
+        let saved = CLI.maskForClipboard
+        defer { CLI.maskForClipboard = saved }
+        CLI.maskForClipboard = { _, _, _ in throw failure }
+        let clip = FakeClipboard(image: try png(lines: secretLines))
+        let r = await run(["--clipboard", "--clipboard-out"], clipboard: clip)
+        return (r.code, r.out, r.err, clip)
+    }
+
+    func testUnconfirmedMaskExits3() async throws {
+        // The blank-screenshot gate and the max-rounds refusal: unproven, a retry may work.
+        let r = try await runWithFailingMasker(Masker.Failure(message: "OCR could not confirm a complete read", kind: .unconfirmed))
+        XCTAssertEqual(r.code, 3, r.err)
+        XCTAssertTrue(r.err.contains("could not confirm a safe masked copy"), r.err)
+        XCTAssertTrue(r.clip.writes.isEmpty)
+    }
+
+    /// Stands in for any error the masker passes up that is not a Masker.Failure (OCR's own).
+    struct OtherError: Error, CustomStringConvertible { let description: String }
+
+    func testMaskErrorThatIsNotAColdStartExits1() async throws {
+        // A canvas or render failure (or an OCR error) is not a cold start: exit 1, and the
+        // message says what failed instead of promising that a retry will work.
+        for failure: Error in [Masker.Failure(message: "cannot create a 10x10 canvas"),
+                               Masker.Failure(message: "cannot render the masked image"),
+                               OtherError(description: "vision: injected")] {
+            let r = try await runWithFailingMasker(failure)
+            XCTAssertEqual(r.code, 1, "\(failure): \(r.err)")
+            XCTAssertTrue(r.err.contains("could not make the masked copy (\(failure))"), r.err)
+            XCTAssertFalse(r.err.contains("cold start"), r.err)
+            XCTAssertTrue(r.clip.writes.isEmpty)
+        }
     }
 
     func testWithoutTheFlagNothingIsWritten() async throws {

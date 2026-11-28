@@ -33,7 +33,17 @@ public struct MaskResult {
 
 public enum Masker {
     public struct Failure: Error, CustomStringConvertible {
+        /// Why `mask` gave up, so a caller can pick an exit code without matching message text.
+        public enum Kind: Equatable {
+            /// OCR could not prove the copy safe: the blank-screenshot gate (`blankRefusal`) or
+            /// risky text still showing after `maxRounds`. Often a cold start, so a retry may work.
+            case unconfirmed
+            /// Anything else: a canvas, render, encode or decode failure. A retry will not help.
+            case error
+        }
         public let message: String
+        public let kind: Kind
+        public init(message: String, kind: Kind = .error) { self.message = message; self.kind = kind }
         public var description: String { message }
     }
 
@@ -224,7 +234,7 @@ public enum Masker {
         let checked = try OCR.recognizeLayoutChecked(image: image, minConfidence: minConfidence)
         let firstBoxes = try findBoxes(in: image, redactor: redactor, minConfidence: minConfidence)
         if refusesBlank(screenshotLike: checked.screenshotLike, status: checked.status, boxes: firstBoxes) {
-            throw Failure(message: blankRefusal)
+            throw Failure(message: blankRefusal, kind: .unconfirmed)
         }
         // The counts the user sees match a plain `cheapshot --json` run of the same image.
         let shown = checked.lines
@@ -240,7 +250,8 @@ public enum Masker {
             boxes += fresh
             masked = try paint(image, boxes: boxes)
         }
-        throw Failure(message: "the masked copy still showed risky text after \(maxRounds) rounds; nothing was written")
+        throw Failure(message: "the masked copy still showed risky text after \(maxRounds) rounds; nothing was written",
+                      kind: .unconfirmed)
     }
 
     /// PNG bytes, lossless, so a box stays exactly black (a JPEG would smear the edges).

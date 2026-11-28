@@ -67,6 +67,8 @@ public enum Output {
           0 ok   1 an input failed   2 usage error
           3 --clipboard only: the read was retried and still came back blank (a cold-start OCR
             failure is likely; try again), or --clipboard-out could not prove a safe masked copy
+          With --clipboard-out, 1 and 3 leave the clipboard untouched (a failed write says so if
+          not), and once the clipboard is written the exit is 0
 
         """
     }

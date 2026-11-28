@@ -563,6 +563,13 @@ public enum CLI {
 
     // MARK: - --clipboard
 
+    /// The masker `--clipboard-out` runs, swappable so a test can make it throw each kind of
+    /// `Masker.Failure` without a real Vision failure.
+    // test seam; swapped and restored by ClipboardOutTests
+    nonisolated(unsafe) static var maskForClipboard: (CGImage, Redactor, Float) throws -> MaskResult = {
+        try Masker.mask($0, redactor: $1, minConfidence: $2)
+    }
+
     /// `cheapshot --clipboard` (NOV-155): reads the one file copied in Finder, else image bytes from
     /// the clipboard, and prints the redacted text the way a file read does. Never reads
     /// clipboard text, and never prints anything from the clipboard that has not been through the
@@ -571,10 +578,13 @@ public enum CLI {
     /// back as the clipboard's only item: a masked PNG for an image (bytes or a copied image file),
     /// redacted text for a copied PDF. Nothing is written when the read failed or was blank, when
     /// the mask could not be proven, or when the clipboard changed while the read ran.
-    /// Exit: 0 text read (and written back); 1 nothing usable on the clipboard, an unreadable
-    /// input, an OCR error, blank text, the clipboard changed, or the write failed; 3 blank after a
-    /// retry on a screenshot-like image (likely a cold start), or a masked copy that could not be
-    /// proven safe.
+    /// Exit: 0 text read (and written back, if asked); 1 nothing was written: nothing usable on the
+    /// clipboard, an unreadable input, an OCR or masking error, blank text, the clipboard changed,
+    /// the `--json` result could not be built, or the write failed (that message says the original
+    /// is gone); 3 nothing was written and a retry may work: blank after a retry on a
+    /// screenshot-like image (likely a cold start), or a masked copy OCR could not prove safe.
+    /// Once the clipboard has been written the run exits 0: an exit code never claims the
+    /// clipboard is untouched when it is not.
     static func runClipboard(_ opts: Options, redactor: Redactor, io: CLIIO) -> Int32 {
         let redaction = Pipeline.Redaction.redact(redactor)
         func fail(_ message: String, code: Int32 = 1, entry: [String: Any]? = nil) -> Int32 {
@@ -702,8 +712,8 @@ public enum CLI {
             let payload: ClipboardPayload
             if let source = maskSource {
                 // The same masker `cheapshot mask` uses: every redacted or low-confidence line
-                // painted black, re-read until clean, and a blank screenshot refused (#29). Any
-                // refusal leaves the clipboard alone and exits 3, as an unproven copy.
+                // painted black, re-read until clean, and a blank screenshot refused (#29). Every
+                // failure leaves the clipboard alone; only an unproven copy exits 3 (see below).
                 // Loading and masking fail apart. A load failure is an unreadable input (exit 1),
                 // and its error is never printed: for a copied file it could name the path.
                 let pixels: CGImage
@@ -711,11 +721,16 @@ public enum CLI {
                 catch { return fail("could not load the clipboard image again to mask it; clipboard left untouched", entry: entry) }
                 // Masker errors describe the pixels, never a path (it is handed a CGImage).
                 let masked: MaskResult
-                do { masked = try Masker.mask(pixels, redactor: redactor, minConfidence: opts.minConfidence) }
-                catch {
-                    // Masker's own refusal text points at `allow`, which has no clipboard twin, so
-                    // it is not repeated here. OCR errors inside the mask land here too: unproven.
+                do { masked = try maskForClipboard(pixels, redactor, opts.minConfidence) }
+                catch let failure as Masker.Failure where failure.kind == .unconfirmed {
+                    // The blank-screenshot gate or the max-rounds refusal: OCR could not prove the
+                    // copy safe, often a cold start, so exit 3 (try again). Masker's own refusal
+                    // text points at `allow`, which has no clipboard twin, so it is not repeated.
                     return fail("could not confirm a safe masked copy (OCR read blank, perhaps a cold start, or risky text kept showing after masking); clipboard left untouched", code: 3, entry: entry)
+                } catch {
+                    // A canvas, render or OCR error: not a cold start, so a retry is not promised
+                    // (exit 1). The error is safe to print: it describes pixels or Vision, never a path.
+                    return fail("could not make the masked copy (\(error)); clipboard left untouched", entry: entry)
                 }
                 do { payload = .png(try Masker.pngData(masked.image)) }
                 catch { return fail("could not encode the masked copy; clipboard left untouched", entry: entry) }
@@ -724,6 +739,14 @@ public enum CLI {
                 // Only redacted text: `text` came out of the redactor (C1: never the raw read).
                 payload = .text(text)
                 entryOut["clipboard_out"] = "text"
+            }
+            // Serialize the --json result before the write, not after: once the clipboard is
+            // replaced the run must exit 0 (exit 1 means nothing was written), so nothing that
+            // can fail is left for after the write. A result that cannot be built stops here.
+            var json: String? = nil
+            if opts.json {
+                do { json = try Output.json(CLI.payload([entryOut], imageTokens: it, textTokens: tt)) }
+                catch { return fail("could not build the --json result (\(error)); clipboard left untouched", entry: entry) }
             }
             guard clip.changeCount == startCount else {
                 return fail("clipboard changed during the read; left untouched", entry: entry)
@@ -734,6 +757,9 @@ public enum CLI {
             }
             let what = entryOut["clipboard_out"] as? String == "image" ? "the masked image" : "the redacted text"
             io.err("cheapshot: the clipboard now holds \(what) only (clipboard history and Universal Clipboard may still hold the original)\n")
+            // Printing a built string cannot fail, so the exit is 0 from here on.
+            io.out(json ?? (text + "\n"))
+            return 0
         }
         if opts.json {
             guard emit(payload([entryOut], imageTokens: it, textTokens: tt), io) else { return 1 }
