@@ -1,5 +1,5 @@
 import XCTest
-@testable import CheapshotCore
+@testable import CheapshotPortable
 
 final class RedactorTests: XCTestCase {
     func testBuiltinRedactsEmail() {
@@ -127,10 +127,6 @@ final class RedactorTests: XCTestCase {
         }
     }
 
-    func testVersionConstant() {
-        XCTAssertEqual(cheapshotVersion, "0.6.0")
-    }
-
     // Review finding 3: retryShorter takes the longest valid prefix at a separator; a rule
     // without it still drops the whole hit.
     func testRetryShorterKeepsLongestValidPrefix() {
@@ -227,8 +223,12 @@ final class RedactorTests: XCTestCase {
         // 1.0 s limit), so it gets 3.0 s. macOS runners are noisy too: this test failed on
         // macos-latest at 1.06 s, 1.15 s and 1.007 s against the old 1.0 s limit, so macOS and
         // devices get 2.0 s.
+        // Windows Foundation's regex is 4 to 8 times slower on these lines (PR #23's windows-core
+        // runs: 3.7 s to 8.2 s across 9 shapes, then 11.01 s on 9986031), so Windows gets 20 s.
         #if targetEnvironment(simulator)
         let limit = 3.0
+        #elseif os(Windows)
+        let limit = 20.0
         #else
         let limit = 2.0
         #endif

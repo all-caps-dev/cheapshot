@@ -1,0 +1,3 @@
+# Golden redaction fixtures stay LF on every checkout (Windows git would otherwise turn them
+# into CRLF and change every redaction input). The windows-core job also sets core.autocrlf false.
+Tests/CheapshotPortableTests/Golden/** text eol=lf

@@ -1,5 +1,9 @@
 import Foundation
+// CGRect and CGFloat come from CoreGraphics on Apple platforms and from Foundation itself on
+// Windows and Linux (swift-corelibs-foundation), so the import is only needed where it exists.
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// One recognized line. `bbox` is in pixels (or PDF points) with a top-left origin.
 public struct OCRLine: Equatable {
@@ -153,7 +157,7 @@ public enum Layout {
     }
 
     /// Column-major: the columns left to right, each one in its own reading order.
-    static func sorted(_ lines: [OCRLine]) -> [OCRLine] {
+    package static func sorted(_ lines: [OCRLine]) -> [OCRLine] {
         columns(lines).flatMap { $0.map { lines[$0] } }
     }
 
@@ -186,7 +190,7 @@ public enum Layout {
         }
     }
 
-    static func median(_ xs: [CGFloat]) -> CGFloat {
+    package static func median(_ xs: [CGFloat]) -> CGFloat {
         let s = xs.sorted()
         return s.count % 2 == 1 ? s[s.count / 2] : (s[s.count / 2 - 1] + s[s.count / 2]) / 2
     }

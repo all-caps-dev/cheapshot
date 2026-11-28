@@ -1,5 +1,10 @@
+// Apple platforms only: XCTExpectFailure is Apple XCTest only (swift-corelibs-xctest, used on
+// Windows and Linux, has none). These
+// are expected-failure gap markers, not part of the gated redaction count (PR #23 moved them here
+// with GoldenTests, whose joinMarker they use).
+#if canImport(Darwin)
 import XCTest
-@testable import CheapshotCore
+@testable import CheapshotPortable
 
 /// CS-05: one test per redaction gap the v0.6.0 reviews found. The redactor is unchanged here;
 /// each gap's assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
@@ -107,3 +112,4 @@ final class RedactionGapTests: XCTestCase {
         }
     }
 }
+#endif

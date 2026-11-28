@@ -1,5 +1,5 @@
 import XCTest
-@testable import CheapshotCore
+@testable import CheapshotPortable
 
 /// Each Golden/cases/NN-name.txt is redacted and compared to Golden/expected/NN-name.txt.
 /// A trailing newline in either file is ignored. Every case is one test failure line.

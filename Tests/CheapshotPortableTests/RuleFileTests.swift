@@ -1,5 +1,5 @@
 import XCTest
-@testable import CheapshotCore
+@testable import CheapshotPortable
 
 final class RuleFileTests: XCTestCase {
     func testParsesRulesAndDefaults() throws {

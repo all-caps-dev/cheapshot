@@ -143,8 +143,8 @@ jobs:
             plugin with a POSIX sh hook and status line, and an Astro site (site/).
             Its job is to read text out of images and redact secrets and personal
             data before that text reaches a model, so treat any change under
-            Sources/CheapshotCore/Redaction/, the golden cases in
-            Tests/CheapshotCoreTests/Golden/, plugin/hooks/, plugin/scripts/,
+            Sources/CheapshotPortable/Redaction/, the golden cases in
+            Tests/CheapshotPortableTests/Golden/, plugin/hooks/, plugin/scripts/,
             or the MCP tool handlers in mcp/ as security-sensitive. Flag
             anything that could let unredacted text through:
             a weakened or reordered rule, a regex that no longer matches its golden

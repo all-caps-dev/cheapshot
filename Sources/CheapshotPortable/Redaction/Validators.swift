@@ -91,7 +91,11 @@ public enum Validators {
 
     /// Whole-value shapes that point at a secret instead of being one. Each is a full match,
     /// so a real password that merely starts with "$" or "#", or holds "(", is still caught.
-    private static let referenceShapes = [
+    /// Each must be valid ICU syntax: Apple's `String.range(of:options: .regularExpression)`
+    /// tolerates some invalid escapes that NSRegularExpression (and so Windows Foundation)
+    /// rejects, and a rejected pattern silently never matches (PR #23: `\u{2022}` made every
+    /// mask such as `xxxx-xxxx` count as a secret on Windows). ValidatorsTests compiles them all.
+    static let referenceShapes = [
         #"\[[A-Z0-9_]+\].*"#,                  // already replaced by a more specific rule
         #"\$\{[^}]*\}"#,                       // ${DB_PASSWORD}
         #"\{\{.*\}\}"#,                        // {{ secrets.TOKEN }}
@@ -99,7 +103,7 @@ public enum Validators {
         #"%[A-Z_][A-Z0-9_]*%"#,                 // %DB_PASSWORD% (Windows)
         #"%\([A-Za-z_]\w*\)s"#,                // %(password)s (Python format)
         #"<[^<>]+>"#,                           // <your-token>
-        #"[*\u{2022}\u{25CF}xX#.\-_]+"#,         // masks: ****, ••••, xxxx, ####
+        #"[*\x{2022}\x{25CF}xX#.\-_]+"#,         // masks: ****, ••••, xxxx, ####
     ]
 
     /// `name(...)` call syntax in code: `getToken()`, `os.getenv("X")`, `getSecret(name)`. The
