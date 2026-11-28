@@ -101,7 +101,7 @@ final class RedactionGapTests: XCTestCase {
     // right after a key word ("key", "token", camelCase `openaiKey`); a bare CSS class, or one
     // in a class list, is still spared. With a separator SECRET takes it first. Golden case 64 covers it
     // on every platform.
-    func testSkKeyOfShortLowercaseWordsIsRedacted() {
+    func testSkKeyOfShortLowercaseWordsIsRedacted() throws {
         let key = Self.assemble("sk-my-super-secret" + Self.m + "-litellm-key")
         // Control: a key of about the same length that is not lowercase words is caught by
         // OPENAI_KEY with no key word at all.
@@ -113,6 +113,17 @@ final class RedactionGapTests: XCTestCase {
         XCTAssertEqual(out, "Your key [OPENAI_KEY]")
         // Still spared with no key word: a CSS class of the same shape.
         XCTAssertEqual(Redactor().redact(".sk-cube-grid-container-wrapper { }").text, ".sk-cube-grid-container-wrapper { }")
+        // The placeholder guard lists builtin names by hand. Every builtin that runs before the
+        // key-context rule can leave its `[NAME]` right before a CSS class; none of them may read
+        // as a key word, so a builtin added above the rule without joining the list fails here.
+        let rules = Rule.builtin
+        let keyContext = try XCTUnwrap(rules.firstIndex { $0.pattern.hasPrefix(#"\b(?=sk-)"#) })
+        for name in Set(rules[..<keyContext].map(\.name)) {
+            let line = "[\(name)] sk-cube-grid-container-wrapper"
+            XCTAssertEqual(Redactor().redact(line).text, line, "[\(name)] should not read as a key word")
+        }
+        // A bracketed label no builtin writes is the user's text and still counts as a key word.
+        XCTAssertEqual(Redactor().redact("[API_KEY] \(key)").text, "[API_KEY] [OPENAI_KEY]")
     }
 }
 #endif

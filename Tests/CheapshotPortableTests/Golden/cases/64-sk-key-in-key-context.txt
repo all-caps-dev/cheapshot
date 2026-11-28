@@ -17,3 +17,7 @@ password=hunter2x9 sk-cube-grid-container-wrapper
 @keyframes sk-cube-grid-scale-delay-anim { }
 monkey sk-cube-grid-container-wrapper
 --key-color: sk-chase-dot-before-color
+[API_KEY] sk-my-super-secret⟦⟧-litellm-key
+LITELLM [MASTER_KEY] sk-team-alpha-prod⟦⟧-proxy-one
+[TOKEN]	sk-dev-local-proxy⟦⟧-only-key
+Your key sk-Ab3dEf6Hh9⟦⟧Kk2Ll5Oo8Pp1Qq sk-cube-grid-container-wrapper

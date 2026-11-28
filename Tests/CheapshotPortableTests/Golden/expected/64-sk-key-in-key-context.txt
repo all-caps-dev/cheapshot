@@ -17,3 +17,7 @@ password=[SECRET] sk-cube-grid-container-wrapper
 @keyframes sk-cube-grid-scale-delay-anim { }
 monkey sk-cube-grid-container-wrapper
 --key-color: sk-chase-dot-before-color
+[API_KEY] [OPENAI_KEY]
+LITELLM [MASTER_KEY] [OPENAI_KEY]
+[TOKEN]	[OPENAI_KEY]
+Your key [OPENAI_KEY] sk-cube-grid-container-wrapper
