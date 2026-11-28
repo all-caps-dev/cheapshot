@@ -1,4 +1,5 @@
 import Foundation
+import CheapshotCore
 
 /// Everything the runner touches outside its arguments, so tests can capture output and
 /// redirect the home directory and the environment.
@@ -15,12 +16,17 @@ public struct CLIIO {
     /// still fake a terminal (script(1)) or write the allow file. Defaults to false so a test or
     /// embedder has to opt in on purpose.
     public var isInteractive: Bool
+    /// The clipboard `--clipboard` reads (NOV-155). nil means this platform has none the CLI can
+    /// use, and the mode says so. Defaults to nil so a test or embedder never touches the real
+    /// pasteboard by accident; only `standard` wires up the general pasteboard.
+    public var clipboard: ClipboardSource?
 
     public init(out: @escaping (String) -> Void, err: @escaping (String) -> Void,
                 readStdin: @escaping () -> String, environment: [String: String], home: String,
-                isInteractive: Bool = false) {
+                isInteractive: Bool = false, clipboard: ClipboardSource? = nil) {
         self.out = out; self.err = err; self.readStdin = readStdin; self.environment = environment; self.home = home
         self.isInteractive = isInteractive
+        self.clipboard = clipboard
     }
 
     public static var standard: CLIIO {
@@ -29,7 +35,18 @@ public struct CLIIO {
               readStdin: { String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? "" },
               environment: ProcessInfo.processInfo.environment,
               home: NSHomeDirectory(),
-              isInteractive: foregroundTerminal())
+              isInteractive: foregroundTerminal(),
+              clipboard: standardClipboard())
+    }
+
+    /// The general pasteboard on macOS, nil elsewhere. Building the wrapper reads nothing:
+    /// the pasteboard is only touched when a `--clipboard` run asks for it.
+    static func standardClipboard() -> ClipboardSource? {
+        #if os(macOS)
+        return PasteboardClipboard(.general)
+        #else
+        return nil
+        #endif
     }
 
     /// See ``isInteractive``.
