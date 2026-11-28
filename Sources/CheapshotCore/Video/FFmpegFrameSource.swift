@@ -1,3 +1,6 @@
+// macOS only: it starts ffmpeg as a child process (Foundation's Process), which iOS does not
+// allow and does not have. The rest of Core builds on iOS without it.
+#if os(macOS)
 import Foundation
 import CoreGraphics
 import ImageIO
@@ -165,3 +168,4 @@ public struct FFmpegFrameSource: FrameSource {
         return CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCache: false] as CFDictionary)
     }
 }
+#endif

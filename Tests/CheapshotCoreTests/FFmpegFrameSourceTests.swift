@@ -1,3 +1,5 @@
+// macOS only, like FFmpegFrameSource itself (it starts a child process).
+#if os(macOS)
 import XCTest
 @testable import CheapshotCore
 
@@ -127,3 +129,4 @@ final class FFmpegFrameSourceTests: XCTestCase {
         XCTAssertEqual(try leftoverDirs(), [])
     }
 }
+#endif

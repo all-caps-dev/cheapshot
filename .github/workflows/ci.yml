@@ -28,6 +28,19 @@ jobs:
       - name: Homebrew formula check
         run: scripts/check-formula.sh
 
+  # CheapshotCore on iOS: build for device and Simulator, run the Core tests on a Simulator.
+  ios-core:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: iOS check script self-test (fake xcodebuild, proves 0 tests fails)
+        run: sh scripts/test-check-ios-core.sh
+      - name: Core on iOS
+        run: scripts/check-ios-core.sh
+
   checks:
     runs-on: ubuntu-latest
     steps:
