@@ -13,20 +13,40 @@ final class FakeClipboard: ClipboardSource {
     /// Finder-copied items whose file can no longer be resolved (deleted, or volume unmounted):
     /// they count as file items and hide the image, as on the real pasteboard, but yield no URL.
     var unresolvableFileItems = 0
-    private(set) var changeCount = 1
+    private var count = 1
+    /// Reading it is a clipboard access too, so it can fire `copyAfterTheBracket` (below).
+    var changeCount: Int {
+        if copyAfterTheBracket {
+            if bracketClosed { copyAfterTheBracket = false; bracketClosed = false; bump() }
+            else if itemCountRead { bracketClosed = true }
+        }
+        return count
+    }
     private(set) var reads = 0
     private(set) var writes: [ClipboardPayload] = []
-    /// Called on every image read, so a test can copy something mid-run (the change-count race).
+    /// Called on every read, so a test can copy something mid-run (the change-count race).
     var onRead: (() -> Void)?
+    /// When true, `replace` clears but reports a failed write, as a broken pasteboard would.
+    var failWrites = false
+    /// One-shot: the user copies something after the run has finished reading the clipboard and
+    /// before it writes (C3, during OCR or masking). The run reads `fileItemCount` and then
+    /// `changeCount` to close #34's read bracket; the count moves on the next `changeCount` read
+    /// after that, so the bracket passes and only the write guard (`startCount`) can catch it.
+    /// `onRead` cannot model this for a copied file: it fires inside the bracket.
+    var copyAfterTheBracket = false
+    private var itemCountRead = false, bracketClosed = false
 
     init(image: Data? = nil, fileURLs: [URL] = [], text: String? = nil) {
         self.image = image; self.fileURLs = fileURLs; self.text = text
     }
 
     /// The user copied something: content changes and the count moves.
-    func userCopied(text: String) { image = nil; fileURLs = []; unresolvableFileItems = 0; self.text = text; changeCount += 1 }
+    func userCopied(text: String) { image = nil; fileURLs = []; unresolvableFileItems = 0; self.text = text; count += 1 }
     /// The user copied one file in Finder: its URL replaces everything and the count moves.
-    func userCopiedFile(_ url: URL) { image = nil; text = nil; unresolvableFileItems = 0; fileURLs = [url]; changeCount += 1 }
+    func userCopiedFile(_ url: URL) { image = nil; text = nil; unresolvableFileItems = 0; fileURLs = [url]; count += 1 }
+
+    /// Something else wrote the clipboard (content left as is, so a read still sees it).
+    func bump() { count += 1 }
 
     /// Counts only reads that hand out image bytes, so a test can prove the image was never read.
     private(set) var imageReads = 0
@@ -38,20 +58,28 @@ final class FakeClipboard: ClipboardSource {
         imageReads += 1
         return image
     }
-    /// Called on every file-URL read, so a test can copy something between the reads.
+    /// Called on every file-URL read after the URLs are taken, so a test can copy something
+    /// between the reads (onRead, by contrast, runs before the read and can change its result).
     var onFileRead: (() -> Void)?
-    func readFileURLs() -> [URL] { reads += 1; let urls = fileURLs; onFileRead?(); return urls }
-    var fileItemCount: Int { fileURLs.count + unresolvableFileItems }
+    /// onRead fires here only when a file is on the clipboard, so an image-only clipboard's
+    /// onRead lands on the image read (the OCR window), not on the empty URL probe before it.
+    func readFileURLs() -> [URL] {
+        reads += 1
+        if !fileURLs.isEmpty { onRead?() }
+        let urls = fileURLs; onFileRead?(); return urls
+    }
+    var fileItemCount: Int { itemCountRead = true; return fileURLs.count + unresolvableFileItems }
 
     @discardableResult
     func replace(with payload: ClipboardPayload) -> Bool {
         writes.append(payload)
-        image = nil; fileURLs = []; unresolvableFileItems = 0; text = nil
+        image = nil; fileURLs = []; text = nil; unresolvableFileItems = 0
+        count += 1
+        if failWrites { return false }
         switch payload {
         case .text(let s): text = s
         case .png(let d): image = d
         }
-        changeCount += 1
         return true
     }
 }

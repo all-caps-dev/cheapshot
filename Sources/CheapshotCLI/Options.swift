@@ -31,6 +31,8 @@ public struct Options: Equatable {
     /// Explicit frame times for a --video run. nil means scene detection picks the frames.
     public var frameTimes: [TimeInterval]? = nil
     public var rulesPath: String? = nil
+    /// With --clipboard: put the result back on the clipboard, same type as the input (Q8 A).
+    public var clipboardOut = false
     public var pages: ClosedRange<Int>? = nil
 
     public init(command: Command) { self.command = command }
@@ -238,6 +240,7 @@ public struct Options: Equatable {
             case "--text":      text = try value(a)
             case "--video":     video = try value(a)
             case "--clipboard": clipboard = true
+            case "--clipboard-out": o.clipboardOut = true
             case "--frames-at":
                 let raw = try value(a)
                 let times = try raw.split(separator: ",").map { try parseTimestamp(String($0).trimmingCharacters(in: .whitespaces)) }
@@ -288,10 +291,16 @@ public struct Options: Equatable {
             if o.pages != nil { throw UsageError(message: "--pages cannot be combined with --clipboard") }
             if migrate || days != nil || byMode { throw UsageError(message: "--migrate, --days and --by-mode need --ledger") }
             if o.frameTimes != nil { throw UsageError(message: "--frames-at needs --video") }
+            // A masked copy goes back where anything can paste it, and nobody approves it, so the
+            // confidence floor can be raised but never lowered (plan 4.4, as for `mask`).
+            if o.clipboardOut, o.minConfidence < Options(command: .help).minConfidence {
+                throw UsageError(message: "--clipboard-out: --min-conf can only raise the floor (at least \(Options(command: .help).minConfidence)): \(o.minConfidence)")
+            }
             o.command = .clipboard
             return o
         }
 
+        if o.clipboardOut { throw UsageError(message: "--clipboard-out needs --clipboard") }
         if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days, byMode: byMode); return o }
         if migrate { throw UsageError(message: "--migrate needs --ledger") }
         if days != nil { throw UsageError(message: "--days needs --ledger") }

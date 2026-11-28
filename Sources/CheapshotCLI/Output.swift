@@ -22,6 +22,10 @@ public enum Output {
           cheapshot --clipboard            read the one file copied in Finder, else the image on the clipboard,
                                            always redacted. Never reads clipboard text: use
                                            pbpaste | cheapshot --text - for that. macOS only
+          cheapshot --clipboard --clipboard-out  then put the result back as the clipboard's only
+                                           item: a masked PNG for an image, redacted text for a
+                                           copied PDF. Untouched on any failure or if the clipboard
+                                           changed during the read
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes;
                                            needs a foreground terminal; a speed bump, not a sandbox).
@@ -62,7 +66,10 @@ public enum Output {
         EXIT CODES
           0 ok   1 an input failed   2 usage error
           3 --clipboard only: the read was retried and still came back blank (a cold-start OCR
-            failure is likely; try again)
+            failure is likely; try again), or --clipboard-out could not prove a safe masked copy
+            (a blank screenshot, where a retry may work, or the mask kept finding new text)
+          With --clipboard-out, 1 and 3 leave the clipboard untouched (a failed write says so if
+          not), and once the clipboard is written the exit is 0
 
         """
     }
