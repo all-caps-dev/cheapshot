@@ -60,54 +60,40 @@ public enum CLI {
 
     // MARK: - Setup
 
-    /// Which rules file applies, first match wins: --rules, then $CHEAPSHOT_RULES, then rules.json
-    /// next to the ledger when it exists. Before #290 item 4 only --rules worked, so the Read hook
-    /// and the MCP server (which never pass --rules) ran built-in rules only. `named` is true for
-    /// the first two: a file someone named on purpose that is missing or bad is an error (exit 2).
-    static func rulesURL(_ opts: Options, _ io: CLIIO) -> (url: URL, named: Bool)? {
-        if let p = opts.rulesPath { return (URL(fileURLWithPath: p), true) }
-        if let p = io.environment["CHEAPSHOT_RULES"], !p.isEmpty { return (URL(fileURLWithPath: p), true) }
-        let fallback = Ledger.resolveURL(environment: io.environment, home: io.home)
-            .deletingLastPathComponent().appendingPathComponent("rules.json")
-        return FileManager.default.fileExists(atPath: fallback.path) ? (fallback, false) : nil
-    }
-
+    /// The redactor for a run, or nil with --raw. Which rules file applies and what happens when
+    /// it is broken live in CheapshotCore (`Pipeline.rulesSource`, `Pipeline.redactor`), so the
+    /// app picks rules the same way. Before #290 item 4 only --rules worked, so the Read hook and
+    /// the MCP server (which never pass --rules) ran built-in rules only. A file named with
+    /// --rules or $CHEAPSHOT_RULES that is missing or bad throws here, and the run exits 2.
     static func makeRedactor(_ opts: Options, _ io: CLIIO) throws -> Redactor? {
         guard opts.redact else { return nil }
-        guard let rules = rulesURL(opts, io) else { return Redactor() }
-        do {
-            return Redactor(customRules: try RuleFile.load(rules.url))
-        } catch where !rules.named {
-            // The default file broke (a typo, or the app mid-write). Keep the built-in redaction
-            // rather than failing every run, which would send the Read hook's pixels through.
-            io.err("cheapshot: warning: ignoring \(rules.url.path): \(error); using built-in rules only\n")
-            return Redactor()
-        }
-    }
-
-    static func apply(_ redactor: Redactor?, _ text: String) -> (text: String, report: RedactionReport) {
-        redactor?.redact(text) ?? (text, RedactionReport())
+        let rules = Pipeline.rulesSource(explicitPath: opts.rulesPath, environment: io.environment, home: io.home)
+        return try Pipeline.redactor(rules: rules) { io.err("cheapshot: warning: \($0)\n") }
     }
 
     /// One JSON object per recognized line: 1-based number, redacted text, integer box with a
     /// top-left origin, and Vision's confidence. The box is in pixels for an image or a rendered
-    /// page, and in PDF points for the text lane.
-    ///
-    /// The lines are redacted joined, exactly as `text` is, and split back apart, so the array is
-    /// the same redaction the payload carries. Redacting each line on its own was weaker: a rule
-    /// whose pattern crosses a newline redacted the document but not the array, so `text` was
-    /// clean while `lines[]` still held the secret, and the two disagreed on how many lines there
-    /// were. When a rule does eat a newline the split no longer lines up with the input, and then
-    /// per-line redaction is the honest fallback: a custom rule may contain `\s` deliberately, and
-    /// keeping `n` and the boxes attached to the right line matters more than matching `text`.
-    static func lineJSON(_ lines: [RenderedLine], redactor: Redactor?) -> [[String: Any]] {
-        let joined = apply(redactor, lines.map(\.text).joined(separator: "\n")).text.components(separatedBy: "\n")
-        let texts = joined.count == lines.count ? joined : lines.map { apply(redactor, $0.text).text }
-        return zip(lines, texts).map { l, text in
-            ["n": l.n, "text": text,
+    /// page, and in PDF points for the text lane. `lines` must already be redacted
+    /// (`Pipeline.redactLines`, which the Pipeline read functions call). The label is required so
+    /// a caller holding raw OCR lines cannot pick this overload by accident (PR #22 review).
+    static func lineJSON(alreadyRedacted lines: [RenderedLine]) -> [[String: Any]] {
+        lines.map { l in
+            ["n": l.n, "text": l.text,
              "bbox": [Int(l.bbox.minX.rounded()), Int(l.bbox.minY.rounded()), Int(l.bbox.maxX.rounded()), Int(l.bbox.maxY.rounded())],
              "confidence": Double(l.confidence)]
         }
+    }
+
+    /// Redacts `lines` the way the document text is redacted, then formats them as above.
+    static func lineJSON(_ lines: [RenderedLine], redactor: Redactor?) -> [[String: Any]] {
+        lineJSON(alreadyRedacted: Pipeline.redactLines(lines, with: redaction(redactor)))
+    }
+
+    /// The CLI's redactor is nil for --raw and nothing else (`makeRedactor`). This is the one
+    /// place that turns that nil into the Pipeline's explicit `.raw`.
+    static func redaction(_ redactor: Redactor?) -> Pipeline.Redaction {
+        guard let redactor = redactor else { return .raw }
+        return .redact(redactor)
     }
 
     /// Writes the --json envelope, or the serialization failure to stderr. False means the run
@@ -121,12 +107,9 @@ public enum CLI {
         ["version": cheapshotVersion, "results": results, "image_tokens": imageTokens, "text_tokens": textTokens]
     }
 
-    /// Tokens not spent by reading text instead of the image, floored at zero, and that as a
-    /// truncated percent of the image cost. Zero image tokens is zero saved, not a division.
+    /// See `Pipeline.savings`.
     static func savings(imageTokens: Int, textTokens: Int) -> (saved: Int, pct: Int) {
-        let saved = max(0, imageTokens - textTokens)
-        let pct = imageTokens > 0 ? Int(Double(saved) / Double(imageTokens) * 100) : 0
-        return (saved, pct)
+        Pipeline.savings(imageTokens: imageTokens, textTokens: textTokens)
     }
 
     static func statsLine(inputs: Int, noun: String, imageTokens: Int, textTokens: Int) -> String {
@@ -142,8 +125,8 @@ public enum CLI {
 
     static func record(_ entry: LedgerEntry, _ opts: Options, _ io: CLIIO) {
         guard !opts.noLedger else { return }
-        var entry = entry
-        if !opts.redact { entry.raw = true }   // #290 item 4: a raw run is visible in the ledger
+        // #290 item 4: a raw run is visible in the ledger.
+        let entry = Pipeline.ledgerEntry(entry, redacted: opts.redact)
         do { try ledger(io).append(entry) } catch { io.err("cheapshot: ledger not written: \(error)\n") }
     }
 
@@ -456,9 +439,8 @@ public enum CLI {
             }
             raw = s
         }
-        let input = raw.hasSuffix("\n") ? String(raw.dropLast()) : raw
-        let (text, report) = apply(redactor, input)
-        let tt = Tokens.text(text)
+        let read = Pipeline.readText(raw, redaction: redaction(redactor))
+        let (text, report, tt) = (read.text, read.report, read.textTokens)
         if opts.json {
             guard emit(payload([["file": path, "text": text, "redactions": report.counts,
                                  "image_tokens": 0, "text_tokens": tt]], imageTokens: 0, textTokens: tt), io) else { return 1 }
@@ -471,16 +453,6 @@ public enum CLI {
 
     // MARK: - images
 
-    /// One kind of input's running totals. PDFs and images are counted apart because they mean
-    /// different things in the ledger: an image line is a measured saving, a PDF line is an
-    /// estimate of what reading the pages as images would have cost.
-    struct RunTotals {
-        var inputs = 0, imageTokens = 0, textTokens = 0, redactions = 0
-        mutating func add(imageTokens it: Int, textTokens tt: Int, redactions r: Int) {
-            inputs += 1; imageTokens += it; textTokens += tt; redactions += r
-        }
-    }
-
     static func runImages(_ opts: Options, paths: [String], redactor: Redactor?, io: CLIIO) -> Int32 {
         // Only the PDF branch reads --pages; on any other input it was accepted and ignored.
         if opts.pages != nil, let f = paths.first(where: { ($0 as NSString).pathExtension.lowercased() != "pdf" }) {
@@ -488,7 +460,8 @@ public enum CLI {
             return 2
         }
         var results: [[String: Any]] = []
-        var pdfs = RunTotals(), images = RunTotals()
+        // PDFs and images are counted apart: see Pipeline.Totals.
+        var pdfs = Pipeline.Totals(), images = Pipeline.Totals()
         var failed = 0
 
         for f in paths {
@@ -499,62 +472,58 @@ public enum CLI {
                 continue
             }
             if (f as NSString).pathExtension.lowercased() == "pdf" {
-                let doc: PDFDocumentResult
-                do { doc = try PDFSource.pages(of: URL(fileURLWithPath: f), range: opts.pages, minConfidence: opts.minConfidence,
-                                                 forceOCR: opts.forceOCR) }
+                let read: Pipeline.PDFRead
+                do { read = try Pipeline.readPDF(url: URL(fileURLWithPath: f), pages: opts.pages, minConfidence: opts.minConfidence,
+                                                 forceOCR: opts.forceOCR, redaction: redaction(redactor)) }
                 catch {
                     failed += 1
                     results.append(["file": f, "error": "\(error)"])
                     io.err("cheapshot: \(error)\n")
                     continue
                 }
-                let (text, report) = apply(redactor, PDFSource.text(of: doc))
-                let it = doc.pages.reduce(0) { $0 + Tokens.image(width: $1.width, height: $1.height) }
-                let tt = Tokens.text(text)
-                pdfs.add(imageTokens: it, textTokens: tt, redactions: report.total)
-                results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
+                let doc = read.document   // page lines already redacted
+                pdfs.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
+                results.append(["file": f, "text": read.text, "redactions": read.report.counts,
+                                "image_tokens": read.imageTokens, "text_tokens": read.textTokens,
                                 "source": ["path": doc.path, "sha256": doc.sha256, "pages": doc.pageCount],
                                 "pages": doc.pages.map { ["n": $0.n, "lane": $0.lane.rawValue,
                                                           "width": $0.width, "height": $0.height,
-                                                          "lines": lineJSON($0.lines, redactor: redactor)] as [String: Any] }])
+                                                          "lines": lineJSON(alreadyRedacted: $0.lines)] as [String: Any] }])
                 if !opts.json {
                     if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
-                    io.out(text + "\n")
+                    io.out(read.text + "\n")
                 }
                 continue
             }
-            guard let image = ImageLoader.load(path: f) else {
+            let read: Pipeline.ImageRead
+            do { read = try Pipeline.readImage(path: f, redaction: redaction(redactor), minConfidence: opts.minConfidence) }
+            catch Pipeline.ReadError.unreadableImage {
                 failed += 1
-                results.append(["file": f, "error": "cannot read image"])
+                results.append(["file": f, "error": "\(Pipeline.ReadError.unreadableImage)"])
                 io.err("cheapshot: cannot read \(f)\n")
                 continue
-            }
-            let checked: OCR.CheckedLayout
-            do { checked = try OCR.recognizeLayoutChecked(image: image, minConfidence: opts.minConfidence) }
-            catch {
+            } catch {
+                // OCR failed. Its message is printed as is, after the file name.
                 failed += 1
                 results.append(["file": f, "error": "\(error)"])
                 io.err("cheapshot: \(f): \(error)\n")
                 continue
             }
-            let rendered = checked.lines
-            if checked.retried && checked.status == .empty {
+            if read.retried && read.status == .empty {
                 io.err("cheapshot: \(f): no text found after a retry, though it looks like a screenshot\n")
             }
-            let (text, report) = apply(redactor, Layout.text(rendered))
-            let size = ImageLoader.pixelSize(path: f) ?? (image.width, image.height)
-            let it = Tokens.image(width: size.width, height: size.height), tt = Tokens.text(text)
-            images.add(imageTokens: it, textTokens: tt, redactions: report.total)
-            results.append(["file": f, "text": text, "redactions": report.counts, "image_tokens": it, "text_tokens": tt,
-                            "lines": lineJSON(rendered, redactor: redactor),
+            images.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
+            results.append(["file": f, "text": read.text, "redactions": read.report.counts,
+                            "image_tokens": read.imageTokens, "text_tokens": read.textTokens,
+                            "lines": lineJSON(alreadyRedacted: read.lines),   // lines already redacted
                             // "empty" with "retried": true is a screenshot-like image that still read blank
                             // (a likely cold-start OCR failure); "empty" without a retry is a photo or a
                             // small image. Callers must not treat the first like the second.
-                            "ocr_status": checked.status.rawValue, "retried": checked.retried,
-                            "screenshot_like": checked.screenshotLike])
+                            "ocr_status": read.status.rawValue, "retried": read.retried,
+                            "screenshot_like": read.screenshotLike])
             if !opts.json {
                 if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
-                io.out(text + "\n")
+                io.out(read.text + "\n")
             }
         }
 
@@ -563,10 +532,7 @@ public enum CLI {
         if opts.json, !emit(payload(results, imageTokens: totalImage, textTokens: totalText), io) { return 1 }
         let ok = paths.count - failed
         // One line per kind present, so a PDF run never reports itself as measured image savings.
-        for (mode, t) in [("pdf", pdfs), ("image", images)] where t.inputs > 0 {
-            record(LedgerEntry(mode: mode, inputs: t.inputs, imageTokens: t.imageTokens,
-                               textTokens: t.textTokens, redactions: t.redactions), opts, io)
-        }
+        for entry in Pipeline.ledgerEntries(pdfs: pdfs, images: images, redacted: opts.redact) { record(entry, opts, io) }
         if opts.stats {
             // From the inputs asked for, not the ones that succeeded, so a PDF run that fails
             // entirely still says pdf(s).
