@@ -707,7 +707,7 @@ public enum CLI {
                 catch {
                     // Masker's own refusal text points at `allow`, which has no clipboard twin, so
                     // it is not repeated here. OCR errors inside the mask land here too: unproven.
-                    return fail("OCR could not confirm a safe masked copy (likely a cold start; try again); clipboard left untouched", code: 3, entry: entry)
+                    return fail("could not confirm a safe masked copy (OCR read blank, perhaps a cold start, or risky text kept showing after masking); clipboard left untouched", code: 3, entry: entry)
                 }
                 do { payload = .png(try Masker.pngData(masked.image)) }
                 catch { return fail("could not encode the masked copy; clipboard left untouched", entry: entry) }
