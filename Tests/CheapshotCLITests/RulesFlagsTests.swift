@@ -265,6 +265,11 @@ final class RulesFlagsTests: XCTestCase {
             XCTAssertThrowsError(try Options.parse(["--list-rules"] + other), "\(other)")
             XCTAssertThrowsError(try Options.parse(other + ["--list-rules"]), "\(other)")
         }
+        // --chapters sets the same frame times as --frames-at; the error names both.
+        let meta = try file("meta.json", #"{"chapters": [{"t": 0, "title": "a"}]}"#)
+        XCTAssertThrowsError(try Options.parse(["--list-rules", "--chapters", meta])) { e in
+            XCTAssertTrue("\(e)".contains("--chapters"), "\(e)")
+        }
         XCTAssertThrowsError(try Options.parse(["--preset"]))
         // mask: --all-rules only strengthens, so it is accepted; --preset only weakens, so it is not.
         XCTAssertTrue(try Options.parse(["mask", "--all-rules", "a.png"]).allRules)

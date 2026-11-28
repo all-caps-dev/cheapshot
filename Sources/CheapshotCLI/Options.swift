@@ -291,7 +291,7 @@ public struct Options: Equatable {
             // Report a clash instead of dropping the other flag (the rule for modes above).
             let other: [(Bool, String)] = [(ledger, "--ledger"), (text != nil, "--text"), (video != nil, "--video"),
                                            (newest != nil, "--newest"), (cleanshot != nil, "--cleanshot"),
-                                           (o.frameTimes != nil, "--frames-at"), (migrate, "--migrate"),
+                                           (o.frameTimes != nil, "--frames-at or --chapters"), (migrate, "--migrate"),
                                            (days != nil, "--days"), (byMode, "--by-mode"), (!o.redact, "--raw")]
             if let clash = other.first(where: { $0.0 }) {
                 throw UsageError(message: "--list-rules cannot be combined with \(clash.1)")
