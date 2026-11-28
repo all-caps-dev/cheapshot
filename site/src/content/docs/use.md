@@ -137,8 +137,10 @@ the redaction hid.
 
 The converse is not true. `redactions: {}` does not make the pixels safe.
 Lines under `--min-conf` are dropped before redaction, so they are never
-checked, and neither is text that OCR did not see. To share the pixels, run
-`cheapshot mask` and share the masked copy.
+checked, and neither is text that OCR did not see. `cheapshot mask` paints lines
+under the floor as well as redacted ones, but it finds them with the same OCR,
+so it cannot cover text OCR missed, and on an image that read blank it paints
+nothing. Have a person look at the masked copy before it is shared.
 
 ## Recognition
 
