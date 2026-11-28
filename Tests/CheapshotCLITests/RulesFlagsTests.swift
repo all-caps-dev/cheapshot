@@ -171,10 +171,13 @@ final class RulesFlagsTests: XCTestCase {
     }
 
     func testNamedFileProblemsExit2() async throws {
-        for body in [#"{"preset": "nope"}"#, #"{"disabled": ["NOPE"]}"#, #"{"version": 3}"#] {
+        for body in [#"{"preset": "nope"}"#, #"{"disabled": ["NOPE"]}"#, #"{"version": 3}"#,
+                     #"{"presets": {"everything": {}}}"#, #"{"disabled": 1}"#] {
             let rules = try file("r.json", body)
             let r = await run(["--rules", rules, "--text", "-"], stdin: "x")
             XCTAssertEqual(r.code, 2, body)
+            // The Read hook recognises a broken rules file by this prefix (cheapshot-read.sh, failed()).
+            XCTAssertTrue(r.err.hasPrefix("cheapshot: rules file"), "\(body): \(r.err)")
         }
     }
 
@@ -257,7 +260,11 @@ final class RulesFlagsTests: XCTestCase {
         XCTAssertEqual(try Options.parse(["--list-rules"]).command, .listRules(json: false))
         XCTAssertEqual(try Options.parse(["--list-rules", "--json"]).command, .listRules(json: true))
         XCTAssertThrowsError(try Options.parse(["--list-rules", "a.png"]))
-        XCTAssertThrowsError(try Options.parse(["--list-rules", "--raw"]))
+        for other in [["--raw"], ["--ledger"], ["--text", "n.txt"], ["--video", "v.mp4"], ["--newest"],
+                      ["--cleanshot"], ["--frames-at", "1,2"], ["--days", "3"], ["--by-mode"], ["--migrate"]] {
+            XCTAssertThrowsError(try Options.parse(["--list-rules"] + other), "\(other)")
+            XCTAssertThrowsError(try Options.parse(other + ["--list-rules"]), "\(other)")
+        }
         XCTAssertThrowsError(try Options.parse(["--preset"]))
         // mask: --all-rules only strengthens, so it is accepted; --preset only weakens, so it is not.
         XCTAssertTrue(try Options.parse(["mask", "--all-rules", "a.png"]).allRules)

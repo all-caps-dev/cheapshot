@@ -94,10 +94,12 @@ public enum RuleFile {
             throw LoadError(message: "rules file version \(version) is newer than this cheapshot understands (\(currentVersion)); upgrade cheapshot")
         }
 
-        /// Reports a problem that only throws for a named file.
-        func soft(_ message: String) throws {
-            if strict { throw LoadError(message: message) }
-            warn(message)
+        /// Reports a problem that only throws for a named file. A throw starts "rules file:", so
+        /// the Read hook's broken-rules check (plugin/hooks/cheapshot-read.sh) recognises it; a
+        /// warning also says what the run does instead.
+        func soft(_ problem: String, instead: String) throws {
+            if strict { throw LoadError(message: "rules file: \(problem)") }
+            warn("\(problem); \(instead)")
         }
 
         /// Resolves a `disabled` list to built-in names. Unknown items throw or are dropped.
@@ -107,7 +109,7 @@ public enum RuleFile {
                 if let names = RuleCatalog.resolve(item) {
                     out.formUnion(names)
                 } else {
-                    try soft("\(context): \"\(item)\" is not a built-in rule name or group; ignoring it")
+                    try soft("\(context): \"\(item)\" is not a built-in rule name or group", instead: "ignoring it")
                 }
             }
             return out
@@ -117,11 +119,11 @@ public enum RuleFile {
         for (rawName, p) in (obj.presets ?? [:]).sorted(by: { $0.key < $1.key }) {
             let name = rawName.lowercased()
             if RuleCatalog.preset(named: name) != nil {
-                try soft("preset \"\(rawName)\" has the name of a built-in preset; ignoring the file's version")
+                try soft("preset \"\(rawName)\" has the name of a built-in preset", instead: "ignoring the file's version")
                 continue
             }
             if userPresets[name] != nil {
-                try soft("preset \"\(rawName)\" is defined twice; ignoring the second")
+                try soft("preset \"\(rawName)\" is defined twice", instead: "ignoring the second")
                 continue
             }
             userPresets[name] = try resolveList(p.disabled ?? [], where: "preset \(rawName)")
@@ -133,7 +135,7 @@ public enum RuleFile {
             if RuleCatalog.preset(named: lower) != nil || userPresets[lower] != nil {
                 preset = lower
             } else {
-                try soft("unknown preset \"\(p)\"; using \(RuleCatalog.defaultPreset)")
+                try soft("unknown preset \"\(p)\"", instead: "using \(RuleCatalog.defaultPreset)")
                 preset = nil
             }
         }

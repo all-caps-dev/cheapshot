@@ -287,11 +287,18 @@ public struct Options: Equatable {
             throw UsageError(message: "files cannot be combined with \(m): \(positional.joined(separator: " "))")
         }
 
-        if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days, byMode: byMode); return o }
         if listRules {
-            guard o.redact else { throw UsageError(message: "--list-rules cannot be combined with --raw") }
+            // Report a clash instead of dropping the other flag (the rule for modes above).
+            let other: [(Bool, String)] = [(ledger, "--ledger"), (text != nil, "--text"), (video != nil, "--video"),
+                                           (newest != nil, "--newest"), (cleanshot != nil, "--cleanshot"),
+                                           (o.frameTimes != nil, "--frames-at"), (migrate, "--migrate"),
+                                           (days != nil, "--days"), (byMode, "--by-mode"), (!o.redact, "--raw")]
+            if let clash = other.first(where: { $0.0 }) {
+                throw UsageError(message: "--list-rules cannot be combined with \(clash.1)")
+            }
             o.command = .listRules(json: o.json); return o
         }
+        if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days, byMode: byMode); return o }
         if migrate { throw UsageError(message: "--migrate needs --ledger") }
         if days != nil { throw UsageError(message: "--days needs --ledger") }
         if byMode { throw UsageError(message: "--by-mode needs --ledger") }
