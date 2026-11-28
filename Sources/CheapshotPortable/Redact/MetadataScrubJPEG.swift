@@ -9,7 +9,8 @@
 // Accepted grammar: SOI, then segments, then exactly one SOF0 (baseline) or SOF2 (progressive),
 // the only two frame types ImageIO writes, then one or more SOS each followed by entropy-coded
 // data, then EOI, then end of data. Tables (DQT, DHT, DRI) may also sit between scans, as in
-// progressive files. Kept tables are parsed table by table, so their payload holds tables only.
+// progressive files. Kept tables are parsed table by table, so their payload holds tables only,
+// each table id at most once per segment (redefining an id in a later segment stays legal).
 // A JFIF APP0 is kept only straight after SOI, and an ICC APP2 only before the frame header.
 import Foundation
 
@@ -125,6 +126,10 @@ public enum MetadataScrubJPEG {
             let marker = b[m]
             let at = m - 1   // the FF right before the marker code; reported offsets point here
 
+            // Fill bytes between segments are a dropped piece: strip does not copy them, and
+            // check reports them, so a clean check means strip would change nothing.
+            if at > i { pieces.append(Piece(range: i..<at, marker: 0xFF, dropped: .structure)) }
+
             // Markers with no length field.
             switch marker {
             case 0xD9:   // EOI: the walk ends here, and so must the data.
@@ -232,13 +237,17 @@ public enum MetadataScrubJPEG {
 
     /// DQT payload: one or more tables, each a byte Pq<<4 | Tq (Pq 0 or 1, Tq 0 to 3) then 64
     /// one-byte values (Pq 0) or 64 two-byte values (Pq 1). The tables must use up the payload
-    /// exactly, so nothing else can ride along inside the segment.
+    /// exactly, and each Tq may appear once, so one segment holds at most 4 tables. The limit is
+    /// per segment: a later DQT may redefine a table. The table values themselves are free bytes,
+    /// so this bounds what a segment can carry; it does not make it zero.
     static func isValidDQT(_ p: ArraySlice<UInt8>) -> Bool {
         guard !p.isEmpty else { return false }
+        var seen: UInt8 = 0   // bit n set once table id n has appeared in this segment
         var k = p.startIndex
         while k < p.endIndex {
             let pq = p[k] >> 4, tq = p[k] & 0x0F
-            guard pq <= 1, tq <= 3 else { return false }
+            guard pq <= 1, tq <= 3, seen & (1 << tq) == 0 else { return false }
+            seen |= 1 << tq
             let size = pq == 0 ? 64 : 128
             k += 1
             guard p.endIndex - k >= size else { return false }   // table cut short
@@ -249,13 +258,19 @@ public enum MetadataScrubJPEG {
 
     /// DHT payload: one or more tables, each a byte Tc<<4 | Th (Tc 0 or 1, Th 0 to 3), 16 code
     /// counts, then exactly as many symbols as the counts add up to (at most 256, one per byte
-    /// value). The tables must use up the payload exactly.
+    /// value). The tables must use up the payload exactly, and each (Tc, Th) pair may appear once,
+    /// so one segment holds at most 8 tables. The limit is per segment: progressive files
+    /// redefine tables between scans in later DHT segments, which stays legal.
     static func isValidDHT(_ p: ArraySlice<UInt8>) -> Bool {
         guard !p.isEmpty else { return false }
+        var seen: UInt8 = 0   // bit Tc * 4 + Th set once that pair has appeared in this segment
         var k = p.startIndex
         while k < p.endIndex {
             let tc = p[k] >> 4, th = p[k] & 0x0F
             guard tc <= 1, th <= 3 else { return false }
+            let bit: UInt8 = 1 << (tc * 4 + th)
+            guard seen & bit == 0 else { return false }
+            seen |= bit
             k += 1
             guard p.endIndex - k >= 16 else { return false }     // counts cut short
             let symbols = p[k..<(k + 16)].reduce(0) { $0 + Int($1) }

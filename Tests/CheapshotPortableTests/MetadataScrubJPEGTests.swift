@@ -54,6 +54,11 @@ private enum J {
     static let dqt16 = seg(0xDB, [0x12] + [UInt8](repeating: 0, count: 128))
     static let dhtTwo = seg(0xC4, [0x01, 0, 2] + [UInt8](repeating: 0, count: 14) + [0x03, 0x04]
                                  + [0x11, 1] + [UInt8](repeating: 0, count: 15) + [0x05])
+    /// One DQT holding all four table ids, and one DHT holding all eight (Tc, Th) pairs.
+    static let dqtFour = seg(0xDB, (0..<4).flatMap { [UInt8($0)] + [UInt8](repeating: 1, count: 64) })
+    static let dhtEight = seg(0xC4, [0x00, 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13].flatMap {
+        [$0, 1] + [UInt8](repeating: 0, count: 15) + [0x00]
+    })
     /// A frame header with one component: precision 8, 16 x 16, Nf 1, length 8 + 3 * Nf = 11.
     static func sof(_ marker: UInt8 = 0xC0) -> [UInt8] { seg(marker, [8, 0, 16, 0, 16, 1, 1, 0x11, 0]) }
     /// A scan header with one component: Ns 1, length 6 + 2 * Ns = 8.
@@ -69,6 +74,30 @@ private enum J {
 
     /// A whole baseline file with the given APP/COM segments after SOI.
     static func jpeg(_ head: [[UInt8]] = [jfif()]) -> [UInt8] { soi + head.flatMap { $0 } + body }
+
+    /// Every file strip accepts, clean or not: the corpus for the "strip output passes check" and
+    /// "a clean check means strip changes nothing" tests.
+    static var wellFormed: [[UInt8]] {
+        let iccID = ascii("ICC_PROFILE") + [0]
+        return [
+            jpeg(), jpeg([]), jpeg([jfif(), exif, xmp]), jpeg([jfif(), app13, com]),
+            jpeg([jfif(), jfxx, fakeJFIF, junkAPP0]), jpeg([jfif(thumbW: 2, thumbH: 1)]),
+            jpeg([jfif(), icc, mpf, flashpix, iccNoNUL]), jpeg([jfif(), icc]),
+            jpeg([jfif(), seg(0xE2, iccID + [1, 2, 0x42]), seg(0xE2, iccID + [2, 2, 0x43])]),
+            soi + jfif() + [0xFF] + exif + [0xFF, 0xFF] + body,                       // fills between segments
+            soi + jfif() + [0xFF, 0xFF, 0xFF] + body,                                 // fills, nothing else
+            soi + jfif() + dqt + sof() + dht + sos + scan + [0xFF] + eoi,             // a fill inside the scan
+            soi + sof() + sos + [0x01, 0xFF, 0xFF, 0xFF, 0xD9],
+            soi + jfif() + dqt + dri + sof(0xC2) + dht + sos + scan + com + sos + scan2 + eoi,
+            soi + jfif() + dqt + dri + sof(0xC2) + dht + sos + scan + dht2 + sos + scan2 + sos + scan3 + eoi,
+            soi + exif + jfif() + jfif() + body,                                      // late JFIF
+            soi + jfif() + dqt + sof() + icc + dht + sos + scan + eoi,                // late ICC
+            soi + jfif() + dqtTwo + dqt16 + sof() + dhtTwo + sos + scan + eoi,
+            soi + jfif() + dqtFour + sof() + dhtEight + sos + scan + eoi,             // the per-segment maximums
+            soi + dqt + sof(0xC0) + dht + sos + scan + eoi,
+            soi + dqt + sof(0xC2) + dht + sos + scan + eoi,
+        ]
+    }
 }
 
 final class MetadataScrubJPEGTests: XCTestCase {
@@ -245,7 +274,9 @@ final class MetadataScrubJPEGTests: XCTestCase {
         // belongs to the scan's bytes (the scan ends at the FF that starts a marker).
         let golden = J.soi + J.jfif() + J.dqt + J.sof() + J.dht + J.sos + J.scan + [0xFF] + J.eoi
         XCTAssertEqual(stripped(input), golden)
-        XCTAssertEqual(found(input), ["segment e1 @\(2 + J.jfif().count + 1)"], "APP1 found behind one fill byte")
+        let fill1 = 2 + J.jfif().count, fill2 = fill1 + 1 + J.exif.count
+        XCTAssertEqual(found(input), ["structure ff @\(fill1)", "segment e1 @\(fill1 + 1)", "structure ff @\(fill2)"],
+                       "APP1 found behind one fill byte; both fill runs flagged")
         XCTAssertEqual(found(golden), [])
 
         // FF FF D9 straight after a scan header's data ends the file cleanly.
@@ -306,19 +337,7 @@ final class MetadataScrubJPEGTests: XCTestCase {
     // checker; it does not prove the public strip(_:) passes `check` as that checker (that is the
     // one-line forward in the source, and the first part covers its result).
     func testStripOutputAlwaysPassesCheck() {
-        let fixtures: [[UInt8]] = [
-            J.jpeg(), J.jpeg([]), J.jpeg([J.jfif(), J.exif, J.xmp]), J.jpeg([J.jfif(), J.app13, J.com]),
-            J.jpeg([J.jfif(), J.jfxx, J.fakeJFIF, J.junkAPP0]), J.jpeg([J.jfif(thumbW: 2, thumbH: 1)]),
-            J.jpeg([J.jfif(), J.icc, J.mpf, J.flashpix, J.iccNoNUL]),
-            J.soi + J.jfif() + [0xFF] + J.exif + [0xFF, 0xFF] + J.body,
-            J.soi + J.jfif() + J.dqt + J.dri + J.sof(0xC2) + J.dht + J.sos + J.scan + J.com + J.sos + J.scan2 + J.eoi,
-            J.soi + J.exif + J.jfif() + J.jfif() + J.body,                                   // late JFIF
-            J.soi + J.jfif() + J.dqt + J.sof() + J.icc + J.dht + J.sos + J.scan + J.eoi,     // late ICC
-            J.soi + J.jfif() + J.dqtTwo + J.dqt16 + J.sof() + J.dhtTwo + J.sos + J.scan + J.eoi,
-        ] + [UInt8]([0xC0, 0xC2]).map {
-            J.soi + J.dqt + J.sof($0) + J.dht + J.sos + J.scan + J.eoi   // both SOFn on the list
-        }
-        for (n, bytes) in fixtures.enumerated() {
+        for (n, bytes) in J.wellFormed.enumerated() {
             guard let out = stripped(bytes) else { continue }
             XCTAssertEqual(S.check(Data(out)), [], "fixture \(n)")
         }
@@ -383,7 +402,7 @@ final class MetadataScrubJPEGTests: XCTestCase {
         // Behind a fill byte it is no longer straight after SOI.
         let filled = J.soi + [0xFF] + J.jfif() + J.body
         XCTAssertEqual(stripped(filled), J.soi + J.body)
-        XCTAssertEqual(found(filled), ["segment e0 @3"])
+        XCTAssertEqual(found(filled), ["structure ff @2", "segment e0 @3"])
 
         // ICC after the frame header: dropped.
         let iccLateAt = 2 + J.jfif().count + J.dqt.count + J.sof().count
@@ -421,6 +440,49 @@ final class MetadataScrubJPEGTests: XCTestCase {
         // SOF with Nf 0 (length 8 = 8 + 3 * 0).
         assertThrows(J.soi + J.seg(0xC0, [8, 0, 16, 0, 16, 0]) + J.sos + J.scan + J.eoi,
                      .malformed(offset: 2), "SOF Nf 0")
+    }
+
+    // Pre-push review: within one segment a table id may appear once, which caps DQT at 4 tables
+    // and DHT at 8. Without it one DQT could hold about a thousand 64-byte "tables".
+    func testRepeatedTableIdInOneSegmentThrows() {
+        let head = J.soi + J.jfif()
+        let at = head.count
+        let q = [UInt8](repeating: 1, count: 64)
+        let h = [UInt8]([1]) + [UInt8](repeating: 0, count: 15) + [0x00]   // counts then one symbol
+        let bad: [(String, [UInt8])] = [
+            ("DQT Tq 0 twice", J.seg(0xDB, [0x00] + q + [0x00] + q)),
+            ("DQT Tq 1 as 8-bit then 16-bit", J.seg(0xDB, [0x01] + q + [0x11] + q + q)),
+            ("DQT five tables", J.seg(0xDB, [0x00, 0x01, 0x02, 0x03, 0x00].flatMap { [$0] + q })),
+            ("DHT (0,0) twice", J.seg(0xC4, [0x00] + h + [0x00] + h)),
+            ("DHT (1,3) twice", J.seg(0xC4, [0x13] + h + [0x02] + h + [0x13] + h)),
+        ]
+        for (label, segment) in bad {
+            assertThrows(head + segment + J.body, .malformed(offset: at), label)
+        }
+        // Different segments may define the same id again (progressive files redefine DHT
+        // between scans), and the per-segment maximums pass.
+        let redefined = J.soi + J.jfif() + J.dqt + J.dqt + J.sof(0xC2) + J.dht + J.sos + J.scan + J.dht + J.sos + J.scan2 + J.eoi
+        XCTAssertEqual(stripped(redefined), redefined)
+        let maximums = J.soi + J.jfif() + J.dqtFour + J.sof() + J.dhtEight + J.sos + J.scan + J.eoi
+        XCTAssertEqual(stripped(maximums), maximums)
+    }
+
+    // Pre-push review: check flags fill bytes between segments, because strip removes them.
+    // So check(x) == [] means strip(x) == x, over every fixture strip accepts and its output.
+    func testCleanCheckMeansStripChangesNothing() {
+        let filled = J.soi + J.jfif() + [0xFF, 0xFF, 0xFF] + J.body
+        XCTAssertEqual(found(filled), ["structure ff @\(2 + J.jfif().count)"])
+        XCTAssertEqual(stripped(filled), J.jpeg())
+
+        var clean = 0
+        for (n, bytes) in J.wellFormed.enumerated() {
+            guard let out = stripped(bytes) else { continue }
+            for (label, x) in [("fixture \(n)", bytes), ("fixture \(n) stripped", out)] where S.check(Data(x)).isEmpty {
+                clean += 1
+                XCTAssertEqual(stripped(x), x, "\(label): check said clean but strip changed it")
+            }
+        }
+        XCTAssertGreaterThan(clean, J.wellFormed.count, "too few clean files: the loop proved little")
     }
 
     // Rule 10: check never says [] for something it could not parse.
