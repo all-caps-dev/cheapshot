@@ -1,7 +1,7 @@
 {
   "name": "cheapshot",
   "description": "On-device OCR for coding agents. Intercepts Read on images and PDFs, returns redacted text, and counts the tokens saved. Needs the cheapshot binary: brew install all-caps-dev/tap/cheapshot.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": { "name": "Ryan Ilano" },
   "homepage": "https://all-caps-dev.github.io/cheapshot/claude-code/",
   "repository": "https://github.com/all-caps-dev/cheapshot",
