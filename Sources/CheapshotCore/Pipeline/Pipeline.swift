@@ -32,13 +32,17 @@ public enum Pipeline {
         return FileManager.default.fileExists(atPath: fallback.path) ? RulesSource(url: fallback, named: false) : nil
     }
 
-    /// Built-in rules, plus the custom rules in `rules` placed first so they win.
+    /// Every built-in rule, plus the custom rules in `rules` placed first so they win. The file's
+    /// `preset` and `disabled` list are ignored here (``RuleTogglePolicy/allRules``), so this
+    /// entry point keeps its pre-v2 meaning and never returns a weakened redactor without a mark.
+    /// A caller that honours switches uses ``ruleSelection(rules:presetOverride:policy:warn:)``
+    /// and shows the marks itself.
     ///
     /// A named file that cannot be read or parsed throws. The default file failing does not: it
     /// calls `warn` and keeps the built-in rules, because failing every run would let the Read
     /// hook pass raw pixels through (a typo, or the app writing the file at that moment).
     public static func redactor(rules: RulesSource?, warn: (String) -> Void) throws -> Redactor {
-        Redactor(selection: try ruleSelection(rules: rules, warn: warn))
+        Redactor(selection: try ruleSelection(rules: rules, policy: .allRules, warn: warn))
     }
 
     /// The rules a run uses (rules file v2, NOV-156): the file's custom rules first, then the
