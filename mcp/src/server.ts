@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { runCheapshot } from "./run.js";
-import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP, type OcrInput, type VideoInput, type LedgerInput } from "./args.js";
+import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP, ALL_RULES, type OcrInput, type VideoInput, type LedgerInput } from "./args.js";
 
 // TypeScript: read the version from package.json so the MCP handshake always reports the build
 // that is running. From dist/src/server.js, "../../package.json" is the package root, and npm
@@ -60,7 +60,7 @@ type Probed = { file: string; pages?: number };
 /** A one page, no ledger probe of the given inputs (explicit paths or a --newest selection). Returns
  *  each result's file and, for a PDF, its page count. Undefined when the probe printed no JSON. */
 async function probe(selector: string[]): Promise<Probed[] | undefined> {
-  const run = await runCheapshot(["--json", "--no-ledger", "--pages", "1-1", ...selector]);
+  const run = await runCheapshot(["--json", ALL_RULES, "--no-ledger", "--pages", "1-1", ...selector]);
   const payload = parsePayload(run.stdout);
   if (payload === undefined) return undefined;
   const results = (payload.results as Array<Record<string, unknown>> | undefined) ?? [];

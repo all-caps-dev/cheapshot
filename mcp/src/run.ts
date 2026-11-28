@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { ALL_RULES } from "./args.js";
 
 export interface RunResult { code: number; stdout: string; stderr: string; }
 
@@ -8,7 +9,22 @@ const INSTALL = "Install it: brew install all-caps-dev/tap/cheapshot";
 /** Runs the cheapshot binary found on PATH (or CHEAPSHOT_BIN) and captures everything. Never throws
  *  on a non-zero exit; the caller reads `code`. Throws only when the binary cannot be found. Any other
  *  spawn failure (EACCES, a signal) resolves with code 1 and the failure message appended to stderr. */
-export function runCheapshot(args: string[]): Promise<RunResult> {
+export async function runCheapshot(args: string[]): Promise<RunResult> {
+  const first = await runOnce(args);
+  // A binary older than 0.7.0 rejects --all-rules with exactly this line and exit 2. Run the same
+  // read once more without the flag: such a binary cannot switch a built-in rule off anyway (it
+  // reads only the array form of rules.json, which adds rules, and skips a version 2 file with a
+  // warning), so every built-in still runs. Any other failure is returned as it is.
+  if (first.code === 2 && args.includes(ALL_RULES) && first.stderr.split("\n").includes(OLD_BINARY_LINE)) {
+    return runOnce(args.filter((a) => a !== ALL_RULES));
+  }
+  return first;
+}
+
+/** The stderr line a pre-0.7.0 binary prints for --all-rules. */
+export const OLD_BINARY_LINE = "cheapshot: unknown option --all-rules";
+
+function runOnce(args: string[]): Promise<RunResult> {
   const fromEnv = process.env.CHEAPSHOT_BIN && process.env.CHEAPSHOT_BIN.length > 0 ? process.env.CHEAPSHOT_BIN : undefined;
   const bin = fromEnv ?? "cheapshot";
   return new Promise((resolve, reject) => {

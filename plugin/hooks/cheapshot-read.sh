@@ -269,10 +269,27 @@ if [ -f "$allow" ]; then
   fi
 fi
 
+# Every read the hook makes passes --all-rules (Ryan, Q5: "A. Agents get all rules"): what an
+# agent sees always gets every built-in redaction rule, whatever presets or switches rules.json
+# holds. Those switch rules off only for a person's own runs, `redact`, --clipboard and the apps.
+# A binary older than 0.7.0 does not know the flag and exits 2 with exactly
+# "cheapshot: unknown option --all-rules"; the read is then run once more without it. That is
+# safe: an older binary cannot switch a built-in rule off at all (it reads only the array form,
+# which adds rules, and skips a version 2 default file with a warning, keeping every built-in).
+cs_read() {
+  cheapshot --all-rules "$@" 2>"$errf"
+  rc=$?
+  if [ "$rc" = 2 ] && /usr/bin/grep -qx 'cheapshot: unknown option --all-rules' "$errf" 2>/dev/null; then
+    cheapshot "$@" 2>"$errf"
+    rc=$?
+  fi
+  return "$rc"
+}
+
 pages=$(printf '%s' "$input" | jq -r '.tool_input.pages // empty')
 if [ "$ext" = pdf ] && [ -z "$pages" ]; then
   # Cheap probe: one page, no ledger line, just to learn the page count.
-  probe=$(cheapshot --json --no-ledger --pages 1-1 ${sep:+"$sep"} "$rpath" 2>"$errf") || failed "could not probe the page count (exit $?)."
+  probe=$(cs_read --json --no-ledger --pages 1-1 ${sep:+"$sep"} "$rpath") || failed "could not probe the page count (exit $?)."
   count=$(printf '%s' "$probe" | jq -r '.results[0].source.pages // 0')
   if [ "$count" -gt 20 ] 2>/dev/null; then
     if [ "$strict" = 1 ]; then
@@ -287,9 +304,9 @@ if [ "$ext" = pdf ] && [ -z "$pages" ]; then
 fi
 
 if [ -n "$pages" ]; then
-  out=$(cheapshot --json --stats --pages "$pages" ${sep:+"$sep"} "$rpath" 2>"$errf")
+  out=$(cs_read --json --stats --pages "$pages" ${sep:+"$sep"} "$rpath")
 else
-  out=$(cheapshot --json --stats ${sep:+"$sep"} "$rpath" 2>"$errf")
+  out=$(cs_read --json --stats ${sep:+"$sep"} "$rpath")
 fi
 code=$?
 [ "$code" = 0 ] || failed "could not read $path (exit $code)."

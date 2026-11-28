@@ -105,7 +105,8 @@ public struct Options: Equatable {
     }
 
     /// `cheapshot mask [--out <file.png>] [--min-conf <f>] [--rules <file>] [--all-rules] [--json] [--] <image>`.
-    /// No --preset: a mask is a copy for an agent, and a preset can only switch rules off.
+    /// No --preset: a mask is a copy for an agent and always runs every built-in rule (Q5 A, see
+    /// `CLI.togglePolicy`); --all-rules is accepted and changes nothing.
     /// Its own small parser, so a flag that makes no sense here (--raw above all: a mask with
     /// redaction off would paint nothing) is a usage error instead of being silently accepted.
     static func parseMask(_ args: [String]) throws -> Options {

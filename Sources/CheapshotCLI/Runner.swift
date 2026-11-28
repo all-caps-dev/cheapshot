@@ -81,13 +81,19 @@ public enum CLI {
         return (Redactor(selection: selection), mark)
     }
 
-    /// Whether a rules file may switch built-in rules off when --all-rules is not given. This is
-    /// the one switch for Ryan's open question Q5 (plan 8): A and B keep `.honour` (under A the
-    /// hook and the MCP server pass --all-rules, CS-33); C is `.locked([.credentials])`.
+    /// Whether a rules file may switch built-in rules off when --all-rules is not given. Ryan's
+    /// Q5 (plan 8), answered "A. Agents get all rules": a person's own runs honour the file, and
+    /// the Read hook and the MCP server pass --all-rules (CHE-62). C would be
+    /// `.locked([.credentials])` here.
     static let defaultTogglePolicy: RuleTogglePolicy = .honour
 
+    /// `mask` always runs every built-in rule: its copy is for an agent to look at (NOV-95), and
+    /// under Q5 A no file switch applies to what an agent sees. Being in the binary, it also
+    /// covers an agent running `cheapshot mask` from Bash, which the hook tells it to do.
     static func togglePolicy(_ opts: Options) -> RuleTogglePolicy {
-        opts.allRules ? .allRules : defaultTogglePolicy
+        if opts.allRules { return .allRules }
+        if case .mask = opts.command { return .allRules }
+        return defaultTogglePolicy
     }
 
     static func ruleSelection(_ opts: Options, _ io: CLIIO) throws -> RuleSelection {

@@ -39,6 +39,12 @@ export function assertRawAllowed(raw: boolean | undefined, env: NodeJS.ProcessEn
   }
 }
 
+/** Every read passes this (Ryan, Q5: "A. Agents get all rules"): presets and switches in
+ *  rules.json never apply to what the model reads. They switch rules off only for a person's own
+ *  CLI runs, `redact`, --clipboard and the apps. A binary older than 0.7.0 does not know the flag;
+ *  runCheapshot then runs the read once more without it (see run.ts). */
+export const ALL_RULES = "--all-rules";
+
 const PAGES = /^(\d+)(?:-(\d+))?$/;
 
 export function parsePages(s: string): { lo: number; hi: number } {
@@ -70,7 +76,7 @@ export function ocrArgs(input: OcrInput, env: NodeJS.ProcessEnv = process.env): 
   assertRawAllowed(input.raw, env);
   const hasPaths = Array.isArray(input.paths) && input.paths.length > 0;
   if (!hasPaths && !input.newest) throw new Error("cheapshot_ocr needs paths or newest");
-  const args = ["--json"];
+  const args = ["--json", ALL_RULES];
   if (input.raw) args.push("--raw");
   if (input.min_confidence !== undefined) args.push("--min-conf", String(input.min_confidence));
   if (input.pages !== undefined) { parsePages(input.pages); args.push("--pages", input.pages); }
@@ -93,7 +99,7 @@ export function ocrArgs(input: OcrInput, env: NodeJS.ProcessEnv = process.env): 
 export function videoArgs(input: VideoInput, env: NodeJS.ProcessEnv = process.env): string[] {
   assertRawAllowed(input.raw, env);
   assertNotOption("path", input.path);
-  const args = ["--json"];
+  const args = ["--json", ALL_RULES];
   if (input.raw) args.push("--raw");
   if (input.scene !== undefined) args.push("--scene", String(input.scene));
   if (input.max_frames !== undefined) args.push("--max-frames", String(input.max_frames));

@@ -190,7 +190,7 @@ test("cheapshot_ocr newest: the real run gets the probed paths, not --newest", a
     const calls = fs.readFileSync(log, "utf8").trim().split("\n");
     assert.equal(calls.length, 2);
     assert.match(calls[0], /--no-ledger --pages 1-1 --newest \/tmp\/inbox 2$/);
-    assert.equal(calls[1], "--json /tmp/report.pdf");
+    assert.equal(calls[1], "--json --all-rules /tmp/report.pdf");
   } finally {
     delete process.env.FAKE_PAGES;
     delete process.env.FAKE_LOG;
@@ -265,8 +265,8 @@ test("cheapshot_ocr: a pdf probe sends no -- marker, so older binaries still wor
     const c = await connected();
     await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/report.pdf"] } });
     const calls = fs.readFileSync(log, "utf8").trim().split("\n");
-    assert.equal(calls[0], "--json --no-ledger --pages 1-1 /tmp/report.pdf");
-    assert.equal(calls[1], "--json /tmp/report.pdf");
+    assert.equal(calls[0], "--json --all-rules --no-ledger --pages 1-1 /tmp/report.pdf");
+    assert.equal(calls[1], "--json --all-rules /tmp/report.pdf");
   } finally {
     delete process.env.FAKE_PAGES;
     delete process.env.FAKE_LOG;
@@ -299,7 +299,7 @@ test("cheapshot_ocr: raw with CHEAPSHOT_ALLOW_RAW=1 reaches the binary as --raw"
     const c = await connected();
     const r = (await c.callTool({ name: "cheapshot_ocr", arguments: { paths: ["/tmp/shot.png"], raw: true } })) as ToolResult;
     assert.equal(r.isError ?? false, false);
-    assert.equal(fs.readFileSync(log, "utf8").trim(), "--json --raw /tmp/shot.png");
+    assert.equal(fs.readFileSync(log, "utf8").trim(), "--json --all-rules --raw /tmp/shot.png");
   } finally {
     delete process.env.FAKE_LOG;
     delete process.env.CHEAPSHOT_ALLOW_RAW;

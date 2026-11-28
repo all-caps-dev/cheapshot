@@ -276,6 +276,15 @@ final class RulesFlagsTests: XCTestCase {
         XCTAssertThrowsError(try Options.parse(["mask", "--preset", "secrets-only", "a.png"]))
     }
 
+    /// Q5 A: mask is for an agent, so it ignores the rules file's switches with or without
+    /// --all-rules; a person's own read honours them.
+    func testMaskAlwaysRunsAllRules() throws {
+        XCTAssertEqual(CLI.togglePolicy(try Options.parse(["mask", "a.png"])), .allRules)
+        XCTAssertEqual(CLI.togglePolicy(try Options.parse(["mask", "--all-rules", "a.png"])), .allRules)
+        XCTAssertEqual(CLI.togglePolicy(try Options.parse(["a.png"])), .honour)
+        XCTAssertEqual(CLI.togglePolicy(try Options.parse(["--all-rules", "a.png"])), .allRules)
+    }
+
     func testLedgerEntryEncodingUnchangedWithoutRulesOff() throws {
         let e = LedgerEntry(ts: "2026-11-28T00:00:00Z", mode: "image", inputs: 1, imageTokens: 10, textTokens: 2, redactions: 0)
         let s = String(decoding: try JSONEncoder().encode(e), as: UTF8.self)
