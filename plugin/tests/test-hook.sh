@@ -317,7 +317,7 @@ grep -q 'pages' "$err" && grep -q '42' "$err" && pass "big pdf hint names the pa
 grep -q -- '--all-rules --json --stats' "$FAKE_LOG" && fail "big pdf never fully run" || pass "big pdf never fully run"
 # Ruling 2: the hint is a systemMessage on stdout and names the Bash escape hatch.
 msg=$(printf '%s' "$out" | jq -r '.systemMessage // empty')
-case "$msg" in *"42"*"--pages 1-5 /tmp/report.pdf"*) pass "big pdf systemMessage names --pages 1-5";; *) fail "big pdf systemMessage: $out";; esac
+case "$msg" in *"42"*"--all-rules --pages 1-5 /tmp/report.pdf"*"unknown option --all-rules"*) pass "big pdf systemMessage names --all-rules --pages 1-5 and the old-binary fallback";; *) fail "big pdf systemMessage: $out";; esac
 
 # 9. binary failure on an image: denied in default mode too (NOV-160), the reason and the fix on
 # stderr and in the systemMessage, nothing recorded as a pass-through
@@ -864,6 +864,15 @@ grep -qx -- '--all-rules --json --stats /tmp/shot.png' "$FAKE_LOG" && grep -qx -
 fresh
 o=$(input /tmp/report.pdf | FAKE_OLD=1 run_hook 2>/dev/null)
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"contact [EMAIL]"*) pass "old binary, PDF: redacted text, not pixels";; *) fail "old binary PDF: $o";; esac
+# #42 bot review: with no temp file for stderr (mktemp fails), the retry still runs, so an old
+# binary's PDF read is still redacted text, not pixels.
+fresh
+o=$(input /tmp/report.pdf | TMPDIR=/nonexistent/cheapshot-test FAKE_OLD=1 run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"contact [EMAIL]"*) pass "old binary, no temp file, PDF: redacted text, not pixels";; *) fail "old binary no temp file PDF: $o";; esac
+grep -qx -- '--json --stats /tmp/report.pdf' "$FAKE_LOG" && pass "old binary, no temp file: retried without --all-rules" || fail "old binary no temp file argv: $(cat "$FAKE_LOG")"
+fresh
+o=$(input /tmp/shot.png | TMPDIR=/nonexistent/cheapshot-test run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"key [AWS_KEY]"*) pass "new binary, no temp file, image: redacted text";; *) fail "new binary no temp file image: $o";; esac
 fresh
 o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_OLD=1 run_hook 2>/dev/null)
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"key [AWS_KEY]"*) pass "strict, old binary: redacted text";; *) fail "strict old binary: $o";; esac

@@ -309,7 +309,20 @@ fi
 # "cheapshot: unknown option --all-rules"; the read is then run once more without it. That is
 # safe: an older binary cannot switch a built-in rule off at all (it reads only the array form,
 # which adds rules, and skips a version 2 default file with a warning, keeping every built-in).
+#
+# With no temp file (mktemp failed, errf is /dev/null), stderr is caught in a variable for the
+# retry check instead, so an old binary still gets its retry and a PDF is not passed as pixels.
+# fd 3 carries stdout past the inner capture to the caller's $(...).
 cs_read() {
+  if [ "$errf" = /dev/null ]; then
+    { cs_err=$(cheapshot --all-rules "$@" 2>&1 >&3 3>&-); } 3>&1
+    rc=$?
+    if [ "$rc" = 2 ] && printf '%s\n' "$cs_err" | /usr/bin/grep -qx 'cheapshot: unknown option --all-rules'; then
+      cheapshot "$@"
+      rc=$?
+    fi
+    return "$rc"
+  fi
   cheapshot --all-rules "$@" 2>"$errf"
   rc=$?
   if [ "$rc" = 2 ] && /usr/bin/grep -qx 'cheapshot: unknown option --all-rules' "$errf" 2>/dev/null; then
@@ -330,7 +343,7 @@ if [ "$ext" = pdf ] && [ -z "$pages" ]; then
            "cheapshot: $path has $count pages; strict mode asked the agent for a page range."
     else
       note over_cap
-      hint "cheapshot: $path has $count pages, reading it as-is. For redacted text of a range, Read it with pages (for example pages: \"1-5\") or run from Bash: cheapshot --pages 1-5 $path"
+      hint "cheapshot: $path has $count pages, reading it as-is. For redacted text of a range, Read it with pages (for example pages: \"1-5\") or run from Bash: cheapshot --all-rules --pages 1-5 $path (a binary older than 0.7.0 says \"unknown option --all-rules\": run it again without that flag)"
     fi
     exit 0
   fi
