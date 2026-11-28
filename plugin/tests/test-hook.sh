@@ -155,6 +155,43 @@ printf '%s\t%s\t%s\n' "$((now + 200))" "$TMPDIR/link.png" "$sum" > "$TMPDIR/chea
 dec=$(input "$TMPDIR/link.png" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "mask entry: a symlink is denied even when its target hashes right" || fail "mask entry: symlink denied (dec=$dec)"
 
+# 6v. PR #43 review: a mask entry is honoured only when `cheapshot --version` is at least 0.6.1.
+# A v0.6.0 mask that read a screenshot blank wrote the unmasked original as its copy, so on an old
+# binary the entry is used up, the Read is denied, and the user is told to update and re-run mask.
+for v in 0.6.0 0.6.1-dev garbage; do
+  fresh
+  now=$(date +%s)
+  m="$TMPDIR/masked.png"; printf 'masked-bytes' > "$m"
+  sum=$(shasum -a 256 "$m" | cut -d' ' -f1)
+  printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+  out=$(input "$m" | FAKE_VERSION="$v" run_hook 2>/dev/null)
+  dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // empty')
+  [ "$dec" = deny ] && pass "mask entry on $v binary: denied" || fail "mask entry on $v binary: $out"
+  [ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedInput.file_path // empty')" ] && pass "mask entry on $v binary: no copy handed over" || fail "mask entry on $v binary: copy handed over"
+  grep -q "$m" "$TMPDIR/cheapshot-allow" && fail "mask entry on $v binary: entry not used up" || pass "mask entry on $v binary: entry used up"
+  case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *"mask entry for this file was not honoured"*"brew upgrade"*) pass "mask entry on $v binary: user told why";; *) fail "mask entry on $v binary: user message: $out";; esac
+  case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"brew "*|*"not honoured"*) fail "mask entry on $v binary: model told the bypass detail";; *) pass "mask entry on $v binary: model reason unchanged";; esac
+done
+# The case the fix exists for: the old copy is the unmasked original of a blank screenshot, so
+# OCR reads it blank again and the hook denies on the empty-text path. The note must reach it too.
+fresh
+now=$(date +%s)
+m="$TMPDIR/masked.png"; printf 'masked-bytes' > "$m"
+sum=$(shasum -a 256 "$m" | cut -d' ' -f1)
+printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+out=$(input "$m" | FAKE_VERSION=0.6.0 FAKE_EMPTY_TEXT=1 run_hook 2>/dev/null)
+[ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "mask entry on 0.6.0, blank copy: denied" || fail "mask entry on 0.6.0, blank copy: $out"
+case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *"mask entry for this file was not honoured"*) pass "mask entry on 0.6.0, blank copy: user told why";; *) fail "mask entry on 0.6.0, blank copy: user message: $out";; esac
+case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"not honoured"*|*"brew "*) fail "mask entry on 0.6.0, blank copy: model told the detail";; *) pass "mask entry on 0.6.0, blank copy: model reason unchanged";; esac
+# The same entry on a 0.6.1 binary is still honoured (the 6m behaviour).
+fresh
+now=$(date +%s)
+m="$TMPDIR/masked.png"; printf 'masked-bytes' > "$m"
+sum=$(shasum -a 256 "$m" | cut -d' ' -f1)
+printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+dec=$(input "$m" | FAKE_VERSION=0.6.1 run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+[ "$dec" = allow ] && pass "mask entry on 0.6.1 binary: still allowed" || fail "mask entry on 0.6.1 binary: dec=$dec"
+
 # 6s. NOV-117: `cheapshot allow` of an image writes a stripped copy and a four-field entry
 # "<exp>\t<original>\t<sha256 of copy>\t<copy>". A Read of the original is rewritten to a fresh
 # copy of the stripped copy; the original's bytes (and its EXIF) never reach the Read.
@@ -317,9 +354,10 @@ out=$(input /tmp/report.pdf 1-2 | FAKE_RAW='not json' run_hook 2>/dev/null)
 # retried false): a photo or a small image, so the pixels are the content. Pass through, recorded.
 # (Before NOV-160 this case used FAKE_EMPTY_TEXT, which has no ocr_status: see 9d-b for that now.)
 ocr_result() {
-  # $1 ocr_status JSON value, $2 retried JSON value, $3 text (JSON-escaped), $4 screenshot_like
-  printf '{"version":"0.6.0","results":[{"file":"/tmp/shot.png","text":"%s","redactions":{},"image_tokens":1018,"text_tokens":%s,"lines":[],"ocr_status":%s,"retried":%s,"screenshot_like":%s}],"image_tokens":1018,"text_tokens":%s}' \
-    "$3" "${#3}" "$1" "$2" "${4:-true}" "${#3}"
+  # $1 ocr_status JSON value, $2 retried JSON value, $3 text (JSON-escaped), $4 screenshot_like.
+  # The "version" field is $OCR_VER, default 0.6.1 (the first binary whose mask the hook names).
+  printf '{"version":"%s","results":[{"file":"/tmp/shot.png","text":"%s","redactions":{},"image_tokens":1018,"text_tokens":%s,"lines":[],"ocr_status":%s,"retried":%s,"screenshot_like":%s}],"image_tokens":1018,"text_tokens":%s}' \
+    "${OCR_VER:-0.6.1}" "$3" "${#3}" "$1" "$2" "${4:-true}" "${#3}"
 }
 fresh
 err=$(mktemp "$ROOT/err.XXXXXX")
@@ -630,7 +668,7 @@ o=$(input /tmp/report.pdf 1-2 | FAKE_EXIT=2 run_hook 2>/dev/null)
 pdfshape() {
   # $1 text (JSON-escaped), $2 page count for .source.pages. A PDF result: source.pages, no
   # ocr_status, like the real binary writes.
-  printf '{"version":"0.6.0","results":[{"file":"/tmp/doc","text":"%s","redactions":{},"image_tokens":2200,"text_tokens":%s,"source":{"path":"/tmp/doc","sha256":"ab12","pages":%s},"pages":[]}],"image_tokens":2200,"text_tokens":%s}' \
+  printf '{"version":"0.6.1","results":[{"file":"/tmp/doc","text":"%s","redactions":{},"image_tokens":2200,"text_tokens":%s,"source":{"path":"/tmp/doc","sha256":"ab12","pages":%s},"pages":[]}],"image_tokens":2200,"text_tokens":%s}' \
     "$1" "${#1}" "$2" "${#1}"
 }
 # 15a. a file named .pdf whose result is an image result: ocr_status "" (unknown) and
@@ -712,6 +750,101 @@ case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')
 fresh
 o=$(input /tmp/x.pdf | FAKE_RAW="$(ocr_result '"ok"' false 'hello')" run_hook 2>/dev/null)
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask"*) fail "x.pdf, image result, with text: reason must not offer mask: $o";; *"ask the user to approve it."*) pass "x.pdf, image result, with text: PDF ask-the-user line";; *) fail "x.pdf, image result, with text line: $o";; esac
+
+# 15. CHANGELOG 0.6.1 Security, first bullet: a v0.6.0 `cheapshot mask` that reads a screenshot
+# blank copies the original unmasked image and allows it for Read. The hook names mask only when
+# the binary's JSON "version" is a plain X.Y.Z of at least 0.6.1 (build metadata ignored, a
+# pre-release must be above 0.6.1). Old, unknown and unparseable versions fail closed: no mask
+# command in either copy, the user is told to update, and the model's reason still names no
+# command at all.
+# $1 label, $2 version JSON value (or "" to drop the field). Blank-after-retry and text results.
+blank_v() {
+  if [ -z "$1" ]; then ocr_result '"empty"' true '' | jq -c 'del(.version)'
+  else ocr_result '"empty"' true '' | jq -c --argjson v "$1" '.version = $v'; fi
+}
+text_v() {
+  if [ -z "$1" ]; then ocr_result '"ok"' false 'hello' | jq -c 'del(.version)'
+  else ocr_result '"ok"' false 'hello' | jq -c --argjson v "$1" '.version = $v'; fi
+}
+no_mask() {
+  # $1 label, $2 version JSON value
+  fresh
+  o=$(input /tmp/shot.png | FAKE_RAW="$(blank_v "$2")" run_hook 2>/dev/null); denied "$1, blank"
+  r=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+  m=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+  case "$m" in *"cheapshot mask"*) fail "$1, blank: user message must not name mask: $m";; *) pass "$1, blank: user message names no mask";; esac
+  case "$m" in *"cheapshot allow '/tmp/shot.png'"*"brew upgrade all-caps-dev/tap/cheapshot"*) pass "$1, blank: user message keeps allow and says to update first";; *) fail "$1, blank: user message: $m";; esac
+  case "$r" in *"cheapshot "*"mask"*|*"cheapshot allow"*|*"brew "*) fail "$1, blank: model reason names a command: $r";; *) pass "$1, blank: model reason names no command";; esac
+  fresh
+  o=$(input /tmp/shot.png | FAKE_RAW="$(text_v "$2")" run_hook 2>/dev/null); denied "$1, with text"
+  r=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+  m=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+  case "$r" in *"cheapshot mask"*) fail "$1, with text: model must not be told to run mask: $r";; *"hello"*"ask the user to approve it.") pass "$1, with text: model gets the ask-the-user line";; *) fail "$1, with text: model line: $r";; esac
+  case "$r" in *"cheapshot allow"*|*"brew "*) fail "$1, with text: model reason names allow or brew: $r";; *) pass "$1, with text: model reason names neither allow nor brew";; esac
+  case "$m" in *"cheapshot mask"*) fail "$1, with text: user message must not name mask: $m";; *"cheapshot allow '/tmp/shot.png'"*"brew upgrade all-caps-dev/tap/cheapshot"*) pass "$1, with text: user message keeps allow and says to update";; *) fail "$1, with text: user message: $m";; esac
+}
+has_mask() {
+  # $1 label, $2 version JSON value
+  fresh
+  o=$(input /tmp/shot.png | FAKE_RAW="$(blank_v "$2")" run_hook 2>/dev/null); denied "$1, blank"
+  m=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+  case "$m" in *"(or cheapshot mask '/tmp/shot.png' for a copy"*) pass "$1, blank: user message names mask";; *) fail "$1, blank: user message lacks mask: $m";; esac
+  case "$m" in *"brew "*) fail "$1, blank: no update advice on a new binary: $m";; *) pass "$1, blank: no update advice";; esac
+  case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *mask*|*allow*) fail "$1, blank: model reason names mask or allow: $o";; *) pass "$1, blank: model reason names neither";; esac
+  fresh
+  o=$(input /tmp/shot.png | FAKE_RAW="$(text_v "$2")" run_hook 2>/dev/null)
+  case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"run in Bash: cheapshot mask '/tmp/shot.png'"*) pass "$1, with text: model gets the mask line";; *) fail "$1, with text: model line: $o";; esac
+  case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *"brew "*) fail "$1, with text: no update advice on a new binary: $o";; *) pass "$1, with text: no update advice";; esac
+}
+# Old releases.
+no_mask "v0.6.0" '"0.6.0"'
+no_mask "v0.5.0" '"0.5.0"'
+# New releases, compared as numbers, not strings (0.10.0 and 0.6.10 sort below 0.6.1 as text).
+has_mask "v0.6.1" '"0.6.1"'
+has_mask "v0.6.10" '"0.6.10"'
+has_mask "v0.10.0" '"0.10.0"'
+has_mask "v1.0.0" '"1.0.0"'
+# Dev builds: a `make build` stamp is build metadata; a pre-release sorts below its release.
+has_mask "0.6.1 make build stamp" '"0.6.1+157ccf4.20261029"'
+no_mask "0.6.0 make build stamp" '"0.6.0+157ccf4.20261029"'
+no_mask "0.6.1-dev pre-release" '"0.6.1-dev"'
+has_mask "0.7.0-dev pre-release" '"0.7.0-dev"'
+# Unknown or unparseable: fail closed.
+no_mask "no version field" ''
+no_mask "null version" 'null'
+no_mask "numeric version" '0.61'
+no_mask "empty version" '""'
+no_mask "garbage version" '"latest"'
+no_mask "v-prefixed version" '"v0.6.1"'
+no_mask "two-part version" '"0.6"'
+no_mask "version with trailing junk" '"0.6.1 (beta)"'
+no_mask "version with a newline" '"0.6.1\n"'
+# The fake's own canned paths honour FAKE_VERSION too.
+fresh
+o=$(input /tmp/shot.png | FAKE_VERSION=0.6.0 run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask"*) fail "fake 0.6.0 with text: model told to mask: $o";; *"ask the user to approve it.") pass "fake 0.6.0 with text: ask-the-user line";; *) fail "fake 0.6.0 with text: $o";; esac
+# A legacy binary (no ocr_status) that is also old: no mask, and one update command, not two.
+fresh
+o=$(input /tmp/shot.png | FAKE_EMPTY_TEXT=1 FAKE_VERSION=0.5.0-dev run_hook 2>/dev/null); denied "legacy 0.5.0-dev, empty text"
+m=$(printf '%s' "$o" | jq -r '.systemMessage // empty')
+case "$m" in *"cheapshot mask"*) fail "legacy 0.5.0-dev: user message names mask: $m";; *) pass "legacy 0.5.0-dev: user message names no mask";; esac
+[ "$(printf '%s' "$m" | /usr/bin/grep -o 'brew upgrade' | wc -l | tr -d ' ')" = 1 ] && pass "legacy 0.5.0-dev: one update command" || fail "legacy 0.5.0-dev: update commands: $m"
+case "$m" in *"does not report ocr_status (added in v0.6.0)"*"cheapshot allow '/tmp/shot.png'"*) pass "legacy 0.5.0-dev: still says update or allow";; *) fail "legacy 0.5.0-dev: user message: $m";; esac
+# A single-quote path on an old binary: the allow command still pastes as one argument.
+fresh
+o=$(input "$qshot" | FAKE_RAW="$(OCR_VER=0.6.0 ocr_result '"empty"' true '')" run_hook 2>/dev/null); denied "single-quote path, v0.6.0, blank"
+msg=$(printf '%s' "$o" | jq -r '.systemMessage')
+a=${msg#*cheapshot allow }; a=${a%%. For a copy*}
+eval "set -- $a"
+[ "$#" = 1 ] && [ "$1" = "$qshot" ] && pass "single-quote path, v0.6.0: allow command is shell-quoted" || fail "single-quote path, v0.6.0: $msg"
+# PDFs never get mask or the update line, old binary or new.
+fresh
+o=$(input /tmp/report.pdf 1-2 | FAKE_VERSION=0.6.0 run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"ask the user to approve it.") pass "pdf on v0.6.0: ask-the-user line";; *) fail "pdf on v0.6.0: $o";; esac
+case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *mask*|*"brew "*) fail "pdf on v0.6.0: user message names mask or brew: $o";; *) pass "pdf on v0.6.0: no mask, no update line";; esac
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(OCR_VER=0.6.0 ocr_result '"empty"' true '')" run_hook 2>/dev/null); denied "x.pdf image result on v0.6.0, blank"
+case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *mask*|*"brew "*) fail "x.pdf on v0.6.0: user message names mask or brew: $o";; *) pass "x.pdf on v0.6.0: no mask, no update line";; esac
 
 # 16. CHE-62 (Ryan, Q5: "A. Agents get all rules"): every read passes --all-rules, so presets and
 # switches in rules.json never thin out what an agent sees. A binary older than 0.7.0 rejects the

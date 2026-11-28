@@ -81,8 +81,10 @@ hint() {
 
 # A deny: $1 is what the model sees, $2 what the user sees.
 deny() {
-  echo "$2" >&2
-  jq -n --arg r "$1" --arg m "$2" \
+  # A refused old mask entry (set in the allowlist loop) is explained on every deny path.
+  dm="$2"; [ -n "${mask_note:-}" ] && dm="$dm $mask_note"
+  echo "$dm" >&2
+  jq -n --arg r "$1" --arg m "$dm" \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}, systemMessage: $m}'
 }
 
@@ -194,6 +196,30 @@ fi
 # `updatedInput` (Claude Code PreToolUse: it replaces the whole tool_input, so every other field
 # is kept). The hashed bytes are then the bytes read, which closes the gap between check and Read
 # that NOV-95's Known limits named, and an image allow shows the stripped copy, never the original.
+# jq filter shared by the mask hint and the mask allow entry (CHANGELOG 0.6.1 Security): reads
+# {"version": ...} and prints 1 when it is a plain X.Y.Z of at least 0.6.1, else 0. The rules
+# are explained where mask_ok is set, below.
+mask_ok_jq='
+  (.version | if type == "string" then . else "" end) as $v
+  | ([$v | capture("\\A(?<a>[0-9]+)\\.(?<b>[0-9]+)\\.(?<c>[0-9]+)(?<pre>-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?\\z")] | first) as $m
+  | if $m == null then "0"
+    else ([$m.a, $m.b, $m.c] | map(tonumber)) as $n
+    | if $m.pre == null then (if $n >= [0, 6, 1] then "1" else "0" end)
+      else (if $n > [0, 6, 1] then "1" else "0" end) end
+    end'
+# A mask allow entry is honoured only when this binary's `cheapshot mask` is safe (PR #43
+# review): a v0.6.0 mask that read a screenshot blank wrote the unmasked original as its "masked"
+# copy, so hiding the hint is not enough. Asked only when a mask entry matches, so the normal
+# path costs no extra process. `--version` prints the bare version; any failure counts as old.
+# Known limit (PR #43 second review): this asks the cheapshot first on the hook's PATH at Read
+# time, which need not be the binary that wrote the entry (an absolute-path or stale dev build,
+# or an upgrade inside the entry's 5-minute life). Closing that needs the binary to record its
+# version in the mask entry.
+mask_binary_ok() {
+  [ "$(cheapshot --version 2>/dev/null | head -n 1 | jq -Rr '{version: .}' 2>/dev/null | jq -r "$mask_ok_jq" 2>/dev/null)" = 1 ]
+}
+oldmask=0
+mask_note=""
 allow="$tmp/cheapshot-allow"
 if [ -f "$allow" ]; then
   alt="$rpath"
@@ -218,6 +244,13 @@ if [ -f "$allow" ]; then
     fi
     if [ "$hit" = 0 ] && { [ "$p" = "$path" ] || [ "$p" = "$alt" ] || { [ -n "$copy" ] && { [ "$copy" = "$path" ] || [ "$copy" = "$alt" ]; }; }; }; then
       # Either way the entry is used up: a tampered entry falls through to normal handling.
+      if [ -n "$sum" ] && [ -z "$copy" ] && ! mask_binary_ok; then
+        # A mask entry from a binary below 0.6.1: its copy may be the unmasked original. Used
+        # up, never honoured; the Read falls through to the normal redacted handling.
+        oldmask=1
+        mask_note="(A cheapshot mask entry for this file was not honoured: this cheapshot binary is older than 0.6.1, whose masked copy can be the unmasked image. Update cheapshot (brew upgrade all-caps-dev/tap/cheapshot), then run mask again.)"
+        continue
+      fi
       if [ -n "$sum" ]; then
         src="${copy:-$path}"
         # Only a regular file, not a symlink (PR #18 review). cp could still race a swap, but
@@ -315,6 +348,23 @@ printf '%s' "$out" | jq -e '.results | type == "array"' >/dev/null 2>&1 || faile
 
 text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2>/dev/null)
 
+# Whether this binary's `cheapshot mask` is safe to name (CHANGELOG 0.6.1 Security, first bullet).
+# A v0.6.0 mask runs its own OCR without the cold-start retry; when that reads blank it paints
+# nothing, then copies the original unmasked image and allows it for Read. 0.6.1 (#29) refuses a
+# blank screenshot instead. The version comes from the "version" field of the --json run above,
+# so it is the same binary and costs no extra process. Fail closed: anything that is not a plain
+# X.Y.Z of at least 0.6.1 counts as old, including a missing, non-string or unparseable field
+# (\A and \z, not ^ and $: jq's $ also matches before a trailing newline).
+# Build metadata ("0.6.1+157ccf4.20261029", a `make build` stamp) is ignored as semver says; a
+# pre-release ("0.6.1-dev") sorts below its release, so it must be above 0.6.1 to count. Dev
+# builds between #29 and the 0.6.1 bump call themselves 0.6.0 and are treated as old, which only
+# costs them the hint.
+mask_ok=$(printf '%s' "$out" | jq -r "$mask_ok_jq" 2>/dev/null)
+[ "$mask_ok" = 1 ] || mask_ok=0
+# What an old (or unknown) binary's user is told in place of the mask command. It names no mask
+# command, so following the hint cannot reach the unsafe copy.
+mask_upgrade="For a copy with its text blacked out, first update cheapshot (brew upgrade all-caps-dev/tap/cheapshot): this binary's masked copy can be the unmasked image."
+
 # NOV-160: how sure the binary is that OCR worked, from `ocr_status` and `retried` on each image
 # result (cheapshot 0.6.0 and later). One word per distinct verdict, space separated:
 #   ok             text found on the first pass
@@ -396,8 +446,18 @@ if [ -z "$text" ]; then
       why="no text in $path, and cheapshot did not report a usable OCR status" ;;
   esac
   # mask refuses PDFs (Runner.swift), so a .pdf name never gets the mask hint, whatever its result.
+  # Below 0.6.1, or on an unknown version, the user is told to update before masking, and the
+  # mask command is not named (see mask_ok above).
   maskhint=" (or cheapshot mask $qpath for a copy with any text it finds blacked out)"
+  [ "$mask_ok" = 1 ] || maskhint=""
   [ "$ext" = pdf ] && maskhint=""
+  if [ "$mask_ok" != 1 ] && [ "$ext" != pdf ]; then
+    # The legacy line already says to update; one upgrade command is enough.
+    case " $ocr " in
+      *" legacy "*) extra=" Or update cheapshot (brew upgrade all-caps-dev/tap/cheapshot): a release that reports ocr_status can tell a photo from a failed read, and its masked copy is safe to use." ;;
+      *) extra=" $mask_upgrade" ;;
+    esac
+  fi
   deny "cheapshot: $why, so the pixels were kept out. Tell the user; do not read it another way." \
        "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath$maskhint.$extra"
   exit 0
@@ -424,6 +484,11 @@ qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
 # extension), so a .pdf with an image-shaped or ambiguous result still gets the ask-the-user line.
 if [ "$is_pdf" = pdf ] || [ "$ext" = pdf ]; then
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
+elif [ "$mask_ok" != 1 ]; then
+  # An image on a binary below 0.6.1 (or an unknown version): its mask runs a second OCR pass
+  # without the cold-start retry and, if that reads blank, hands the agent the unmasked image
+  # with no person in the loop. The model gets the ask-the-user line; the user is told to update.
+  model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
 else
   # NOV-95: for an image, point the agent at the masked copy first. `cheapshot mask` paints every
   # redacted or low-confidence line black, writes the copy to a scratch folder and allows only
@@ -431,9 +496,11 @@ else
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the layout, run in Bash: cheapshot mask $qpath, then Read the path it prints after \"masked: \" (a copy with redacted and low-confidence lines blacked out). The raw pixels still need the user's approval."
 fi
 user_line="cheapshot: $it image tokens -> $tt text tokens. To show the agent the pixels, run in a terminal: cheapshot allow $qpath"
+[ "$mask_ok" != 1 ] && [ "$is_pdf" != pdf ] && [ "$ext" != pdf ] && user_line="$user_line $mask_upgrade"
 # A plain allow line for an image was refused above: it came from an older binary, so another
 # `cheapshot allow` from that binary would loop. Say so (PR #19 second review).
 [ "${stale:-0}" = 1 ] && user_line="$user_line (The allow entry for this file came from an older cheapshot binary and was not honoured; update cheapshot, then run allow again.)"
+[ -n "$mask_note" ] && user_line="$user_line $mask_note"
 # NOV-160: the flag goes first on both lines, so the deny reason still ends with the savings line.
 if [ -n "$flag" ]; then
   model_line="cheapshot: $flag ${model_line#cheapshot: }"
