@@ -125,7 +125,7 @@ public enum RuleFile {
         if let dict = top as? [String: Any] {
             for key in dict.keys.sorted() where !knownKeys.contains(key) {
                 let hint = knownKeys.first { $0 == key.lowercased() }.map { " (did you mean \"\($0)\"?)" } ?? ""
-                try soft("unknown top-level key \"\(key)\"\(hint); known keys are \(knownKeys.joined(separator: ", "))")
+                try soft("unknown top-level key \"\(key)\"\(hint) (known keys: \(knownKeys.joined(separator: ", ")))", instead: "ignoring it")
             }
         }
 
