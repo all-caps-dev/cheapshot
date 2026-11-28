@@ -12,6 +12,10 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 - New `cheapshot --clipboard` (NOV-155): reads the one file copied in Finder (image or PDF), else the image on the clipboard (PNG, TIFF, JPEG or HEIC), and prints the redacted text with the same text, counts, JSON and ledger line as a file read. In `--json` the entry has `"file": "clipboard"` and `"source": "image"` or `"file_url"`; a copied PDF puts its hash and page count under `"document"`, never its path. Clipboard text is never read (use `pbpaste | cheapshot --text -`), the clipboard is never written, and `--raw`, files, `--pages` and the other input modes are usage errors with it. Blank text is a failure, stricter than a file read: exit 1, or the new exit 3 when a screenshot-like image is still blank after the retry (likely a cold start). macOS only.
 
+### Redaction
+
+- An empty Cookie pair no longer stops the Cookie rule (CS-05 gap 1). In `Cookie: foo=; sid=<value>` the first pair had no value, so nothing on the line matched and every later value was left in the clear. An empty or `""` value is now read and kept, and the chain goes on to the next pair. The line is now read exactly as one with a non-empty first pair (`foo=bar;`) already was, including that rule's known limits. Known side effect, tracked as strict expected failures in `RedactionGapTests`: past an empty first pair, a cookie value the rule refuses (such as a URL) can swallow a nested `Cookie:` start and leave the value after it in the clear, and a cookie value can split a card number before CARD runs, leaving its last ten digits.
+
 ## 0.6.1 (unreleased)
 
 Safety fixes: the Claude Code hook fails closed when OCR fails or reads blank and no longer trusts the extension alone to decide a file is a PDF; `cheapshot mask` writes 0600 copies and refuses a blank screenshot. Ships with plugin 0.1.2 (the hook changed) and cheapshot-mcp 0.1.3 (unchanged). PRs [#21](https://github.com/all-caps-dev/cheapshot/pull/21) to [#30](https://github.com/all-caps-dev/cheapshot/pull/30).

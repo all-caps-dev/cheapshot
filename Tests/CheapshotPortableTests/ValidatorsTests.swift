@@ -50,6 +50,7 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertTrue(Validators.secretValue("9f86d081884c7d659a2feaa0c55ad015"))
         XCTAssertTrue(Validators.secretValue("correcthorsebatterystaple"))   // letters only, long
         XCTAssertFalse(Validators.secretValue("forgotten"))                  // letters only, short
+        XCTAssertFalse(Validators.secretValue(""))                           // empty: an empty Cookie pair (gap 1)
         XCTAssertFalse(Validators.secretValue("[OPENAI_KEY]"))               // already redacted
         XCTAssertFalse(Validators.secretValue("${DB_PASSWORD}"))
         XCTAssertFalse(Validators.secretValue("process.env.API_KEY"))

@@ -1,0 +1,10 @@
+Cookie: foo=; sid=[SECRET]; theme=dark
+Cookie: pref=""; csrftoken=[SECRET]
+Cookie: a=; b=; session=[SECRET]
+Cookie: foo=; theme=dark
+Set-Cookie: sid=; Path=/; HttpOnly
+Cookie: foo= ; sid=[SECRET]
+Cookie: foo=;sid=[SECRET];
+Set-Cookie: sid=""; Path=/
+"Cookie": "foo=; sid=[SECRET]"
+Cookie: sid=[SECRET]; empty=; csrftoken=[SECRET]

@@ -6,8 +6,8 @@
 import XCTest
 @testable import CheapshotPortable
 
-/// CS-05: one test per redaction gap the v0.6.0 reviews found. The redactor is unchanged here;
-/// each gap's assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
+/// CS-05: one test per redaction gap the v0.6.0 reviews found. Where a gap is still open, its
+/// assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
 /// the suite is green now and the test turns red, on purpose, once the gap is fixed (the
 /// wrapper then reports that no expected failure occurred and the wrap is removed).
 ///
@@ -21,17 +21,47 @@ final class RedactionGapTests: XCTestCase {
     private static let m = GoldenTests.joinMarker
     private static func assemble(_ raw: String) -> String { GoldenTests.assemble(raw) }
 
-    // Gap 1: an empty first pair stops the Cookie chain. The first-pair branch needs at least
-    // one value character after `foo=`, so nothing matches on the line, and the `;`-chained
-    // branch (\G, the end of the previous match) never starts: the sid value is left in the
-    // clear. Confirmed red today, 2026-11-27.
+    // Gap 1, fixed: an empty first pair used to stop the Cookie chain. The first-pair branch
+    // needed at least one value character after `foo=`, so nothing matched on the line, and the
+    // `;`-chained branch (\G, the end of the previous match) never started: the sid value was
+    // left in the clear. A cookie value may now be empty; golden case 63 covers it on every
+    // platform.
     func testCookieHeaderWithEmptyFirstPairRedactsSid() {
         let sid = Self.assemble("7f3a9c21d04e" + Self.m + "b85a6f31c2d9")
         // Control: with a non-empty first pair the chain reaches sid.
         XCTAssertEqual(Redactor().redact("Cookie: foo=bar; sid=\(sid)").text, "Cookie: foo=bar; sid=[SECRET]")
-        XCTExpectFailure("CS-05 gap 1: an empty first Cookie pair stops the chain", strict: true) {
-            let out = Redactor().redact("Cookie: foo=; sid=\(sid)").text
+        let out = Redactor().redact("Cookie: foo=; sid=\(sid)").text
+        XCTAssertFalse(out.contains(sid), "the sid value should not survive: \(out.debugDescription)")
+        XCTAssertEqual(out, "Cookie: foo=; sid=[SECRET]")
+    }
+
+    // Gap 1 side effect, widened by PR #32: now that the chain carries on past an empty first
+    // pair, a later cookie value the rule refuses (here a URL) is consumed as one pair and
+    // swallows a nested `Cookie:` start, so the sid after it is left in the clear. main
+    // redacted it (`sid=[SECRET]`) because the chain never started. Expected failure until the
+    // linear matcher follow-up replaces the chained regex.
+    func testCookieChainPastEmptyPairDoesNotSwallowNestedCookieStart() {
+        let sid = Self.assemble("7f3a9c21d04e" + Self.m + "b85a6f31c2d9")
+        // Control: the nested `Cookie:` start alone redacts the sid.
+        XCTAssertFalse(Redactor().redact("next=https://x/?Cookie:sid=\(sid)").text.contains(sid))
+        XCTExpectFailure("CS-05 gap 1 follow-up: a refused cookie value swallows a nested Cookie: start", strict: true) {
+            let out = Redactor().redact("Cookie: a=; next=https://x/?Cookie:sid=\(sid)").text
             XCTAssertFalse(out.contains(sid), "the sid value should not survive: \(out.debugDescription)")
+        }
+    }
+
+    // Gap 1 side effect, widened by PR #32: the Cookie rule runs before CARD, and with the
+    // chain now reaching `card=` it takes the value up to the space, leaving
+    // `card=[SECRET] 1111111111`: ten digits of the card number survive. main gave
+    // `card=[CARD]`. Expected failure until the linear matcher follow-up.
+    func testCookieChainPastEmptyPairDoesNotSplitCardNumber() {
+        let card = Self.assemble("411111" + Self.m + " 1111111111")
+        let tail = Self.assemble("11111" + Self.m + "11111")
+        // Control: outside the Cookie chain the whole number is caught by CARD.
+        XCTAssertFalse(Redactor().redact("card=\(card)").text.contains(tail))
+        XCTExpectFailure("CS-05 gap 1 follow-up: the Cookie chain splits a card number before CARD runs", strict: true) {
+            let out = Redactor().redact("Cookie: a=; card=\(card)").text
+            XCTAssertFalse(out.contains(tail), "no part of the card number should survive: \(out.debugDescription)")
         }
     }
 
