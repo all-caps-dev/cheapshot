@@ -16,8 +16,9 @@
 # reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the session, or
 # `cheapshot allow <path>` from a terminal) or the image has no text to redact (Fleet #290 item
 # 4). "No text" passes only when the binary says so for a photo (ocr_status
-# "empty", retried false, text "", screenshot_like false or absent) or for a PDF result (one
-# carrying .source.pages: the result shape, not the file name, decides; CS-03). A screenshot
+# "empty", retried false, text "", screenshot_like false or absent) or for a PDF result (a
+# whole-number .source.pages of 1 or more and no OCR status fields: the result shape, not the
+# file name, decides; an ambiguous result is denied like an unknown status; CS-03). A screenshot
 # still blank after the cold-start retry, an unknown or malformed status, and any empty image
 # from a binary that does not report ocr_status (added in v0.6.0; it cannot tell a photo from a
 # failed read) are denied in every mode (NOV-160). Known limit: the binary only retries an image
@@ -310,14 +311,33 @@ text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2
 #   unknown        a status this hook does not know, fields of the wrong type, only one of the two
 #                  fields, or an "empty" result that does not look like a photo
 # Empty output (non-object results, an empty array, a jq error) counts as unknown below.
-# Whether this was a PDF is decided by the result shape, not the file name (CS-03): a PDF
-# result carries .source.pages, an image result does not. A x.pdf holding an image result
-# gets the NOV-160 checks; a .png holding a PDF result keeps the PDF handling. An empty or
-# malformed result counts as an image, so it is denied instead of passing on the name.
-is_pdf=$(printf '%s' "$out" | jq -r '[.results[]? | objects | (.source.pages != null)] | if length > 0 and all then "pdf" else "img" end' 2>/dev/null)
-[ "$is_pdf" = "pdf" ] || is_pdf=img
+# Whether this was a PDF is decided by the result shape, not the file name (CS-03). One word
+# per distinct result kind:
+#   pdf   .source.pages is a whole number of 1 or more, and neither ocr_status nor retried is
+#         there (the real binary writes exactly this for a PDF)
+#   img   no .source.pages key at all
+#   bad   anything else: a non-object result, .source.pages null, 0, negative, fractional or not
+#         a number, or .source.pages next to ocr_status or retried
+# Only "pdf" on every result gets the PDF handling. "img" gets the NOV-160 checks. A mix, any
+# "bad", an empty array or a jq error is ambiguous: handled as an image whose OCR status is
+# unknown, so an empty one is denied in every mode and one with text is flagged. A x.pdf holding
+# an image result therefore gets the NOV-160 checks, and a .png gets the PDF handling only when
+# the binary's result says it is a PDF.
+kind=$(printf '%s' "$out" | jq -r '
+  [.results[] |
+    if type != "object" then "bad"
+    elif ((.source | type) == "object" and (.source | has("pages"))) | not then "img"
+    elif (.source.pages | type) == "number" and .source.pages >= 1 and .source.pages == (.source.pages | floor)
+         and ((has("ocr_status") or has("retried")) | not) then "pdf"
+    else "bad" end
+  ] | unique | join(" ")' 2>/dev/null)
+is_pdf=img
+[ "$kind" = pdf ] && is_pdf=pdf
 ocr=""
-if [ "$is_pdf" = img ]; then
+if [ "$kind" != img ] && [ "$kind" != pdf ]; then
+  # Ambiguous or malformed: never the PDF leniency, never the photo pass.
+  ocr="unknown"
+elif [ "$is_pdf" = img ]; then
   ocr=$(printf '%s' "$out" | jq -r '
     [.results[] |
       if (has("ocr_status") or has("retried")) | not then "legacy"
