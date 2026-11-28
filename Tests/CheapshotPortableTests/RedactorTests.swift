@@ -341,4 +341,63 @@ final class RedactorTests: XCTestCase {
             XCTAssertEqual(result.report, redactor.redact(input).report, "golden case \(name) counts inside fences")
         }
     }
+
+    // CS-05 gap 4, review fix: a custom rule reads the same text across a fence as without one.
+    // Its first-line cue here is also a builtin's (PRIVATE_KEY), and the builtins run after the
+    // custom rules, so a reading that waited for them saw `[PRIVATE_KEY]` and left the key body.
+    // Secret-shaped strings are joined at runtime (GoldenTests.joinMarker), as elsewhere.
+    func testCustomRuleBeatsBuiltinThatTakesItsCueAcrossAFence() throws {
+        let m = GoldenTests.joinMarker
+        let header = GoldenTests.assemble("-----BEGIN RSA PRIVATE" + m + " KEY-----")
+        let body = GoldenTests.assemble("MIIEowIBAAKCAQ" + m + "EAxyz123456")
+        let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "KEYBODY", "pattern": #"-----BEGIN [A-Z ]*PRIVATE KEY-----\n[A-Za-z0-9+/=]{20,}"#],
+        ])))
+        let plain = r.redact(header + "\n" + body)
+        XCTAssertEqual(plain.text, "[KEYBODY]", "control: without a fence the custom rule wins")
+        for fence in ["```", "~~~ text", "```\n```"] {
+            let fenced = r.redact(header + "\n" + fence + "\n" + body)
+            XCTAssertFalse(fenced.text.contains(body), "key body leaked past \(fence.debugDescription): \(fenced.text.debugDescription)")
+            // Same text and same counts as without the fence: the PRIVATE_KEY token the builtin
+            // placed is folded into KEYBODY's, and its count goes with it.
+            XCTAssertEqual(fenced.text, plain.text)
+            XCTAssertEqual(fenced.report, plain.report)
+        }
+        // Through the layout that puts the fence there: a fenced header line, then the body.
+        func line(_ n: Int, _ text: String, fenced: Bool) -> RenderedLine {
+            RenderedLine(n: n, text: text, bbox: .zero, confidence: 1, fenced: fenced)
+        }
+        let laidOut = r.redact(Layout.text([line(1, header, fenced: true), line(2, body, fenced: false)])).text
+        XCTAssertFalse(laidOut.contains(body), laidOut.debugDescription)
+    }
+
+    // CS-05 gap 4, review fix: the same with EMAIL eating the cue of a custom rule, and the
+    // guard for the other direction: the early reading's hits are replaced last, so a custom
+    // rule crossing a fence never takes a builtin's cue (`password`) away before that builtin
+    // has read it.
+    func testCustomRuleBeatsEmailCueAcrossAFenceAndKeepsBuiltinCues() throws {
+        let m = GoldenTests.joinMarker
+        let password = GoldenTests.assemble("Hunter2" + m + "Hunter2!!")
+        let value = GoldenTests.assemble("hunter2" + m + "abc9")
+        let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "CORPPW", "pattern": #"[\w.]+@corp\.com\n\S{12,}"#],
+            ["name": "FOOPW", "pattern": #"foo\npassword"#],
+            ["name": "WIDE", "pattern": #"login\n[\w.]+@corp\.com"#],
+        ])))
+        XCTAssertEqual(r.redact("alice@corp.com\n" + password).text, "[CORPPW]", "control: no fence")
+        let fenced = r.redact("alice@corp.com\n```\n" + password)
+        XCTAssertFalse(fenced.text.contains(password), fenced.text.debugDescription)
+        XCTAssertEqual(fenced.text, "[CORPPW]")
+        XCTAssertEqual(fenced.report.counts, ["CORPPW": 1])
+        // FOOPW guard: the builtin SECRET still reads `password: ...` and replaces the value.
+        let cue = r.redact("foo\n```\npassword: " + value)
+        XCTAssertFalse(cue.text.contains(value), cue.text.debugDescription)
+        XCTAssertEqual(cue.text, "[FOOPW]: [SECRET]")
+        XCTAssertEqual(cue.report.counts, ["FOOPW": 1, "SECRET": 1])
+        // Two early hits that overlap (WIDE and CORPPW share the address) become one token, and
+        // neither the address nor the password is left.
+        let both = r.redact("login\n```\nalice@corp.com\n~~~\n" + password + " tail").text
+        XCTAssertFalse(both.contains(password) || both.contains("alice"), both.debugDescription)
+        XCTAssertEqual(both, "[WIDE] tail")
+    }
 }

@@ -66,8 +66,25 @@ public struct Redactor {
     public func redact(_ input: String) -> (text: String, report: RedactionReport) {
         var text = input
         var report = RedactionReport()
-        for c in compiled {
-            Self.replace(hits(of: c, in: text), with: c.rule.name, in: &text, report: &report)
+        // Early fence-free reading (see ``FenceTrack``): only when a custom rule could cross a
+        // fence, so builtin-only redaction costs exactly what it did before.
+        var track: FenceTrack? = compiled.contains(where: \.readsPastFences) && FenceFreeView.mayHaveFence(input)
+            ? FenceTrack() : nil
+        for (index, c) in compiled.enumerated() {
+            Self.replace(hits(of: c, in: text), with: c.rule.name, in: &text, report: &report, track: &track)
+            // Right after its own plain pass, a custom rule also reads the text with its fence
+            // lines taken out: the same text it reads when there is no fence, before a later
+            // rule (a builtin) replaces its cue (`-----BEGIN ... PRIVATE KEY-----`, an email).
+            // Its hits are only recorded here and replaced at the end, so no later rule loses
+            // its own cue to them (`foo\npassword` would hide `password: ...` from SECRET).
+            if c.readsPastFences, track != nil, let view = FenceFreeView(text) {
+                let plainNow = Set(hits(of: c, in: text))
+                for r in hits(of: c, in: view.text).compactMap({ view.originalRange(of: $0, in: text) })
+                where !plainNow.contains(r) {
+                    let ns = NSRange(r, in: text)
+                    track?.pending.append(.init(start: ns.location, end: NSMaxRange(ns), name: c.rule.name, order: index))
+                }
+            }
         }
         // Second reading, for rules that may span lines: the text with its code-fence lines
         // taken out. ``Layout/text(_:)`` puts a ```` ``` ```` line between a fenced line and the
@@ -82,19 +99,154 @@ public struct Redactor {
         // crosses a fence line takes that line with it, so a fenced block can be left without
         // its closing line; the secret matters more.
         // Builtins are skipped (they never cross a newline), so their output is unchanged.
-        guard compiled.contains(where: \.readsPastFences), FenceFreeView.mayHaveFence(text) else { return (text, report) }
-        for c in compiled where c.readsPastFences {
-            guard let view = FenceFreeView(text) else { break }
-            // The same rule read plainly over the text as it is now: a view hit at one of these
-            // spans is one the plain pass finds anyway (in the text a later rule left), so it is
-            // not new. Every other non-empty view hit is: one that crosses a fence line, and one
-            // that only sees across it (a lookbehind such as `(?<=creds-begin\n)`, or `$`).
-            let plainNow = Set(hits(of: c, in: text))
-            let extra = hits(of: c, in: view.text).compactMap { view.originalRange(of: $0, in: text) }
-                .filter { !plainNow.contains($0) }
-            Self.replace(extra, with: c.rule.name, in: &text, report: &report)
+        //
+        // The early hits recorded in the loop above are replaced last, after this reading, so
+        // everything up to here is exactly what it was without them; they only widen it.
+        if compiled.contains(where: \.readsPastFences), FenceFreeView.mayHaveFence(text) {
+            for c in compiled where c.readsPastFences {
+                guard let view = FenceFreeView(text) else { break }
+                // The same rule read plainly over the text as it is now: a view hit at one of
+                // these spans is one the plain pass finds anyway (in the text a later rule
+                // left), so it is not new. Every other non-empty view hit is: one that crosses a
+                // fence line, and one that only sees across it (a lookbehind such as
+                // `(?<=creds-begin\n)`, or `$`).
+                let plainNow = Set(hits(of: c, in: text))
+                let extra = hits(of: c, in: view.text).compactMap { view.originalRange(of: $0, in: text) }
+                    .filter { !plainNow.contains($0) }
+                Self.replace(extra, with: c.rule.name, in: &text, report: &report, track: &track)
+            }
         }
+        track?.apply(to: &text, report: &report)
         return (text, report)
+    }
+
+    /// Swift: the early fence-free hits of the custom rules, kept in step with the text until
+    /// they are replaced at the end of ``redact(_:)``. All offsets are UTF-16 in the text as it
+    /// is now; every ``replace(_:with:in:report:track:)`` moves them.
+    ///
+    /// Without a fence a custom rule reads the original text (custom rules go first). Across a
+    /// fence it used to read the text only after the builtins, so a builtin that replaced the
+    /// rule's first-line cue (PRIVATE_KEY on `-----BEGIN RSA PRIVATE KEY-----`, EMAIL on
+    /// `alice@corp.com`) left the second line, the secret, in the output. Replacing an early hit
+    /// right away would fix that and break the reverse: the custom rule would take away a
+    /// builtin's cue (`password`) and that builtin's value would stay. Recording it and
+    /// replacing it last does neither: every rule reads what it read before, and the end step
+    /// only turns more of the text into a token.
+    struct FenceTrack {
+        /// One early hit. A replace it overlaps widens it to cover that whole new token.
+        struct Pending { var start: Int; var end: Int; let name: String; let order: Int }
+        var pending: [Pending] = []
+        /// Every `[NAME]` token placed since the start that is still whole: sorted, never
+        /// overlapping. The end step folds the tokens an early hit swallows into its own, and
+        /// takes their counts back, so the report counts what is in the text (`[KEYBODY]`
+        /// counts once, as it does without a fence, not as KEYBODY plus PRIVATE_KEY).
+        var tokens: [(start: Int, end: Int, name: String)] = []
+
+        /// Moves everything across one replace: each of `hits` (sorted, not overlapping, offsets
+        /// in the text before it) became a token `length` units long named `name`.
+        mutating func shift(_ hits: [NSRange], length: Int, name: String) {
+            if hits.isEmpty { return }
+            // moveBefore[k]: how far text after hits 0..<k moved (each hit's token length minus
+            // its own length, added up).
+            var moveBefore = [0]
+            moveBefore.reserveCapacity(hits.count + 1)
+            for h in hits { moveBefore.append(moveBefore[moveBefore.count - 1] + length - h.length) }
+            // The first hit that ends after offset p (hits are sorted by end too). Binary search,
+            // so many tokens and many hits stay n log n.
+            func firstEndingAfter(_ p: Int) -> Int {
+                var lo = 0, hi = hits.count
+                while lo < hi {
+                    let mid = (lo + hi) / 2
+                    if NSMaxRange(hits[mid]) <= p { lo = mid + 1 } else { hi = mid }
+                }
+                return lo
+            }
+            // Old tokens: one a hit touches is no longer whole and drops out; the rest move.
+            var old: [(start: Int, end: Int, name: String)] = []
+            old.reserveCapacity(tokens.count)
+            for t in tokens {
+                let k = firstEndingAfter(t.start)
+                if k < hits.count && hits[k].location < t.end { continue }
+                old.append((t.start + moveBefore[k], t.end + moveBefore[k], t.name))
+            }
+            // New tokens, merged in by start (no old token overlaps a hit, so none overlap).
+            var merged: [(start: Int, end: Int, name: String)] = []
+            merged.reserveCapacity(old.count + hits.count)
+            var oi = 0
+            for (k, h) in hits.enumerated() {
+                let s = h.location + moveBefore[k]
+                while oi < old.count && old[oi].start < s { merged.append(old[oi]); oi += 1 }
+                merged.append((s, s + length, name))
+            }
+            merged += old[oi...]
+            tokens = merged
+            // Early hits: an edge inside a hit moves out to that token's edge, so an early hit
+            // never ends up covering part of a token.
+            for i in pending.indices {
+                let p = pending[i].start, q = pending[i].end
+                let k = firstEndingAfter(p)
+                pending[i].start = k < hits.count && hits[k].location < p
+                    ? hits[k].location + moveBefore[k] : p + moveBefore[k]
+                let j = firstEndingAfter(q)
+                pending[i].end = j < hits.count && hits[j].location < q
+                    ? hits[j].location + moveBefore[j] + length : q + moveBefore[j]
+            }
+        }
+
+        /// Replaces the early hits. Overlapping hits become one token, named for the one that
+        /// starts first (the earlier rule on a tie). Each also takes in any token it overlaps,
+        /// whole, and that token's count goes back, so a hit the late reading already replaced
+        /// is counted once.
+        mutating func apply(to text: inout String, report: inout RedactionReport) {
+            guard !pending.isEmpty else { return }
+            let sorted = pending.sorted { ($0.start, $0.order) < ($1.start, $1.order) }
+            // The first token that ends after offset p.
+            func firstTokenEndingAfter(_ p: Int) -> Int {
+                var lo = 0, hi = tokens.count
+                while lo < hi {
+                    let mid = (lo + hi) / 2
+                    if tokens[mid].end <= p { lo = mid + 1 } else { hi = mid }
+                }
+                return lo
+            }
+            var spans: [Pending] = []
+            for var s in sorted {
+                var t = firstTokenEndingAfter(s.start)
+                while t < tokens.count && tokens[t].start < s.end {
+                    s.start = min(s.start, tokens[t].start)
+                    s.end = max(s.end, tokens[t].end)
+                    t += 1
+                }
+                if let last = spans.last, last.end > s.start {
+                    spans[spans.count - 1].start = min(last.start, s.start)
+                    spans[spans.count - 1].end = max(last.end, s.end)
+                } else {
+                    spans.append(s)
+                }
+            }
+            // Rebuild the text on UTF-16 units. Every edge is a hit's or a token's edge, so no
+            // surrogate pair is split.
+            let units = Array(text.utf16)
+            var out: [UInt16] = []
+            out.reserveCapacity(units.count)
+            var at = 0
+            for s in spans {
+                var t = firstTokenEndingAfter(s.start)
+                while t < tokens.count && tokens[t].start < s.end {
+                    let n = tokens[t].name
+                    report.counts[n, default: 0] -= 1
+                    if report.counts[n] == 0 { report.counts[n] = nil }
+                    t += 1
+                }
+                report.counts[s.name, default: 0] += 1
+                out += units[at..<s.start]
+                out += "[\(s.name)]".utf16
+                at = s.end
+            }
+            out += units[at...]
+            text = String(decoding: out, as: UTF16.self)
+            pending = []
+        }
     }
 
     /// True when `line` is a code-fence line (``` or ~~~, as CommonMark has them), the lines the
@@ -105,9 +257,15 @@ public struct Redactor {
     }
 
     /// Swift: replaces each span in `hits` (sorted, not overlapping) with `[name]` and counts it.
+    /// `track`, when there is one, is moved along with the text.
     private static func replace(_ hits: [Range<String.Index>], with name: String,
-                                in text: inout String, report: inout RedactionReport) {
+                                in text: inout String, report: inout RedactionReport,
+                                track: inout FenceTrack?) {
         if hits.isEmpty { return }
+        if track != nil {
+            // UTF-16 offsets in the text before this replace.
+            track?.shift(hits.map { NSRange($0, in: text) }, length: "[\(name)]".utf16.count, name: name)
+        }
         var result = ""
         var last = text.startIndex
         for r in hits {
