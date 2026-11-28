@@ -10,9 +10,9 @@ final class FakeClipboard: ClipboardSource {
     var image: Data?
     var fileURLs: [URL] = []
     var text: String?
-    /// A Finder copy whose file can no longer be resolved (deleted, or volume unmounted): it
-    /// still hides the image, as on the real pasteboard, but yields no URL.
-    var unresolvableFileItem = false
+    /// Finder-copied items whose file can no longer be resolved (deleted, or volume unmounted):
+    /// they count as file items and hide the image, as on the real pasteboard, but yield no URL.
+    var unresolvableFileItems = 0
     private(set) var changeCount = 1
     private(set) var reads = 0
     private(set) var writes: [ClipboardPayload] = []
@@ -37,7 +37,7 @@ final class FakeClipboard: ClipboardSource {
         return image
     }
     func readFileURLs() -> [URL] { reads += 1; return fileURLs }
-    var holdsFileItems: Bool { !fileURLs.isEmpty || unresolvableFileItem }
+    var fileItemCount: Int { fileURLs.count + unresolvableFileItems }
 
     @discardableResult
     func replace(with payload: ClipboardPayload) -> Bool {
@@ -204,15 +204,27 @@ final class ClipboardTests: XCTestCase {
         let clip = PasteboardClipboard(pb)
         XCTAssertEqual(clip.readFileURLs(), [])
         XCTAssertNil(clip.readImage())
+        XCTAssertEqual(clip.fileItemCount, 1)
         XCTAssertTrue(clip.holdsFileItems)
+    }
+
+    func testTwoFileItemsWithOneUnresolvableStillCountTwo() throws {
+        let pb = try privatePasteboard()
+        let good = NSPasteboardItem(), gone = NSPasteboardItem()
+        good.setData(URL(fileURLWithPath: "/tmp/a.png").dataRepresentation, forType: .fileURL)
+        gone.setData(Data("not a url".utf8), forType: .fileURL)
+        XCTAssertTrue(pb.writeObjects([good, gone]))
+        let clip = PasteboardClipboard(pb)
+        XCTAssertEqual(clip.readFileURLs().count, 1)
+        XCTAssertEqual(clip.fileItemCount, 2, "a copied file that is gone still counts")
     }
 
     func testFakeModelsAnUnresolvableFileItem() {
         let fake = FakeClipboard(image: Data([1]))
-        fake.unresolvableFileItem = true
+        fake.unresolvableFileItems = 1
         XCTAssertNil(fake.readImage())
         XCTAssertEqual(fake.readFileURLs(), [])
-        XCTAssertTrue(fake.holdsFileItems)
+        XCTAssertEqual(fake.fileItemCount, 1)
     }
 
     func testFakeFileURLHidesItsImage() {
