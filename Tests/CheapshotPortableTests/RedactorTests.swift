@@ -211,12 +211,15 @@ final class RedactorTests: XCTestCase {
             "pg://" + String(repeating: "u", count: n),
             String(repeating: "x://" + String(repeating: "u", count: 200), count: n / 204),
             String(repeating: "(x://u:1", count: n / 8),
-            // CS-05 gap 4: the fence-free second reading. Many fence lines, many hits between
-            // them, one huge fence line, and backtick runs that are not fences.
+            // CS-05 gap 4: fence lines (builtins never take the fence-free second reading, so
+            // these must cost what the same text without fences costs). Many fence lines, many
+            // hits between them, one huge fence line, backtick runs that are not fences, and a
+            // heavy shape inside a fence.
             String(repeating: "```\n", count: n / 4),
             String(repeating: "a@b.io\n```\n", count: n / 11),
             String(repeating: "~", count: n),
             String(repeating: "```a`\n", count: n / 6),
+            "```\n" + String(repeating: "token: ", count: n / 7) + "\n```",
         ]
         let redactor = Redactor()
         var slowest = (0.0, "")
@@ -256,6 +259,7 @@ final class RedactorTests: XCTestCase {
         let json = try JSONSerialization.data(withJSONObject: [
             ["name": "MYCREDS", "pattern": #"creds-begin\n[0-9a-f]{20}"#],
             ["name": "CODEBLOCK", "pattern": #"(?s)~~~~.*?~~~~"#],
+            ["name": "FOOPW", "pattern": #"foo\npassword"#],
         ])
         let r = Redactor(customRules: try RuleFile.parse(json))
         func line(_ n: Int, _ text: String, fenced: Bool) -> RenderedLine {
@@ -276,6 +280,41 @@ final class RedactorTests: XCTestCase {
         let block = r.redact("a\n~~~~\npassword-less text\n~~~~\nb")
         XCTAssertEqual(block.text, "a\n[CODEBLOCK]\nb")
         XCTAssertEqual(block.report.counts["CODEBLOCK"], 1)
+        // A hit inside a fenced block, which both readings see, is replaced and counted once.
+        let hexRule = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "HEX", "pattern": "[0-9a-f]{20}"],
+        ])))
+        let inside = hexRule.redact("```\n\(hex)\n```")
+        XCTAssertEqual(inside.text, "```\n[HEX]\n```")
+        XCTAssertEqual(inside.report.counts["HEX"], 1)
+        // The fence-free reading runs after the builtins, so a custom rule that crosses a fence
+        // to eat a builtin's cue (`password`) cannot bring the builtin's value back.
+        let cue = r.redact("foo\n```\npassword: hunter2abc9").text
+        XCTAssertFalse(cue.contains("hunter2abc9"), cue.debugDescription)
+        XCTAssertEqual(cue, "[FOOPW]: [SECRET]")
+    }
+
+    // The fence-free reading for a custom rule stays linear on fence-heavy input: many fence
+    // lines, each crossed by a hit.
+    func testCustomRuleAcrossManyFencesIsFast() throws {
+        let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "PAIR", "pattern": #"k\nv"#],
+        ])))
+        let n = 100_000
+        let text = String(repeating: "k\n```\nv\n", count: n / 8)
+        let start = Date()
+        let out = r.redact(text)
+        let elapsed = Date().timeIntervalSince(start)
+        #if os(Windows)
+        let limit = 20.0
+        #elseif targetEnvironment(simulator)
+        let limit = 3.0
+        #else
+        let limit = 2.0
+        #endif
+        XCTAssertLessThan(elapsed, limit, "took \(elapsed)s")
+        XCTAssertEqual(out.report.counts["PAIR"], n / 8)
+        XCTAssertFalse(out.text.contains("k\n"))
     }
 
     // The fence-free second reading must not change what the builtins do: every golden case
@@ -292,8 +331,10 @@ final class RedactorTests: XCTestCase {
             let input = chomp(GoldenTests.assemble(try String(contentsOf: root.appendingPathComponent("cases/\(name)"), encoding: .utf8)))
             let expected = chomp(try String(contentsOf: root.appendingPathComponent("expected/\(name)"), encoding: .utf8))
             let fenced = (["```"] + input.components(separatedBy: "\n").flatMap { [$0, "```"] }).joined(separator: "\n")
-            let out = redactor.redact(fenced).text.components(separatedBy: "\n").filter { $0 != "```" }
+            let result = redactor.redact(fenced)
+            let out = result.text.components(separatedBy: "\n").filter { $0 != "```" }
             XCTAssertEqual(out.joined(separator: "\n"), expected, "golden case \(name) inside fences")
+            XCTAssertEqual(result.report, redactor.redact(input).report, "golden case \(name) counts inside fences")
         }
     }
 }

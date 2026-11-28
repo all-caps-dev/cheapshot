@@ -17,7 +17,13 @@ public struct Redactor {
     private struct Compiled {
         let rule: Rule
         let re: NSRegularExpression
+        /// False for a builtin. No builtin crosses a newline (`testNewRulesStayOnOneLine`), so
+        /// only the other rules get the fence-free second reading in ``redact(_:)``.
+        let readsPastFences: Bool
     }
+
+    /// Name and pattern of every builtin, to tell a builtin from a custom rule.
+    private static let builtinKeys = Set(Rule.builtin.map { $0.name + "\u{0}" + $0.pattern })
 
     public struct CompileError: Error, Equatable, CustomStringConvertible {
         public let failures: [String]
@@ -37,7 +43,8 @@ public struct Redactor {
             guard let re = try? NSRegularExpression(pattern: rule.pattern, options: rule.options) else {
                 failures.append(rule); continue
             }
-            compiled.append(Compiled(rule: rule, re: re))
+            compiled.append(Compiled(rule: rule, re: re,
+                                     readsPastFences: !Self.builtinKeys.contains(rule.name + "\u{0}" + rule.pattern)))
         }
         self.compiled = compiled
         self.compileFailures = failures
@@ -59,71 +66,44 @@ public struct Redactor {
     public func redact(_ input: String) -> (text: String, report: RedactionReport) {
         var text = input
         var report = RedactionReport()
-        // A placeholder holds no backtick or tilde, so text with no fence run before the first
-        // rule has none after any rule: check once, not once per rule.
-        let mayHaveFences = FenceFreeView.mayHaveFence(input)
-        // The fence-free view of `text`, built when first needed and again only after a rule
-        // changes the text. The outer nil is "not built yet"; the inner nil is "no fence line".
-        var view: FenceFreeView?? = nil
         for c in compiled {
-            let hits: [Range<String.Index>]
-            if mayHaveFences {
-                if view == nil { view = .some(FenceFreeView(text)) }
-                hits = self.hitsSeeingPastFences(of: c, in: text, view: view!)
-            } else {
-                hits = self.hits(of: c, in: text)
-            }
-            if hits.isEmpty { continue }
-            view = nil
-            var result = ""
-            var last = text.startIndex
-            for r in hits {
-                result += text[last..<r.lowerBound] + "[\(c.rule.name)]"
-                report.counts[c.rule.name, default: 0] += 1
-                last = r.upperBound
-            }
-            result += text[last...]
-            text = result
+            Self.replace(hits(of: c, in: text), with: c.rule.name, in: &text, report: &report)
+        }
+        // Second reading, for rules that may span lines: the text with its code-fence lines
+        // taken out. ``Layout/text(_:)`` puts a ```` ``` ```` line between a fenced line and the
+        // unfenced line after it, and a document may hold fences of its own, so a custom rule
+        // whose pattern spans two lines (`creds-begin\n[0-9a-f]{20}`) never matched across one
+        // and its secret stayed in the text (CS-05 gap 4).
+        //
+        // It runs after every rule has had its plain pass, so the first loop above is exactly
+        // the redaction there was before and nothing it replaces can be lost: a custom rule
+        // that eats a builtin's cue (`password`) here eats it after the builtin has already
+        // replaced the value. Only a hit that crosses a fence line is kept, since any other hit
+        // the plain pass would have found already. The hit takes the fence line with it, so a
+        // fenced block can be left without its closing line; the secret matters more.
+        // Builtins are skipped (they never cross a newline), so their output is unchanged.
+        guard compiled.contains(where: \.readsPastFences), FenceFreeView.mayHaveFence(text) else { return (text, report) }
+        for c in compiled where c.readsPastFences {
+            guard let view = FenceFreeView(text) else { break }
+            let crossing = hits(of: c, in: view.text).compactMap { view.originalRangeCrossingFence(of: $0, in: text) }
+            Self.replace(crossing, with: c.rule.name, in: &text, report: &report)
         }
         return (text, report)
     }
 
-    /// Swift: the spans one rule replaces in `text`, plus the spans it replaces in the same text
-    /// with its code-fence lines taken out, merged.
-    ///
-    /// Why: ``Layout/text(_:)`` puts a ```` ``` ```` line between a fenced line and the unfenced
-    /// line after it, and a document may hold fences of its own. A rule whose pattern spans two
-    /// lines (a custom `creds-begin\n[0-9a-f]{20}`) then no longer matched, and its secret
-    /// survived in the text while the per-line redaction, which joins lines without fences,
-    /// caught it. Reading the text both ways and keeping every hit from either is fail closed:
-    /// nothing the plain scan replaces is dropped. A hit from the fence-free reading that spans
-    /// a fence line takes that line with it.
-    ///
-    /// No builtin crosses a newline (see `testNewRulesStayOnOneLine`), and no builtin matches
-    /// inside a fence line, so for the builtins both readings find the same spans and the
-    /// output is unchanged. Text with no fence run never comes here (see `redact`).
-    private func hitsSeeingPastFences(of c: Compiled, in text: String, view: FenceFreeView?) -> [Range<String.Index>] {
-        let plain = hits(of: c, in: text)
-        guard let view else { return plain }
-        let extra = hits(of: c, in: view.text).compactMap { view.originalRange(of: $0, in: text) }
-        return Self.merged(plain, extra)
-    }
-
-    /// Swift: two sorted lists of non-overlapping spans as one, with spans that overlap (or are
-    /// equal) joined into a single span. Spans that only touch stay separate, as the plain scan
-    /// leaves them.
-    static func merged(_ a: [Range<String.Index>], _ b: [Range<String.Index>]) -> [Range<String.Index>] {
-        if b.isEmpty { return a }
-        let all = (a + b).sorted { ($0.lowerBound, $0.upperBound) < ($1.lowerBound, $1.upperBound) }
-        var out: [Range<String.Index>] = []
-        for r in all {
-            if let last = out.last, r.lowerBound < last.upperBound || r == last {
-                out[out.count - 1] = last.lowerBound..<max(last.upperBound, r.upperBound)
-            } else {
-                out.append(r)
-            }
+    /// Swift: replaces each span in `hits` (sorted, not overlapping) with `[name]` and counts it.
+    private static func replace(_ hits: [Range<String.Index>], with name: String,
+                                in text: inout String, report: inout RedactionReport) {
+        if hits.isEmpty { return }
+        var result = ""
+        var last = text.startIndex
+        for r in hits {
+            result += text[last..<r.lowerBound] + "[\(name)]"
+            report.counts[name, default: 0] += 1
+            last = r.upperBound
         }
-        return out
+        result += text[last...]
+        text = result
     }
 
     /// Swift: a text with its code-fence lines removed, and the way back to the original's
@@ -239,13 +219,12 @@ public struct Redactor {
             return pieces[lo].start + (q - viewStarts[lo]) + (asEnd ? 1 : 0)
         }
 
-        /// `r`, a span in ``text``, as a span in `original`. A span that crosses a removed fence
-        /// line covers that line too.
-        func originalRange(of r: Range<String.Index>, in original: String) -> Range<String.Index>? {
+        /// `r`, a span in ``text``, as a span in `original`, but only when it crosses a removed
+        /// fence line (and so covers that line too); nil for a span inside one kept stretch.
+        func originalRangeCrossingFence(of r: Range<String.Index>, in original: String) -> Range<String.Index>? {
             let ns = NSRange(r, in: text)
-            let empty = ns.length == 0
-            guard let lo = originalOffset(ns.location, asEnd: false),
-                  let hi = empty ? lo : originalOffset(NSMaxRange(ns), asEnd: true) else { return nil }
+            guard ns.length > 0, let lo = originalOffset(ns.location, asEnd: false),
+                  let hi = originalOffset(NSMaxRange(ns), asEnd: true), hi - lo > ns.length else { return nil }
             return Range(NSRange(location: lo, length: hi - lo), in: original)
         }
     }
