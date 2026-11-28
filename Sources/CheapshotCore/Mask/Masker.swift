@@ -204,7 +204,9 @@ public enum Masker {
         // original, so the model would get the raw pixels the mask was meant to keep from it.
         // Fail closed instead: no copy, no allow entry. A non-screenshot-like image (a photo) is
         // not retried and not gated: an empty read there is an answer, not a failure.
-        if checked.retried, checked.status == .empty {
+        // Keyed on `screenshotLike` and "anything but .ok" rather than `retried && .empty`, so a
+        // future status or a change to when the retry runs still fails closed here.
+        if checked.screenshotLike, checked.status != .ok {
             throw Failure(message: "OCR found no text in what looks like a screenshot, even after a retry; nothing was masked or written")
         }
         // The counts the user sees match a plain `cheapshot --json` run of the same image.
