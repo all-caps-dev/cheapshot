@@ -155,6 +155,32 @@ printf '%s\t%s\t%s\n' "$((now + 200))" "$TMPDIR/link.png" "$sum" > "$TMPDIR/chea
 dec=$(input "$TMPDIR/link.png" | run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "mask entry: a symlink is denied even when its target hashes right" || fail "mask entry: symlink denied (dec=$dec)"
 
+# 6v. PR #43 review: a mask entry is honoured only when `cheapshot --version` is at least 0.6.1.
+# A v0.6.0 mask that read a screenshot blank wrote the unmasked original as its copy, so on an old
+# binary the entry is used up, the Read is denied, and the user is told to update and re-run mask.
+for v in 0.6.0 0.6.1-dev garbage; do
+  fresh
+  now=$(date +%s)
+  m="$TMPDIR/masked.png"; printf 'masked-bytes' > "$m"
+  sum=$(shasum -a 256 "$m" | cut -d' ' -f1)
+  printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+  out=$(input "$m" | FAKE_VERSION="$v" run_hook 2>/dev/null)
+  dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // empty')
+  [ "$dec" = deny ] && pass "mask entry on $v binary: denied" || fail "mask entry on $v binary: $out"
+  [ -z "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedInput.file_path // empty')" ] && pass "mask entry on $v binary: no copy handed over" || fail "mask entry on $v binary: copy handed over"
+  grep -q "$m" "$TMPDIR/cheapshot-allow" && fail "mask entry on $v binary: entry not used up" || pass "mask entry on $v binary: entry used up"
+  case "$(printf '%s' "$out" | jq -r '.systemMessage // empty')" in *"mask entry for this file was not honoured"*"brew upgrade"*) pass "mask entry on $v binary: user told why";; *) fail "mask entry on $v binary: user message: $out";; esac
+  case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"brew "*|*"not honoured"*) fail "mask entry on $v binary: model told the bypass detail";; *) pass "mask entry on $v binary: model reason unchanged";; esac
+done
+# The same entry on a 0.6.1 binary is still honoured (the 6m behaviour).
+fresh
+now=$(date +%s)
+m="$TMPDIR/masked.png"; printf 'masked-bytes' > "$m"
+sum=$(shasum -a 256 "$m" | cut -d' ' -f1)
+printf '%s\t%s\t%s\n' "$((now + 200))" "$m" "$sum" > "$TMPDIR/cheapshot-allow"
+dec=$(input "$m" | FAKE_VERSION=0.6.1 run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
+[ "$dec" = allow ] && pass "mask entry on 0.6.1 binary: still allowed" || fail "mask entry on 0.6.1 binary: dec=$dec"
+
 # 6s. NOV-117: `cheapshot allow` of an image writes a stripped copy and a four-field entry
 # "<exp>\t<original>\t<sha256 of copy>\t<copy>". A Read of the original is rewritten to a fresh
 # copy of the stripped copy; the original's bytes (and its EXIF) never reach the Read.
