@@ -655,16 +655,19 @@ o=$(input /tmp/x.pdf | FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
 fresh
 o=$(input /tmp/x.pdf | CHEAPSHOT_STRICT=1 FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
 [ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "strict: empty PDF result still passes through" || fail "strict empty PDF result: $o $(cat "$FAKE_LOG")"
-# 15c. a .PNG whose result carries .source.pages is a PDF result: the shape decides. Empty
-# passes as pixels; with text the deny carries the PDF ask-the-user line, never mask.
+# 15c. a .PNG whose result carries .source.pages does not get the PDF leniency: the PDF handling
+# needs the .pdf name too (the real binary routes on extension, so an image result never has
+# .source.pages). Empty is denied in default and strict mode, and is never a pass-through; with
+# text it gets the image handling, mask line and all.
 fresh
-o=$(input /tmp/shot.PNG | FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
-[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass ".PNG with a PDF result and no text passes through" || fail ".PNG with a PDF result, empty: $o $(cat "$FAKE_LOG")"
+o=$(input /tmp/shot.PNG | FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null); denied ".PNG with a PDF result and no text"
+grep -q -- '--note-passthrough' "$FAKE_LOG" && fail ".PNG with a PDF result, empty: not a pass-through" || pass ".PNG with a PDF result, empty: not recorded as a pass-through"
+fresh
+o=$(input /tmp/shot.PNG | CHEAPSHOT_STRICT=1 FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null); denied "strict: .PNG with a PDF result and no text"
 fresh
 o=$(input /tmp/shot.PNG | FAKE_RAW="$(pdfshape 'hello' 3)" run_hook 2>/dev/null); denied ".PNG with a PDF result and text"
 reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
-case "$reason" in *"ask the user to approve it.") pass ".PNG with a PDF result: PDF ask-the-user line";; *) fail ".PNG with a PDF result line: $reason";; esac
-case "$reason" in *"cheapshot mask"*) fail ".PNG with a PDF result: reason must not offer mask: $reason";; *) pass ".PNG with a PDF result: no mask in the reason";; esac
+case "$reason" in *"cheapshot mask '/tmp/shot.PNG'"*) pass ".PNG with a PDF result: image mask line";; *) fail ".PNG with a PDF result line: $reason";; esac
 # Without .source.pages the same .PNG is an image: the old image handling, mask line and all.
 fresh
 o=$(input /tmp/shot.PNG | FAKE_RAW="$(ocr_result '"ok"' false 'hello')" run_hook 2>/dev/null)
