@@ -19,6 +19,8 @@ public struct Options: Equatable {
         case newest(dir: String, count: Int)
         case cleanshot(count: Int)
         case listRules(json: Bool)       // the rule catalog with each rule on or off (NOV-156)
+        /// Image bytes or one copied file from the general pasteboard, always redacted (NOV-155).
+        case clipboard
     }
 
     public var command: Command
@@ -185,6 +187,7 @@ public struct Options: Equatable {
         var cleanshot: Int? = nil
         var text: String? = nil
         var video: String? = nil
+        var clipboard = false
         var ledger = false, migrate = false, byMode = false, listRules = false
         var days: Int? = nil
         var i = 0
@@ -248,6 +251,7 @@ public struct Options: Equatable {
             case "--pages":     o.pages = try parsePages(try value(a))
             case "--text":      text = try value(a)
             case "--video":     video = try value(a)
+            case "--clipboard": clipboard = true
             case "--frames-at":
                 let raw = try value(a)
                 let times = try raw.split(separator: ",").map { try parseTimestamp(String($0).trimmingCharacters(in: .whitespaces)) }
@@ -293,12 +297,28 @@ public struct Options: Equatable {
             let other: [(Bool, String)] = [(ledger, "--ledger"), (text != nil, "--text"), (video != nil, "--video"),
                                            (newest != nil, "--newest"), (cleanshot != nil, "--cleanshot"),
                                            (o.frameTimes != nil, "--frames-at or --chapters"), (migrate, "--migrate"),
-                                           (days != nil, "--days"), (byMode, "--by-mode"), (!o.redact, "--raw")]
+                                           (days != nil, "--days"), (byMode, "--by-mode"), (!o.redact, "--raw"),
+                                           (clipboard, "--clipboard")]
             if let clash = other.first(where: { $0.0 }) {
                 throw UsageError(message: "--list-rules cannot be combined with \(clash.1)")
             }
             o.command = .listRules(json: o.json); return o
         }
+        // --clipboard is its own input and always redacts (plan 4.3). Everything that would pick
+        // another input, or switch redaction off, is refused rather than quietly ignored.
+        if clipboard {
+            if let m = mode { throw UsageError(message: "--clipboard cannot be combined with \(m)") }
+            if !positional.isEmpty {
+                throw UsageError(message: "files cannot be combined with --clipboard: \(positional.joined(separator: " "))")
+            }
+            if !o.redact { throw UsageError(message: "--clipboard always redacts; --raw is not allowed with it") }
+            if o.pages != nil { throw UsageError(message: "--pages cannot be combined with --clipboard") }
+            if migrate || days != nil || byMode { throw UsageError(message: "--migrate, --days and --by-mode need --ledger") }
+            if o.frameTimes != nil { throw UsageError(message: "--frames-at needs --video") }
+            o.command = .clipboard
+            return o
+        }
+
         if ledger { o.command = .ledger(json: o.json, migrate: migrate, days: days, byMode: byMode); return o }
         if migrate { throw UsageError(message: "--migrate needs --ledger") }
         if days != nil { throw UsageError(message: "--days needs --ledger") }
