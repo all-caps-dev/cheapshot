@@ -1,4 +1,7 @@
 import Foundation
+#if os(Windows)
+import WinSDK
+#endif
 
 public struct LedgerEntry: Codable, Equatable {
     public var ts: String
@@ -118,11 +121,31 @@ public struct Ledger {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var data = try Ledger.encoder.encode(entry)
         data.append(0x0A)
+        #if os(Windows)
+        // Windows has no POSIX open(2) that Swift can call with a mode (the CRT's _open is
+        // variadic). FILE_APPEND_DATA without FILE_WRITE_DATA makes every WriteFile land at the
+        // end of the file in one piece, the same guarantee O_APPEND gives below. Unverified until a
+        // windows-core run shows LedgerTests passing: that step is not gating, so a green job alone
+        // does not prove this path; read the step's own result.
+        let path = url.withUnsafeFileSystemRepresentation { String(cString: $0!) }
+        let handle = path.withCString(encodedAs: UTF16.self) {
+            CreateFileW($0, DWORD(FILE_APPEND_DATA), DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE), nil,
+                        DWORD(OPEN_ALWAYS), DWORD(FILE_ATTRIBUTE_NORMAL), nil)
+        }
+        guard handle != INVALID_HANDLE_VALUE else {
+            throw LedgerError(message: "cannot open \(url.path): Windows error \(GetLastError())")
+        }
+        defer { CloseHandle(handle) }
+        var written: DWORD = 0
+        let ok = data.withUnsafeBytes { WriteFile(handle, $0.baseAddress, DWORD($0.count), &written, nil) }
+        guard ok, Int(written) == data.count else { throw LedgerError(message: "short write to \(url.path)") }
+        #else
         let fd = open(url.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
         guard fd >= 0 else { throw LedgerError(message: "cannot open \(url.path): \(String(cString: strerror(errno)))") }
         defer { close(fd) }
         let written = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
         guard written == data.count else { throw LedgerError(message: "short write to \(url.path)") }
+        #endif
     }
 
     public func entries() throws -> [LedgerEntry] {

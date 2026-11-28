@@ -1,8 +1,9 @@
 #!/bin/sh
 # CheapshotCore on iOS (native app plan, step 1): build Core and its tests for the iOS Simulator
 # and for a device, then run the Core tests (the 62 golden redaction cases among them) on an
-# iPhone Simulator. NSRegularExpression comes from the OS, so redaction on iOS is measured here,
-# not assumed.
+# iPhone Simulator. Since the Windows split the golden cases sit in CheapshotPortableTests,
+# which the scheme runs too. NSRegularExpression comes from the OS, so redaction on iOS is
+# measured here, not assumed.
 #
 # The Simulator is chosen on purpose and printed: the newest available iOS runtime that is 17 or
 # later (Core's iOS floor), and the first iPhone on it. The test run must report at least
@@ -18,10 +19,11 @@ set -e
 cd "$(dirname "$0")/.."
 dd="${DERIVED_DATA:-.build/xcode-ios}"
 scheme=CheapshotCore-iOS
-# CheapshotCoreTests has 189 tests on macOS; 11 are macOS only (FFmpegFrameSourceTests and the
-# ImageLoaderTests that compare with AppKit's NSImage), so about 178 run on iOS. 175 leaves room
-# for a test removed on purpose, while still failing on a run that skipped any suite of 4 or more
-# (PR #22 review: at 140, all of LayoutTests could go missing unnoticed).
+# The scheme runs two bundles: CheapshotCoreTests (90 tests on macOS, 11 of them macOS only:
+# 9 ffmpeg, 2 that compare with AppKit's NSImage) and CheapshotPortableTests (99), so 178 run on
+# iOS. 175 leaves room for a test removed on purpose, while still failing on 0 or on a run that
+# skipped a whole bundle or any suite of 4 or more (PR #22 review: at 140, all of
+# LayoutTests could go missing unnoticed).
 min_tests="${MIN_TESTS:-175}"
 
 echo "== build: CheapshotCore for an iOS device"
@@ -68,9 +70,15 @@ set -e
 cat "$log"
 [ "$rc" -eq 0 ] || { echo "xcodebuild test failed (exit $rc)"; exit 1; }
 
-# XCTest prints "Executed N tests, ..." per suite and once for the whole run; the largest N is
-# the run's total. No such line at all counts as 0.
-ran="$(sed -En 's/.*Executed ([0-9]+) tests?,.*/\1/p' "$log" | sort -n | tail -n 1)"
+# XCTest prints "Executed N tests, ..." per suite, per bundle and sometimes once for the whole
+# run. With two bundles there may be no whole-run line, so add up the line that follows each
+# "Test Suite '<bundle>.xctest' passed|failed". With no bundle lines, fall back to the largest
+# N. No Executed line at all counts as 0.
+ran="$(awk '
+  /Test Suite .*\.xctest. (passed|failed)/ { want = 1; next }
+  want && /Executed [0-9]+ tests?,/ { match($0, /Executed [0-9]+/); sum += substr($0, RSTART + 9, RLENGTH - 9); seen = 1; want = 0 }
+  END { if (seen) print sum }' "$log")"
+[ -n "$ran" ] || ran="$(sed -En 's/.*Executed ([0-9]+) tests?,.*/\1/p' "$log" | sort -n | tail -n 1)"
 ran="${ran:-0}"
 [ "$ran" -ge "$min_tests" ] || { echo "ran $ran tests on iOS $runtime, expected at least $min_tests"; exit 1; }
 # The golden redaction cases, by name: the whole point of this run (PR #22 review).

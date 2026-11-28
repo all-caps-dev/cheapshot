@@ -50,10 +50,21 @@ devices_17_18="== Devices ==
     iPhone 16 Pro ($U18) (Shutdown)
 -- watchOS 11.2 --
     Apple Watch Series 10 (46mm) (55555555-5555-5555-5555-555555555555) (Shutdown) "
-golden_line='Test Case '"'"'-[CheapshotCoreTests.GoldenTests testGoldenCases]'"'"' passed (0.412 seconds).'
+golden_line='Test Case '"'"'-[CheapshotPortableTests.GoldenTests testGoldenCases]'"'"' passed (0.412 seconds).'
 ok_out="$golden_line"'
 Test Suite '"'"'All tests'"'"' passed at 2026-11-25 16:00:00.000.
 	 Executed 178 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
+** TEST EXECUTE SUCCEEDED **'
+
+two_bundles="$golden_line"'
+Test Suite '"'"'CheapshotPortableTests.xctest'"'"' passed at 2026-11-27 16:00:00.000.
+	 Executed 99 tests, with 0 failures (0 unexpected) in 2.0 (2.0) seconds
+Test Suite '"'"'CheapshotCoreTests.xctest'"'"' passed at 2026-11-27 16:00:03.000.
+	 Executed 79 tests, with 0 failures (0 unexpected) in 1.0 (1.0) seconds
+** TEST EXECUTE SUCCEEDED **'
+one_bundle="$golden_line"'
+Test Suite '"'"'CheapshotPortableTests.xctest'"'"' passed at 2026-11-27 16:00:00.000.
+	 Executed 99 tests, with 0 failures (0 unexpected) in 2.0 (2.0) seconds
 ** TEST EXECUTE SUCCEEDED **'
 
 pass=0; fail=0
@@ -104,6 +115,9 @@ case_ "no runtime locally builds and says not run" 0 "" "== Runtimes ==" "== Dev
 case_ "runtime with no iPhone on CI fails" 1 true "$runtimes_17_18" "== Devices ==
 -- iOS 18.2 --
     iPad Air 13-inch (M2) ($UPAD) (Shutdown) " "$ok_out" 0 "no iPhone Simulator"
+
+case_ "two bundles with no whole-run line are added up" 0 true "$runtimes_17_18" "$devices_17_18" "$two_bundles" 0 "178 Core tests pass"
+case_ "one bundle alone is too few" 1 true "$runtimes_17_18" "$devices_17_18" "$one_bundle" 0 "ran 99 tests"
 
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

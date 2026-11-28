@@ -1,5 +1,5 @@
 import XCTest
-@testable import CheapshotCore
+@testable import CheapshotPortable
 
 final class LayoutTests: XCTestCase {
     /// A monospace line: 8 px per character, 16 px tall, top-left origin.

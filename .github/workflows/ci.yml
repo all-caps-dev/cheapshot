@@ -41,6 +41,55 @@ jobs:
       - name: Core on iOS
         run: scripts/check-ios-core.sh
 
+  # CheapshotPortable on Windows (cheapshot Windows investigation, section 7, "first step").
+  # Gating: the portable target builds and the redaction tests pass under Windows ICU, so the
+  # same rules redact the same way on both platforms. Not gating: the other portable tests and
+  # a probe that tries Windows.Media.Ocr from a plain unpackaged exe.
+  windows-core:
+    runs-on: windows-latest
+    # A stuck toolchain install or build must not hold the runner for the 6-hour default.
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # Keep LF line endings: Windows git turns them into CRLF on checkout by default, which
+      # would change every golden redaction input and fail the parity check for the wrong reason.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - name: Install Swift for Windows
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
+        with:
+          swift-version: swift-6.4.3-release
+          swift-build: 6.4.3-RELEASE
+      - name: Swift version
+        run: swift --version
+      # On Windows, Package.swift declares only CheapshotPortable and its tests.
+      - name: Build the portable target
+        run: swift build --target CheapshotPortable
+      # The script fails unless exactly 40 tests ran and testGoldenCases passed: swift test
+      # exits 0 when its filter matches nothing. Git Bash runs the POSIX sh script.
+      - name: Redaction tests (golden cases, redactor, validators, rule files)
+        shell: bash
+        run: scripts/check-redaction-tests.sh
+      # Layout, token and ledger tests: expected to surface Windows path and file differences
+      # (the ledger location and the WinSDK append path), so they report without failing the job.
+      - name: Other portable tests (layout, tokens, ledger), not gating
+        continue-on-error: true
+        run: swift test --filter "CheapshotPortableTests.(LayoutTests|TokensTests|LedgerTests|LedgerMigrationTests)"
+      # Not gating either: a failed .NET install must not fail the job.
+      - uses: actions/setup-dotnet@v4
+        continue-on-error: true
+        with:
+          dotnet-version: 8.0.x
+      # Prints "OCR_PROBE: worked" or "OCR_PROBE: needs-packaging" (and a few other verdicts)
+      # and adds it to the run summary. The probe always exits 0; continue-on-error also covers
+      # a build or restore failure, so it can never fail the job.
+      - name: Windows.Media.Ocr probe from an unpackaged exe, not gating
+        continue-on-error: true
+        run: dotnet run --project ci/windows/ocr-probe -- ci/windows/ocr-probe/fixture.png
+
   checks:
     runs-on: ubuntu-latest
     steps:

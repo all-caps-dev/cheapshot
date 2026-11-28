@@ -17,4 +17,4 @@ push protection. So inside each such token the input file carries the marker
   left in and passes once it is removed.
 
 When adding a case with a secret-shaped token, put `⟦⟧` inside the token, then
-check with `gitleaks dir Tests/CheapshotCoreTests/Golden`.
+check with `gitleaks dir Tests/CheapshotPortableTests/Golden`.

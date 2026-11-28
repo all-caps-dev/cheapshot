@@ -1,5 +1,5 @@
 import XCTest
-@testable import CheapshotCore
+@testable import CheapshotPortable
 
 final class RedactorTests: XCTestCase {
     func testBuiltinRedactsEmail() {
@@ -125,10 +125,6 @@ final class RedactorTests: XCTestCase {
         for rule in Rule.builtin {
             XCTAssertTrue(rule.name.allSatisfy { $0.isUppercase || $0.isNumber || $0 == "_" }, rule.name)
         }
-    }
-
-    func testVersionConstant() {
-        XCTAssertEqual(cheapshotVersion, "0.6.0")
     }
 
     // Review finding 3: retryShorter takes the longest valid prefix at a separator; a rule

@@ -1,0 +1,12 @@
+<!-- C# console probe for the cheapshot Windows spike. A plain unpackaged .exe (no MSIX, no
+     package identity) that calls Windows.Media.Ocr on one screenshot. The Windows 10 SDK target
+     framework gives the WinRT projections (Windows.Media.Ocr, Windows.Graphics.Imaging) with no
+     extra packages. Run by the windows-core job in .github/workflows/ci.yml. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

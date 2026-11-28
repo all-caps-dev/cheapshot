@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Builds CheapshotCore and runs CheapshotCoreTests only, so Core can be tested on the iOS
-     Simulator without the macOS-only CLI targets. Used by the ios-core job in ci.yml. -->
+<!-- Builds CheapshotCore and runs CheapshotCoreTests and CheapshotPortableTests (the golden
+     redaction cases live in the portable target since the Windows split), so Core can be tested
+     on the iOS Simulator without the macOS-only CLI targets. Used by the ios-core job in ci.yml. -->
 <Scheme
    LastUpgradeVersion = "1600"
    version = "1.7">
@@ -37,6 +38,16 @@
                BlueprintIdentifier = "CheapshotCoreTests"
                BuildableName = "CheapshotCoreTests"
                BlueprintName = "CheapshotCoreTests"
+               ReferencedContainer = "container:">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "CheapshotPortableTests"
+               BuildableName = "CheapshotPortableTests"
+               BlueprintName = "CheapshotPortableTests"
                ReferencedContainer = "container:">
             </BuildableReference>
          </TestableReference>

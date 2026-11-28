@@ -3,6 +3,12 @@ import XCTest
 @testable import CheapshotCore
 
 final class VersionTests: XCTestCase {
+    // Moved from RedactorTests when redaction split into CheapshotPortable: the version lives
+    // in CheapshotCore. docs/release.md bumps this number at each release.
+    func testVersionConstant() {
+        XCTAssertEqual(cheapshotVersion, "0.6.0")
+    }
+
     func testUnstampedVersionIsTheBaseVersion() {
         // swift test never stamps, so the source tree must report the bare release number.
         XCTAssertEqual(cheapshotBuild, "")

@@ -1,5 +1,5 @@
 import XCTest
-@testable import CheapshotCore
+@testable import CheapshotPortable
 
 final class ValidatorsTests: XCTestCase {
     func testLuhn() {
