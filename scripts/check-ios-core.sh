@@ -1,13 +1,14 @@
 #!/bin/sh
 # CheapshotCore on iOS (native app plan, step 1): build Core and its tests for the iOS Simulator
-# and for a device, then run the Core tests (the 55 golden redaction cases among them) on an
+# and for a device, then run the Core tests (the 62 golden redaction cases among them) on an
 # iPhone Simulator. NSRegularExpression comes from the OS, so redaction on iOS is measured here,
 # not assumed.
 #
 # The Simulator is chosen on purpose and printed: the newest available iOS runtime that is 17 or
 # later (Core's iOS floor), and the first iPhone on it. The test run must report at least
 # MIN_TESTS executed tests, so a run that builds but runs nothing (a scheme or filter mistake)
-# fails instead of passing quietly.
+# fails instead of passing quietly. All golden cases run inside one method,
+# GoldenTests.testGoldenCases, which no count can see, so the log must also show it passed.
 #
 # CI (CI=true) fails when no iOS 17+ iPhone Simulator is available. Locally, with none
 # installed, it builds everything and says the tests were not run, then exits 0.
@@ -17,10 +18,11 @@ set -e
 cd "$(dirname "$0")/.."
 dd="${DERIVED_DATA:-.build/xcode-ios}"
 scheme=CheapshotCore-iOS
-# CheapshotCoreTests has 153 tests on macOS; 11 are macOS only (9 ffmpeg, 2 that compare with
-# AppKit's NSImage), so 142 or more run on iOS. 140 leaves room for a test removed on purpose,
-# while still failing on 0 or on a run that skipped a whole suite.
-min_tests="${MIN_TESTS:-140}"
+# CheapshotCoreTests has 189 tests on macOS; 11 are macOS only (FFmpegFrameSourceTests and the
+# ImageLoaderTests that compare with AppKit's NSImage), so about 178 run on iOS. 175 leaves room
+# for a test removed on purpose, while still failing on a run that skipped any suite of 4 or more
+# (PR #22 review: at 140, all of LayoutTests could go missing unnoticed).
+min_tests="${MIN_TESTS:-175}"
 
 echo "== build: CheapshotCore for an iOS device"
 xcodebuild build -quiet -scheme "$scheme" -destination 'generic/platform=iOS' \
@@ -71,4 +73,6 @@ cat "$log"
 ran="$(sed -En 's/.*Executed ([0-9]+) tests?,.*/\1/p' "$log" | sort -n | tail -n 1)"
 ran="${ran:-0}"
 [ "$ran" -ge "$min_tests" ] || { echo "ran $ran tests on iOS $runtime, expected at least $min_tests"; exit 1; }
+# The golden redaction cases, by name: the whole point of this run (PR #22 review).
+grep -q "GoldenTests testGoldenCases\]' passed" "$log" || { echo "golden redaction cases did not run on iOS $runtime"; exit 1; }
 echo "ok: CheapshotCore builds for iOS and $ran Core tests pass on iOS $runtime"

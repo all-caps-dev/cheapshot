@@ -74,8 +74,9 @@ public enum CLI {
     /// One JSON object per recognized line: 1-based number, redacted text, integer box with a
     /// top-left origin, and Vision's confidence. The box is in pixels for an image or a rendered
     /// page, and in PDF points for the text lane. `lines` must already be redacted
-    /// (`Pipeline.redactLines`, which the Pipeline read functions call).
-    static func lineJSON(_ lines: [RenderedLine]) -> [[String: Any]] {
+    /// (`Pipeline.redactLines`, which the Pipeline read functions call). The label is required so
+    /// a caller holding raw OCR lines cannot pick this overload by accident (PR #22 review).
+    static func lineJSON(alreadyRedacted lines: [RenderedLine]) -> [[String: Any]] {
         lines.map { l in
             ["n": l.n, "text": l.text,
              "bbox": [Int(l.bbox.minX.rounded()), Int(l.bbox.minY.rounded()), Int(l.bbox.maxX.rounded()), Int(l.bbox.maxY.rounded())],
@@ -85,7 +86,7 @@ public enum CLI {
 
     /// Redacts `lines` the way the document text is redacted, then formats them as above.
     static func lineJSON(_ lines: [RenderedLine], redactor: Redactor?) -> [[String: Any]] {
-        lineJSON(Pipeline.redactLines(lines, with: redaction(redactor)))
+        lineJSON(alreadyRedacted: Pipeline.redactLines(lines, with: redaction(redactor)))
     }
 
     /// The CLI's redactor is nil for --raw and nothing else (`makeRedactor`). This is the one
@@ -457,7 +458,7 @@ public enum CLI {
                                 "source": ["path": doc.path, "sha256": doc.sha256, "pages": doc.pageCount],
                                 "pages": doc.pages.map { ["n": $0.n, "lane": $0.lane.rawValue,
                                                           "width": $0.width, "height": $0.height,
-                                                          "lines": lineJSON($0.lines)] as [String: Any] }])
+                                                          "lines": lineJSON(alreadyRedacted: $0.lines)] as [String: Any] }])
                 if !opts.json {
                     if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
                     io.out(read.text + "\n")
@@ -484,7 +485,7 @@ public enum CLI {
             images.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
             results.append(["file": f, "text": read.text, "redactions": read.report.counts,
                             "image_tokens": read.imageTokens, "text_tokens": read.textTokens,
-                            "lines": lineJSON(read.lines),   // lines already redacted
+                            "lines": lineJSON(alreadyRedacted: read.lines),   // lines already redacted
                             // "empty" with "retried": true is a screenshot-like image that still read blank
                             // (a likely cold-start OCR failure); "empty" without a retry is a photo or a
                             // small image. Callers must not treat the first like the second.

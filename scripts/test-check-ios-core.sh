@@ -50,8 +50,10 @@ devices_17_18="== Devices ==
     iPhone 16 Pro ($U18) (Shutdown)
 -- watchOS 11.2 --
     Apple Watch Series 10 (46mm) (55555555-5555-5555-5555-555555555555) (Shutdown) "
-ok_out='Test Suite '"'"'All tests'"'"' passed at 2026-11-25 16:00:00.000.
-	 Executed 143 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
+golden_line='Test Case '"'"'-[CheapshotCoreTests.GoldenTests testGoldenCases]'"'"' passed (0.412 seconds).'
+ok_out="$golden_line"'
+Test Suite '"'"'All tests'"'"' passed at 2026-11-25 16:00:00.000.
+	 Executed 178 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
 ** TEST EXECUTE SUCCEEDED **'
 
 pass=0; fail=0
@@ -73,7 +75,7 @@ case_() {
   LAST_DIR="$d"
 }
 
-case_ "143 tests on iOS 18.2 passes" 0 true "$runtimes_17_18" "$devices_17_18" "$ok_out" 0 "ok: CheapshotCore builds for iOS"
+case_ "178 tests on iOS 18.2 passes" 0 true "$runtimes_17_18" "$devices_17_18" "$ok_out" 0 "ok: CheapshotCore builds for iOS"
 grep -q "id=$U18" "$LAST_DIR/test-args" && { pass=$((pass+1)); echo "ok    picks the iPhone under the newest iOS 17+ runtime"; } \
   || { fail=$((fail+1)); echo "FAIL  destination was: $(cat "$LAST_DIR/test-args")"; }
 case_ "the chosen runtime and device are printed" 0 true "$runtimes_17_18" "$devices_17_18" "$ok_out" 0 "iOS 18.2.*$U18"
@@ -84,8 +86,15 @@ case_ "no Executed line fails" 1 true "$runtimes_17_18" "$devices_17_18" "** TES
 case_ "too few tests fails" 1 true "$runtimes_17_18" "$devices_17_18" \
   "	 Executed 12 tests, with 0 failures (0 unexpected) in 0.1 (0.1) seconds" 0 "ran 12 tests"
 case_ "xcodebuild failure fails even with a big count" 1 true "$runtimes_17_18" "$devices_17_18" \
-  "	 Executed 143 tests, with 2 failures (0 unexpected) in 3.1 (3.2) seconds
+  "	 Executed 178 tests, with 2 failures (0 unexpected) in 3.1 (3.2) seconds
 ** TEST EXECUTE FAILED **" 65 "exit 65"
+# PR #22 review: a high count is not enough; the golden cases must be seen passing by name.
+case_ "high count but no golden line fails" 1 true "$runtimes_17_18" "$devices_17_18" \
+  "	 Executed 178 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
+** TEST EXECUTE SUCCEEDED **" 0 "golden redaction cases did not run"
+case_ "the old floor of 140 now fails" 1 true "$runtimes_17_18" "$devices_17_18" \
+  "$golden_line
+	 Executed 143 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds" 0 "ran 143 tests"
 case_ "only iOS 16 on CI fails" 1 true "== Runtimes ==
 iOS 16.4 (16.4 - 20E247) - com.apple.CoreSimulator.SimRuntime.iOS-16-4" "== Devices ==
 -- iOS 16.4 --
