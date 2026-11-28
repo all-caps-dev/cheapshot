@@ -594,10 +594,15 @@ public enum CLI {
         // here outright (one input per run), so the run never falls back to the icon.
         // Count file items, not resolved URLs: a copied file deleted since still counts, so
         // two copied files with one gone are refused, and one gone file is reported as gone.
-        // Both values are checked: they are separate pasteboard reads, and a copy made between
-        // them must not let a two-file copy through.
+        // These are separate pasteboard reads. A copy made between them could pair one
+        // clipboard's URLs with another's item count (a false "gone", or a two-file copy let
+        // through), so the change count brackets them and a change means try again.
+        let countBefore = clip.changeCount
         let fileURLs = clip.readFileURLs()
         let fileItems = clip.fileItemCount
+        guard clip.changeCount == countBefore else {
+            return fail("the clipboard changed while it was being read; try again")
+        }
         if fileItems > 1 || fileURLs.count > 1 {
             return fail("more than one file is copied to the clipboard; copy one file and try again")
         }

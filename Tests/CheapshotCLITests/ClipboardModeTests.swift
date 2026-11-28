@@ -193,6 +193,20 @@ final class ClipboardModeTests: XCTestCase {
         XCTAssertTrue(try ledgerEntries().isEmpty)
     }
 
+    func testCopyBetweenTheFileReadsExits1() async throws {
+        // An image on the clipboard; the user copies a file just after the URL read. Without the
+        // change-count check this paired [] with one file item and said the file was gone.
+        let clip = FakeClipboard(image: try png(lines: secretLines))
+        let file = tmp.appendingPathComponent("copied-late.png")
+        try png(lines: secretLines).write(to: file)
+        clip.onFileRead = { clip.onFileRead = nil; clip.userCopiedFile(file) }
+        let r = await run(["--clipboard"], clipboard: clip)
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(r.err.contains("changed while it was being read"), r.err)
+        XCTAssertFalse(r.err.contains("can no longer be found"))
+        XCTAssertEqual(clip.imageReads, 0)
+    }
+
     func testBlankCopiedPDFExits1() async throws {
         let url = tmp.appendingPathComponent("blank.pdf")
         var box = CGRect(x: 0, y: 0, width: 300, height: 300)
