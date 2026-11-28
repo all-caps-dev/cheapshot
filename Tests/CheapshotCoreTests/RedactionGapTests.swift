@@ -26,7 +26,7 @@ final class RedactionGapTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("Cookie: foo=bar; sid=\(sid)").text, "Cookie: foo=bar; sid=[SECRET]")
         XCTExpectFailure("CS-05 gap 1: an empty first Cookie pair stops the chain", strict: true) {
             let out = Redactor().redact("Cookie: foo=; sid=\(sid)").text
-            XCTAssertEqual(out, "Cookie: foo=; sid=[SECRET]")
+            XCTAssertFalse(out.contains(sid), "the sid value should not survive: \(out.debugDescription)")
         }
     }
 
@@ -102,7 +102,7 @@ final class RedactionGapTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("Your key \(mixed)").text, "Your key [OPENAI_KEY]")
         XCTExpectFailure("CS-05 gap 5: the CSS-class veto also refuses lowercase-word keys", strict: true) {
             let out = Redactor().redact("Your key \(key)").text
-            XCTAssertEqual(out, "Your key [OPENAI_KEY]")
+            XCTAssertFalse(out.contains(key), "the sk- key should not survive: \(out.debugDescription)")
         }
     }
 }
