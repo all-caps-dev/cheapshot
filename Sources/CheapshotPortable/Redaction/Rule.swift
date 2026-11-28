@@ -223,13 +223,14 @@ public struct Rule: Sendable {
         // value they take whole (`password: "sk-... more words"`) is never cut short here.
         // Key words: key, api_key and the like, token, secret, password, credential, auth, in
         // any case, not continuing a longer word on the left ("monkey"); or camelCase
-        // (`openaiKey`). Then an optional `_DEV`-style or digit suffix (never a hyphen, so CSS
+        // (`openaiKey`, `openAIKey`). A placeholder an earlier rule wrote (`[SECRET]`) is not a
+        // key word. Then an optional `_DEV`-style or digit suffix (never a hyphen, so CSS
         // custom properties such as `--key-color` stay out), an optional " is", a closing
         // quote or `]` (`environ["OPENAI_API_KEY"] =`), one `:` `=` `=>` `:=`, and an opening
         // quote, backtick or `[`. A key inside an HTML class list (`class="auth sk-..."`) is
         // left alone. `\b(?=sk-)` comes first so the lookbehinds run only where a key starts.
         Rule(name: "OPENAI_KEY",
-             pattern: #"\b(?=sk-)(?<!class(?:Name)?=["'][^"'\n]{0,60})(?<=(?:(?:^|[^A-Za-z])(?i:(?:api|secret|master|access|private|virtual)?keys?|tokens?|secrets?|passwords?|passwd|credentials?|auth)|[a-z](?:Key|Token|Secret|Password)s?)(?:(?:_[A-Za-z0-9]{1,12}){1,2}|[0-9]{1,3})?(?i:[ \t]{1,3}is)?["'`]?\]?[ \t]{0,10}(?:=>|:=|[:=])?[ \t]{0,10}\[?["'`]?)sk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#,
+             pattern: #"\b(?=sk-)(?<!class(?:Name)?=["'][^"'\n]{0,60})(?<!\[[A-Z0-9_\-]{1,40}\][ \t]{0,10})(?<=(?:(?:^|[^A-Za-z])(?i:(?:api|secret|master|access|private|virtual)?keys?|tokens?|secrets?|passwords?|passwd|credentials?|auth)|[A-Za-z](?:Key|Token|Secret|Password)s?)(?:(?:_[A-Za-z0-9]{1,12}){1,2}|[0-9]{1,3})?(?i:[ \t]{1,3}is)?["'`]?\]?[ \t]{0,10}(?:=>|:=|[:=])?[ \t]{0,10}\[?["'`]?)sk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#,
              options: []),
 
         // --- Personal data. ---

@@ -8,6 +8,8 @@ Your API key is: [OPENAI_KEY]
 api_key: `[OPENAI_KEY]`
 os.environ["OPENAI_API_KEY"] = "[OPENAI_KEY]"
 const openaiKey = "[OPENAI_KEY]"
+liteLLMKey: "[OPENAI_KEY]"
+password=[SECRET] sk-cube-grid-container-wrapper
 "keys": ["[OPENAI_KEY]"]
 .sk-cube-grid-container-wrapper { animation: sk-cube-grid-scale-delay 1.3s; }
 <div class="sk-folding-cube-wrapper-item"></div>

@@ -8,6 +8,8 @@ Your API key is: sk-team-alpha-prod⟦⟧-proxy-one
 api_key: `sk-dev-local-proxy⟦⟧-only-key`
 os.environ["OPENAI_API_KEY"] = "sk-team-alpha-prod⟦⟧-proxy-one"
 const openaiKey = "sk-my-super-secret⟦⟧-litellm-key"
+liteLLMKey: "sk-team-alpha-prod⟦⟧-proxy-one"
+password=hunter2x9 sk-cube-grid-container-wrapper
 "keys": ["sk-dev-local-proxy⟦⟧-only-key"]
 .sk-cube-grid-container-wrapper { animation: sk-cube-grid-scale-delay 1.3s; }
 <div class="sk-folding-cube-wrapper-item"></div>

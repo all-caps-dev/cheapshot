@@ -6,7 +6,7 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ### Redaction
 
-- An `sk-` key made of short lowercase words (`sk-my-super-secret-litellm-key`, a LiteLLM-style proxy key) is redacted when a key word comes right before it (CS-05 gap 5): `Your key sk-...`, `token sk-...`, `Your API key is: sk-...`, `api_key: \`sk-...\``, `environ["OPENAI_API_KEY"] = "sk-..."`, `openaiKey = "sk-..."`, `OPENAI_KEY_DEV=sk-...`. It is labelled OPENAI_KEY, or SECRET where the SECRET assignment rule takes it first. The CSS-class veto kept every key of that shape before. A CSS class such as `.sk-cube-grid-container-wrapper`, one in an HTML class list, and `--key-color: sk-...` are still left alone.
+- An `sk-` key made of short lowercase words (`sk-my-super-secret-litellm-key`, a LiteLLM-style proxy key) is redacted when a key word comes right before it (CS-05 gap 5): `Your key sk-...`, `token sk-...`, `Your API key is: sk-...`, `api_key: \`sk-...\``, `environ["OPENAI_API_KEY"] = "sk-..."`, `openaiKey = "sk-..."`, `openAIKey`, `OPENAI_KEY_DEV=sk-...`. It is labelled OPENAI_KEY, or SECRET where the SECRET assignment rule takes it first. The CSS-class veto kept every key of that shape before. A CSS class such as `.sk-cube-grid-container-wrapper`, one in an HTML class list, and `--key-color: sk-...` are still left alone.
 
 ### Mask
 
