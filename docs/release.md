@@ -1,4 +1,4 @@
-# Release runbook: v0.5.0
+# Release runbook
 
 Everything below is a hand step for Ryan unless marked AGENT. Do them in order. Nothing in this repo pushes, tags, or creates remote things on its own.
 
@@ -11,9 +11,23 @@ This file is now the record of how v0.5.0 went out. The steps below stay as writ
 - Token: `COMMITTER_TOKEN` is set and expires 2027-04-01. The tap job cannot bump the formula after that until the token is replaced.
 - Tap job 403: `Resource not accessible by personal access token` means the token does not cover `homebrew-tap`. Fix its repository access at https://github.com/settings/personal-access-tokens , then run `gh run rerun <run-id> --failed`. Saving the edit keeps the token value, so the secret and the tag stay as they are.
 
-## Next: v0.6.0
+## v0.6.0 shipped 2026-11-26
 
-Same path as v0.5.0 step 9.2, with no rc and no setup: the seven secrets and the tap are in place. `Version.swift` already reads `0.6.0`, `CHANGELOG.md` has the entry, and `packaging/homebrew/cheapshot.rb` points at v0.6.0 (the tap job writes the real `url` and `sha256` into the tap; the copy here keeps the placeholder hash). Tag from main once the release branch is merged: `git tag v0.6.0 && git push origin v0.6.0`.
+- Release: https://github.com/all-caps-dev/cheapshot/releases/tag/v0.6.0 , tagged at `1c0876a` (PR #20). The release workflow passed in 2m21s.
+- Tap: https://github.com/all-caps-dev/homebrew-tap/blob/main/Formula/cheapshot.rb points at v0.6.0 with a real `sha256`, written by the tap job.
+
+## Next: v0.6.1
+
+Same path as v0.6.0: no rc, no setup. The release branch (`release/v0.6.1`) sets `Version.swift` to `0.6.1`, adds the `CHANGELOG.md` entry, bumps the plugin to 0.1.2 in `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, and points `packaging/homebrew/cheapshot.rb` and `scripts/check-formula.sh` at v0.6.1. The formula copy here keeps the placeholder hash; the tap job writes the real `url` and `sha256` into the tap.
+
+Merging the branch ships plugin 0.1.2 at once: the marketplace reads `./plugin` from main, so plugin users get the new hook before the tag. The hook runs with the v0.6.0 binary, but that pairing is not safe: when a screenshot reads blank, the 0.1.2 hook denies the Read and names `cheapshot mask` to the user, and a v0.6.0 `mask` has no blank-read gate (added in #29, CHE-24), so on that same blank read it writes a copy that is the unmasked original and allows it for Read. Ryan chose on 2026-11-28 to merge now and hold the tag until the redaction-gap fixes land, so this window runs from the merge until users have a v0.6.1 binary. The 0.6.1 Security section in `CHANGELOG.md` carries the upgrade warning. Plugin 0.1.3 closes the gap in the hook and the plugin skill: the hook names `cheapshot mask` only when the binary's `--json` `version` is 0.6.1 or later, and otherwise tells the user to upgrade first (unknown counts as old); the skill tells the model to run mask only when the hook named it. The hook also refuses a mask allow entry when `cheapshot --version` is below 0.6.1, so, while the hook's own `cheapshot` is below 0.6.1, a mask run anyway cannot get its copy read.
+
+1. RYAN: merge the release PR.
+2. AGENT: on main, change `## 0.6.1 (unreleased)` in `CHANGELOG.md` to the UTC date the tag will carry, in a one-line PR (or fold it into the release PR just before merge).
+3. RYAN: tag from main: `git tag v0.6.1 && git push origin v0.6.1`.
+4. Verify: https://github.com/all-caps-dev/cheapshot/actions/workflows/release.yml goes green; https://github.com/all-caps-dev/cheapshot/releases/tag/v0.6.1 has `cheapshot-v0.6.1-macos.zip` and its `.sha256`; https://github.com/all-caps-dev/homebrew-tap/blob/main/Formula/cheapshot.rb points at v0.6.1 with a real `sha256` and the tap job log has no `Skipping:`; `brew upgrade cheapshot && cheapshot --version` reports 0.6.1.
+
+cheapshot-mcp did not change, so there is no `mcp-v*` tag for this release.
 
 ## 0. Preconditions (AGENT, done in Phase 2)
 - `scripts/check-phase2.sh` prints `ok: phase 2` on a clean main.
