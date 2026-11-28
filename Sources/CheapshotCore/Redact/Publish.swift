@@ -8,7 +8,8 @@
 //   3. check the temp name still holds that same file (verify got a path, which can be swapped);
 //   4. give it the final name with a call that refuses an existing name: linkat, else
 //      renameatx_np(RENAME_EXCL), else an O_EXCL | O_NOFOLLOW create at the final name;
-//   5. check the final name holds our file, else remove it; then set the shared mode and close;
+//   5. check the final name holds our file, else remove what publish put there (never another
+//      process's file); then set the shared mode and close, removing the name on a failed close;
 //   6. remove the temp file on every path except a successful rename (which used it up).
 //
 // Banned here (rule 28): Data.write(to:), FileManager.replaceItem / moveItem / copyItem and plain
@@ -70,6 +71,8 @@ extension Redact {
         var write: (Int32, UnsafeRawPointer, Int) -> Int
         /// The temp file's name. A test fixes it to plant something there first.
         var tempName: () -> String
+        /// close(fd) for the descriptors closed on success: 0, or -1 with errno set.
+        var close: (Int32) -> Int32
 
         static let live = PublishOps(
             link: { dirfd, from, to in
@@ -86,7 +89,8 @@ extension Redact {
                 #endif
             },
             write: { fd, bytes, count in Foundation.write(fd, bytes, count) },
-            tempName: { ".cheapshot-\(UUID().uuidString).tmp" }
+            tempName: { ".cheapshot-\(UUID().uuidString).tmp" },
+            close: { fd in Foundation.close(fd) }
         )
     }
 
@@ -163,11 +167,18 @@ extension Redact {
         // 7. The final name, by a call that cannot replace (rule 25). EEXIST at any step is a clash.
         // Only "this volume does not support that call" moves on to the next step; any other error
         // stops, so a real failure is reported, not papered over.
-        // `placed` is the descriptor of the file that should now have the final name.
-        var placed = fd
+        // `placedStat` describes the file that should now have the final name: the temp file on
+        // the link and rename routes, the new file on the exclusive-create route.
+        var placedStat = ours
         var createdFd: Int32 = -1          // only the last fallback opens a second file
         defer { if createdFd >= 0 { close(createdFd) } }
-        if ops.link(dirfd, tempName, name) != 0 {
+        // What the temp name held just after the link: the object linkat linked (a hard link is
+        // the same inode, and linkat with flags 0 links a symlink itself). Set on the link route.
+        var linkedFromTemp: stat?
+        if ops.link(dirfd, tempName, name) == 0 {
+            var t = stat()
+            if fstatat(dirfd, tempName, &t, AT_SYMLINK_NOFOLLOW) == 0 { linkedFromTemp = t }
+        } else {
             let linkErr = errno
             if linkErr == EEXIST { throw PublishError.clash(final) }
             guard linkUnsupported(linkErr) else { throw PublishError.write("link: \(reason(linkErr))") }
@@ -179,34 +190,32 @@ extension Redact {
                 if renameErr == EEXIST { throw PublishError.clash(final) }
                 guard renameUnsupported(renameErr) else { throw PublishError.write("rename: \(reason(renameErr))") }
                 // Last resort: write the same bytes again into a new file at the final name.
-                createdFd = try createExclusive(data, dirfd: dirfd, name: name, final: final, ops: ops)
-                placed = createdFd
+                (createdFd, placedStat) = try createExclusive(data, dirfd: dirfd, name: name, final: final, ops: ops)
             }
         }
 
         // 8. The final name must hold our file now. A swap between step 6 and the call in step 7
         // (or during the last fallback's write) would otherwise publish someone else's file, or a
-        // symlink to the original, while `Published` describes our bytes. The name was free
-        // before step 7 and this call put it there, so it is removed, not left half-published.
-        var placedStat = stat()
-        guard fstat(placed, &placedStat) == 0, isSameRegularFile(dirfd, name, as: placedStat) else {
-            unlinkat(dirfd, name, 0)
+        // symlink to the original, while `Published` describes our bytes.
+        guard isSameRegularFile(dirfd, name, as: placedStat) else {
+            removeIfPublishedByUs(dirfd, name, linkedFromTemp: linkedFromTemp)
             throw PublishError.write("the output was replaced while publishing")
         }
 
-        // 9. Mode for sharing, then close with the result checked (a failed close can mean lost
-        // bytes on some volumes). On a failed close the name we made is removed again.
-        makeShared(placed)
+        // 9. Mode for sharing, then close both descriptors with the results checked (a failed close
+        // can mean lost bytes on some volumes). From here on the final name exists, so a failure
+        // removes it again while it is still our file: a PublishError means nothing was published.
+        makeShared(createdFd >= 0 ? createdFd : fd)
+        var closeErr: Int32 = 0
         if createdFd >= 0 {
-            let r = close(createdFd)
+            if ops.close(createdFd) != 0 { closeErr = errno }
             createdFd = -1
-            if r != 0 { let e = errno; removeIfSame(dirfd, name, placedStat); throw PublishError.write("close: \(reason(e))") }
         }
         tempOpen = false
-        if close(fd) != 0 {
-            let e = errno
-            if placed == fd { removeIfSame(dirfd, name, placedStat) }
-            throw PublishError.write("close: \(reason(e))")
+        if ops.close(fd) != 0, closeErr == 0 { closeErr = errno }
+        if closeErr != 0 {
+            removeIfSame(dirfd, name, placedStat)
+            throw PublishError.write("close: \(reason(closeErr))")
         }
 
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
@@ -307,6 +316,19 @@ extension Redact {
         if isSameRegularFile(dirfd, name, as: st) { unlinkat(dirfd, name, 0) }
     }
 
+    /// After a failed identity check at the final name: removes what is there only when publish
+    /// put it there. That is the object linked from the temp name (same device and inode as the
+    /// temp name held just after the link), or a symlink: publish never makes one, and one at the
+    /// output name could point at the original. A regular file publish cannot prove it placed
+    /// (another process renamed it over the name in the window) is left alone.
+    private static func removeIfPublishedByUs(_ dirfd: Int32, _ name: String, linkedFromTemp: stat?) {
+        var there = stat()
+        guard fstatat(dirfd, name, &there, AT_SYMLINK_NOFOLLOW) == 0 else { return }
+        let isSymlink = (there.st_mode & S_IFMT) == S_IFLNK
+        let isLinkedObject = linkedFromTemp.map { $0.st_dev == there.st_dev && $0.st_ino == there.st_ino } ?? false
+        if isSymlink || isLinkedObject { unlinkat(dirfd, name, 0) }
+    }
+
     /// Writes every byte, looping over partial writes and retrying a write interrupted by a
     /// signal (EINTR). A write of 0 bytes is "short write"; an error keeps its errno, so a full
     /// disk reads as "No space left on device".
@@ -376,9 +398,11 @@ extension Redact {
 
     /// The last fallback: a new file at the final name (O_EXCL | O_NOFOLLOW, so an existing name or
     /// a symlink is a clash), mode 0600 until publish gives it the shared mode. Returns the open
-    /// descriptor, written and synced; the caller checks it and closes it. A failed write or sync
-    /// removes the file, but only while the name still points at the file this call created.
-    private static func createExclusive(_ data: Data, dirfd: Int32, name: String, final: URL, ops: PublishOps) throws -> Int32 {
+    /// descriptor (written and synced) and its stat; the caller checks it and closes it. A failed
+    /// write or sync removes the file, but only while the name still points at the file this call
+    /// created.
+    private static func createExclusive(_ data: Data, dirfd: Int32, name: String, final: URL,
+                                        ops: PublishOps) throws -> (Int32, stat) {
         let out = openat(dirfd, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard out >= 0 else {
             let e = errno
@@ -400,7 +424,7 @@ extension Redact {
             close(out)
             throw error
         }
-        return out
+        return (out, mine)
     }
 
     /// The system's words for an errno value.

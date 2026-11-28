@@ -424,9 +424,11 @@ final class PublishTests: XCTestCase {
     }
 
     /// Review fix 1: the temp file (or, on the last fallback, the new final file) is swapped for
-    /// a different file or for a symlink to the unredacted input after verify looked at it. The
-    /// swap must never end up under the final name: publish throws, no temp is left, the final
-    /// name is absent, and the input keeps its bytes.
+    /// a different file or for a symlink after verify looked at it. Publish always throws, no
+    /// temp is left and the input keeps its bytes. What publish itself put under the final name
+    /// is removed: anything it linked from the temp name, and any symlink (which could point at
+    /// the original). A regular file that publish cannot prove it put there (the rename and
+    /// create routes) is someone else's and is left alone.
     func testSwapAfterVerifyNeverPublishesTheSwappedFile() throws {
         let input = try write("the unredacted original", "shot.png")
         let before = sha(input)
@@ -491,12 +493,97 @@ final class PublishTests: XCTestCase {
                 }
                 Redact.publishOps = live
                 for n in listing() where n.hasSuffix(".aside") { unlink(dir.appendingPathComponent(n).path) }
-                XCTAssertFalse(exists(final), "\(label): something was left under the final name")
+                let leftAlone = kind == .otherFile && (point == .insideRename || point == .duringFinalCreate)
+                if leftAlone {
+                    XCTAssertEqual(try? Data(contentsOf: final), Data("bytes nobody checked".utf8), "\(label): other file touched")
+                    unlink(final.path)
+                } else {
+                    XCTAssertFalse(exists(final), "\(label): something was left under the final name")
+                }
                 XCTAssertEqual(listing(), base, "\(label): folder changed")
                 if point == .afterVerify { XCTAssertEqual(linkCalls, 0, "\(label): a swapped temp was linked") }
             }
         }
         XCTAssertEqual(sha(input), before)
+    }
+
+    /// Pre-push fix 2: another process renames its own file over the final name right after
+    /// publish placed ours (link, rename or create route). Publish throws, but that file is not
+    /// publish's to remove: its bytes stay, and no temp is left.
+    func testRenameOverOfFinalByAnotherProcessIsLeftAlone() throws {
+        let live = Redact.PublishOps.live
+        let theirs = Data("another process's file".utf8)
+        enum Route: CaseIterable { case link, rename, create }
+        for route in Route.allCases {
+            let final = dir.appendingPathComponent("out-\(route).png")
+            /// Puts the other process's file over `final`, the way rename(2) would.
+            func renameOver() {
+                let staging = dir.appendingPathComponent("theirs-\(route).staging")
+                try? theirs.write(to: staging)
+                _ = Darwin.rename(staging.path, final.path)   // test fixture: Sources may not call rename
+            }
+            var ops = live
+            switch route {
+            case .link:
+                ops.link = { fd, a, b in let r = live.link(fd, a, b); renameOver(); return r }
+            case .rename:
+                ops.link = PublishTests.failing(ENOTSUP)
+                ops.renameExcl = { fd, a, b in let r = live.renameExcl(fd, a, b); renameOver(); return r }
+            case .create:
+                ops.link = PublishTests.failing(ENOTSUP)
+                ops.renameExcl = PublishTests.failing(ENOTSUP)
+                var writes = 0
+                ops.write = { fd, p, n in
+                    writes += 1
+                    let r = live.write(fd, p, n)
+                    if writes == 2 { renameOver() }
+                    return r
+                }
+            }
+            Redact.publishOps = ops
+            guard case .write? = publishError(payload, to: final) else {
+                XCTFail("\(route): expected a write error"); Redact.publishOps = live; continue
+            }
+            Redact.publishOps = live
+            XCTAssertEqual(try? Data(contentsOf: final), theirs, "\(route): their file was touched")
+            XCTAssertEqual(listing(), [final.lastPathComponent], "\(route): folder changed")
+            unlink(final.path)
+        }
+    }
+
+    /// Pre-push fix 1: once the final name exists, every failure removes it again (when it is
+    /// still ours), so a PublishError always means nothing under the final name. A close can fail
+    /// (some network volumes report lost writes only there): the temp descriptor on the link
+    /// route, and either descriptor on the exclusive-create route.
+    func testCloseFailureAfterTheNameAppearsRemovesIt() throws {
+        let live = Redact.PublishOps.live
+        // (label, route uses the exclusive create, which close call fails: 1st or 2nd)
+        let cases: [(String, Bool, Int)] = [
+            ("link route, temp close", false, 1),
+            ("create route, final file close", true, 1),
+            ("create route, temp close", true, 2),
+        ]
+        for (label, create, failAt) in cases {
+            var closes = 0
+            var ops = live
+            if create {
+                ops.link = PublishTests.failing(ENOTSUP)
+                ops.renameExcl = PublishTests.failing(ENOTSUP)
+            }
+            ops.close = { fd in
+                closes += 1
+                _ = live.close(fd)                    // really close it, so nothing leaks
+                if closes == failAt { errno = EIO; return -1 }
+                return 0
+            }
+            Redact.publishOps = ops
+            let final = dir.appendingPathComponent("out-\(closes)-\(failAt)-\(create).png")
+            let err = publishError(payload, to: final)
+            Redact.publishOps = live
+            XCTAssertEqual(err, .write("close: \(String(cString: strerror(EIO)))"), label)
+            XCTAssertFalse(exists(final), "\(label): the final name was left")
+            XCTAssertEqual(listing(), [], "\(label): folder changed")
+        }
     }
 
     /// Review fix 2: publish never changes the process umask, even with many publishes at once,
