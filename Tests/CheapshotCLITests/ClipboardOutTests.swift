@@ -184,6 +184,38 @@ final class ClipboardOutTests: XCTestCase {
         XCTAssertEqual(clip.text, "hunter2")
     }
 
+    func testTwoCopiedFilesAreRefusedAndNothingIsWritten() async throws {
+        let a = tmp.appendingPathComponent("a.png"), b = tmp.appendingPathComponent("b.png")
+        try png(lines: secretLines).write(to: a)
+        try png(lines: secretLines).write(to: b)
+        let clip = FakeClipboard(image: try png(lines: secretLines), fileURLs: [a, b])
+        let r = await run(["--clipboard", "--clipboard-out"], clipboard: clip)
+        XCTAssertEqual(r.code, 1)
+        XCTAssertTrue(r.err.contains("more than one file"), r.err)
+        XCTAssertTrue(clip.writes.isEmpty)
+        XCTAssertEqual(clip.imageReads, 0, "the Finder icon is never read")
+    }
+
+    func testOneGoneAndOneLiveFileAreRefusedAndNothingIsWritten() async throws {
+        let a = tmp.appendingPathComponent("a.png")
+        try png(lines: secretLines).write(to: a)
+        let clip = FakeClipboard(fileURLs: [a])
+        clip.unresolvableFileItems = 1
+        let r = await run(["--clipboard", "--clipboard-out"], clipboard: clip)
+        XCTAssertEqual(r.code, 1)
+        XCTAssertTrue(clip.writes.isEmpty)
+    }
+
+    func testOneGoneFileIsReportedAndNothingIsWritten() async throws {
+        let clip = FakeClipboard(image: try png(lines: secretLines))
+        clip.unresolvableFileItems = 1
+        let r = await run(["--clipboard", "--clipboard-out"], clipboard: clip)
+        XCTAssertEqual(r.code, 1)
+        XCTAssertTrue(r.err.contains("can no longer be found"), r.err)
+        XCTAssertTrue(clip.writes.isEmpty)
+        XCTAssertEqual(clip.imageReads, 0)
+    }
+
     func testFailedWriteExits1() async throws {
         let clip = FakeClipboard(fileURLs: [try textPDF("plenty of readable text on this page")])
         clip.failWrites = true
