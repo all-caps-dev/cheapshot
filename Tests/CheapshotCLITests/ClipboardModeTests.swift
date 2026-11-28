@@ -171,6 +171,28 @@ final class ClipboardModeTests: XCTestCase {
         XCTAssertTrue(try ledgerEntries().isEmpty)
     }
 
+    func testUnresolvableCopiedFileExits1AndNeverReadsTheIcon() async throws {
+        let clip = FakeClipboard(image: try png(lines: secretLines))
+        clip.unresolvableFileItems = 1
+        let r = await run(["--clipboard"], clipboard: clip)
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(r.err.contains("can no longer be found"), r.err)
+        XCTAssertEqual(clip.imageReads, 0)
+        XCTAssertFalse(r.out.contains("deploy key below"))
+    }
+
+    func testTwoCopiedFilesWithOneGoneStillExit1() async throws {
+        let a = tmp.appendingPathComponent("still-here.png")
+        try png(lines: secretLines).write(to: a)
+        let clip = FakeClipboard(fileURLs: [a])
+        clip.unresolvableFileItems = 1
+        let r = await run(["--clipboard"], clipboard: clip)
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(r.err.contains("more than one file"), r.err)
+        XCTAssertFalse(r.out.contains("deploy key below"), "the remaining file must not be read")
+        XCTAssertTrue(try ledgerEntries().isEmpty)
+    }
+
     func testBlankCopiedPDFExits1() async throws {
         let url = tmp.appendingPathComponent("blank.pdf")
         var box = CGRect(x: 0, y: 0, width: 300, height: 300)
