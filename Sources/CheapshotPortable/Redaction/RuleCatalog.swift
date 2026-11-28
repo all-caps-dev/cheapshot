@@ -80,7 +80,7 @@ public enum RuleCatalog {
         e("SSN", .personal, "US Social Security number", "US Social Security numbers (123-45-6789)."),
         e("PRODUCT_KEY", .credentials, "Product key", "Windows and Office product keys (five groups of five)."),
         e("IBAN", .financial, "IBAN", "International bank account numbers that pass the IBAN checksum."),
-        e("ROUTING", .financial, "US routing number", "US ABA routing numbers that pass the checksum."),
+        e("ROUTING", .financial, "US routing number", "US ABA routing numbers that pass the checksum. Off also stops BANK_ACCT catching an account number that follows one with no account word."),
         e("CARD", .financial, "Card number", "Payment card numbers that pass the Luhn check."),
         e("BANK_ACCT", .financial, "Bank account number", "Account numbers next to an account word or a routing number."),
         e("PHONE", .personal, "Phone number", "North American and international (+country) phone numbers."),
