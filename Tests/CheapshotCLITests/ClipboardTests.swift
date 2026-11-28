@@ -10,6 +10,9 @@ final class FakeClipboard: ClipboardSource {
     var image: Data?
     var fileURLs: [URL] = []
     var text: String?
+    /// A Finder copy whose file can no longer be resolved (deleted, or volume unmounted): it
+    /// still hides the image, as on the real pasteboard, but yields no URL.
+    var unresolvableFileItem = false
     private(set) var changeCount = 1
     private(set) var reads = 0
     private(set) var writes: [ClipboardPayload] = []
@@ -29,11 +32,12 @@ final class FakeClipboard: ClipboardSource {
     // Same precedence as PasteboardClipboard: any file URL hides the image (Finder's icon).
     func readImage() -> Data? {
         reads += 1; onRead?()
-        guard fileURLs.isEmpty, let image else { return nil }
+        guard !holdsFileItems, let image else { return nil }
         imageReads += 1
         return image
     }
     func readFileURLs() -> [URL] { reads += 1; return fileURLs }
+    var holdsFileItems: Bool { !fileURLs.isEmpty || unresolvableFileItem }
 
     @discardableResult
     func replace(with payload: ClipboardPayload) -> Bool {
@@ -186,6 +190,29 @@ final class ClipboardTests: XCTestCase {
         let clip = PasteboardClipboard(pb)
         XCTAssertNil(clip.readImage(), "the icon must never be read when a file was copied")
         XCTAssertEqual(clip.readFileURL(), url.standardizedFileURL)
+    }
+
+    func testUnresolvableFileItemHidesTheIconAndSaysSo() throws {
+        // A file-url item whose bytes do not decode to a file URL stands in for a reference
+        // that no longer resolves: no URL comes back, the icon stays hidden, and the seam says
+        // a file item was there.
+        let pb = try privatePasteboard()
+        let item = NSPasteboardItem()
+        item.setData(Data("not a url".utf8), forType: .fileURL)
+        item.setData(Data([0x4D, 0x4D, 0x00, 0x2A]), forType: .tiff)
+        XCTAssertTrue(pb.writeObjects([item]))
+        let clip = PasteboardClipboard(pb)
+        XCTAssertEqual(clip.readFileURLs(), [])
+        XCTAssertNil(clip.readImage())
+        XCTAssertTrue(clip.holdsFileItems)
+    }
+
+    func testFakeModelsAnUnresolvableFileItem() {
+        let fake = FakeClipboard(image: Data([1]))
+        fake.unresolvableFileItem = true
+        XCTAssertNil(fake.readImage())
+        XCTAssertEqual(fake.readFileURLs(), [])
+        XCTAssertTrue(fake.holdsFileItems)
     }
 
     func testFakeFileURLHidesItsImage() {

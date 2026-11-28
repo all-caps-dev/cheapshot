@@ -31,12 +31,19 @@ public protocol ClipboardSource: AnyObject {
     /// Finder's file reference URLs (`file:///.file/id=...`) are resolved to their paths. Empty
     /// when there are none. Callers that read one input refuse two or more rather than guess.
     func readFileURLs() -> [URL]
+    /// True when any clipboard item carries a file URL at all, resolvable or not. This is the
+    /// test `readImage()` uses to hide the image, so when it is true and `readFileURLs()` is
+    /// empty, a file was copied but can no longer be found (deleted, or its volume unmounted).
+    var holdsFileItems: Bool { get }
     /// Clears the clipboard, then writes `payload` as its only item. False when the write failed,
     /// and the clipboard is then already empty: the old contents are gone either way.
     @discardableResult func replace(with payload: ClipboardPayload) -> Bool
 }
 
 public extension ClipboardSource {
+    /// Default for conformers whose file URLs always resolve: any URL means a file item.
+    var holdsFileItems: Bool { !readFileURLs().isEmpty }
+
     /// The file URL when the clipboard holds exactly one, else nil (none, or two or more).
     func readFileURL() -> URL? {
         let urls = readFileURLs()
@@ -63,11 +70,15 @@ public final class PasteboardClipboard: ClipboardSource {
     public func readImage() -> Data? {
         // File URLs win (see the protocol): any item carrying public.file-url means the image
         // types on the clipboard are Finder's icon or thumbnail, not something to read.
-        if (pasteboard.pasteboardItems ?? []).contains(where: { $0.types.contains(.fileURL) }) { return nil }
+        if holdsFileItems { return nil }
         for type in Self.imageTypes {
             if let data = pasteboard.data(forType: type), !data.isEmpty { return data }
         }
         return nil
+    }
+
+    public var holdsFileItems: Bool {
+        (pasteboard.pasteboardItems ?? []).contains(where: { $0.types.contains(.fileURL) })
     }
 
     public func readFileURLs() -> [URL] {
