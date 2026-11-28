@@ -3,3 +3,8 @@ Cookie: pref=""; csrftoken=Kq8Zr2Lm5Vt⟦⟧9Xw3Bn6Pd1
 Cookie: a=; b=; session=753eda83d7c5⟦⟧8dfe0d5a0cf3
 Cookie: foo=; theme=dark
 Set-Cookie: sid=; Path=/; HttpOnly
+Cookie: foo= ; sid=Kk3Mm9Qq2Ww5⟦⟧Rr7Tt1Yy4Uu8
+Cookie: foo=;sid=Ab3dEf6Hh9Kk⟦⟧2Ll5Oo8Pp1Qq;
+Set-Cookie: sid=""; Path=/
+"Cookie": "foo=; sid=347301ef56e6⟦⟧4dc3cd6089065c3146e8"
+Cookie: sid=753eda83d7c58dfe⟦⟧0d5a0cf318656b3e; empty=; csrftoken=Zx8Cv2Bn5Mq⟦⟧7Wr3Ty6Ui9

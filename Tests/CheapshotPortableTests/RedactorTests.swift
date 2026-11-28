@@ -173,6 +173,9 @@ final class RedactorTests: XCTestCase {
             String(repeating: "curl -u a:b ", count: n / 12),
             String(repeating: "Authorization: ", count: n / 15),
             "Cookie: " + String(repeating: "a=b; ", count: n / 5),
+            // CS-05 gap 1: empty Cookie values keep the chain going.
+            "Cookie: " + String(repeating: "a=; ", count: n / 4),
+            "Cookie: " + String(repeating: "a=\"\"; ", count: n / 6),
             "password" + String(repeating: "\t", count: n),
             String(repeating: "password\t \t", count: n / 11),
             // NOV-161: values scanned again after an empty field. Chains of keys, keys with
