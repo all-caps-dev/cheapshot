@@ -6,7 +6,7 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ### Redaction
 
-- A custom rule whose pattern spans two lines now matches across a code-fence line (CS-05 gap 4). The text output puts a ```` ``` ```` line after a fenced (monospaced) run, so a `--rules` pattern such as `creds-begin\n[0-9a-f]{20}` never matched when the fence fell between its lines, and the secret stayed in the text. After the normal pass, each custom rule also reads the text with its fence lines taken out; a hit that crosses a fence is replaced, fence line included. Builtins never cross a line and are unchanged. Known and not changed: the `--json` `lines` array still falls back to per-line redaction when a rule eats a newline, so such a rule's secret can remain there.
+- A custom rule whose pattern spans two lines now matches across a code-fence line (CS-05 gap 4). The text output puts a ```` ``` ```` line after a fenced (monospaced) run, so a `--rules` pattern such as `creds-begin\n[0-9a-f]{20}` never matched when the fence fell between its lines, and the secret stayed in the text. After the normal pass, each custom rule also reads the text with its fence lines taken out, and any new hit is replaced: one that crosses a fence (fence line included) or one that only looks across it (a lookbehind). `cheapshot mask` reads the lines on either side of an OCR'd fence line together too, so such a hit is painted, not only counted. Builtins never cross a line and are unchanged. Known and not changed: the `--json` `lines` array still falls back to per-line redaction when a rule eats a newline, so such a rule's secret can remain there.
 
 ### Mask
 

@@ -78,17 +78,30 @@ public struct Redactor {
         // It runs after every rule has had its plain pass, so the first loop above is exactly
         // the redaction there was before and nothing it replaces can be lost: a custom rule
         // that eats a builtin's cue (`password`) here eats it after the builtin has already
-        // replaced the value. Only a hit that crosses a fence line is kept, since any other hit
-        // the plain pass would have found already. The hit takes the fence line with it, so a
-        // fenced block can be left without its closing line; the secret matters more.
+        // replaced the value. A hit the plain pass finds too is skipped (see below). A hit that
+        // crosses a fence line takes that line with it, so a fenced block can be left without
+        // its closing line; the secret matters more.
         // Builtins are skipped (they never cross a newline), so their output is unchanged.
         guard compiled.contains(where: \.readsPastFences), FenceFreeView.mayHaveFence(text) else { return (text, report) }
         for c in compiled where c.readsPastFences {
             guard let view = FenceFreeView(text) else { break }
-            let crossing = hits(of: c, in: view.text).compactMap { view.originalRangeCrossingFence(of: $0, in: text) }
-            Self.replace(crossing, with: c.rule.name, in: &text, report: &report)
+            // The same rule read plainly over the text as it is now: a view hit at one of these
+            // spans is one the plain pass finds anyway (in the text a later rule left), so it is
+            // not new. Every other non-empty view hit is: one that crosses a fence line, and one
+            // that only sees across it (a lookbehind such as `(?<=creds-begin\n)`, or `$`).
+            let plainNow = Set(hits(of: c, in: text))
+            let extra = hits(of: c, in: view.text).compactMap { view.originalRange(of: $0, in: text) }
+                .filter { !plainNow.contains($0) }
+            Self.replace(extra, with: c.rule.name, in: &text, report: &report)
         }
         return (text, report)
+    }
+
+    /// True when `line` is a code-fence line (``` or ~~~, as CommonMark has them), the lines the
+    /// fence-free reading in ``redact(_:)`` reads past. `Masker.flag` uses it to look across an
+    /// OCR'd fence line the same way.
+    public static func isCodeFenceLine(_ line: String) -> Bool {
+        FenceFreeView.isFence(ArraySlice(Array(line.utf16)))
     }
 
     /// Swift: replaces each span in `hits` (sorted, not overlapping) with `[name]` and counts it.
@@ -219,12 +232,12 @@ public struct Redactor {
             return pieces[lo].start + (q - viewStarts[lo]) + (asEnd ? 1 : 0)
         }
 
-        /// `r`, a span in ``text``, as a span in `original`, but only when it crosses a removed
-        /// fence line (and so covers that line too); nil for a span inside one kept stretch.
-        func originalRangeCrossingFence(of r: Range<String.Index>, in original: String) -> Range<String.Index>? {
+        /// `r`, a non-empty span in ``text``, as a span in `original`. A span that crosses a
+        /// removed fence line covers that line too. Nil for an empty span.
+        func originalRange(of r: Range<String.Index>, in original: String) -> Range<String.Index>? {
             let ns = NSRange(r, in: text)
             guard ns.length > 0, let lo = originalOffset(ns.location, asEnd: false),
-                  let hi = originalOffset(NSMaxRange(ns), asEnd: true), hi - lo > ns.length else { return nil }
+                  let hi = originalOffset(NSMaxRange(ns), asEnd: true) else { return nil }
             return Range(NSRange(location: lo, length: hi - lo), in: original)
         }
     }

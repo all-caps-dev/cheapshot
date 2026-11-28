@@ -260,6 +260,7 @@ final class RedactorTests: XCTestCase {
             ["name": "MYCREDS", "pattern": #"creds-begin\n[0-9a-f]{20}"#],
             ["name": "CODEBLOCK", "pattern": #"(?s)~~~~.*?~~~~"#],
             ["name": "FOOPW", "pattern": #"foo\npassword"#],
+            ["name": "AFTER", "pattern": #"(?<=after-marker\n)[0-9a-f]{20}"#],
         ])
         let r = Redactor(customRules: try RuleFile.parse(json))
         func line(_ n: Int, _ text: String, fenced: Bool) -> RenderedLine {
@@ -292,6 +293,9 @@ final class RedactorTests: XCTestCase {
         let cue = r.redact("foo\n```\npassword: hunter2abc9").text
         XCTAssertFalse(cue.contains("hunter2abc9"), cue.debugDescription)
         XCTAssertEqual(cue, "[FOOPW]: [SECRET]")
+        // A rule that only looks across the fence (a lookbehind) is caught too, and the fence
+        // line stays because the hit does not cover it.
+        XCTAssertEqual(r.redact("```\nafter-marker\n```\n\(hex)").text, "```\nafter-marker\n```\n[AFTER]")
     }
 
     // The fence-free reading for a custom rule stays linear on fence-heavy input: many fence

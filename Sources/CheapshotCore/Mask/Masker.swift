@@ -134,6 +134,23 @@ public enum Masker {
                 if pair != single[i] + "\n" + single[i + 1] { hit[i] = true; hit[i + 1] = true }
             }
         }
+        // A rule that reads past a code-fence line (the Redactor's fence-free reading, CS-05
+        // gap 4): when OCR reads a fence line (```), the lines on either side of the fence run
+        // are read together with it, so a hit across the fence is painted, not only counted.
+        var i = 0
+        while i < texts.count {
+            guard Redactor.isCodeFenceLine(texts[i]) else { i += 1; continue }
+            var end = i
+            while end + 1 < texts.count, Redactor.isCodeFenceLine(texts[end + 1]) { end += 1 }
+            if i > 0, end + 1 < texts.count {
+                let window = (i - 1)...(end + 1)
+                let together = redactor.redact(window.map { texts[$0] }.joined(separator: "\n")).text
+                if together != window.map({ single[$0] }).joined(separator: "\n") {
+                    for j in window { hit[j] = true }
+                }
+            }
+            i = end + 1
+        }
         var out: [MaskBox] = []
         for (i, l) in lines.enumerated() {
             if hit[i] { out.append(MaskBox(rect: l.bbox, reason: .redacted)) }
