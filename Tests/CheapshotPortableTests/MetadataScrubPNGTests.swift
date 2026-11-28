@@ -38,6 +38,13 @@ final class MetadataScrubPNGTests: XCTestCase {
     private let idatData: [UInt8] = [0x78, 0x9C, 0x63, 0x60, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01]
 
     private var ihdr: [UInt8] { chunk("IHDR", ihdrData) }
+
+    /// An IHDR for a 1 x 1 image of the given colour type and bit depth. The other bytes can be
+    /// overridden to build invalid headers.
+    private func ihdrOf(colour: UInt8, depth: UInt8, width: UInt32 = 1, height: UInt32 = 1,
+                        compression: UInt8 = 0, filter: UInt8 = 0, interlace: UInt8 = 0) -> [UInt8] {
+        chunk("IHDR", be32(width) + be32(height) + [depth, colour, compression, filter, interlace])
+    }
     private var idat: [UInt8] { chunk("IDAT", idatData) }
     private var iend: [UInt8] { chunk("IEND") }
 
@@ -47,22 +54,23 @@ final class MetadataScrubPNGTests: XCTestCase {
     /// The smallest valid file: IHDR, IDAT, IEND.
     private var minimal: Data { png(ihdr, idat, iend) }
 
-    // Golden input: IHDR sRGB tEXt pHYs eXIf iDOT IDAT zTXt iTXt tIME IEND, CRCs from zlib.
+    // Golden input: IHDR sRGB tEXt pHYs eXIf IDAT zTXt iTXt tIME IEND, CRCs from zlib. It holds
+    // only chunks that Masker.dropMetadataChunks and MetadataScrubPNG.strip treat the same way:
+    // the five metadata chunks both drop, and valid allowlisted chunks both keep. (strip drops or
+    // refuses more than Masker did, such as iDOT, cICP, iCCP and tRNS; other tests cover those.)
     private lazy var goldenInput = hex(
         "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489000000017352474200aece1ce9"
         + "0000001474455874436f6d6d656e74007365637265742d746f6b656effbb48a50000000970485973000016250000"
-        + "162501495224f00000000b655849664d4d002a00000008475053a9d937590000001c69444f540001020304050607"
-        + "08090a0b0c0d0e0f101112131415161718191a1b156e76640000000a49444154789c636000000002000148afa471"
-        + "000000167a545874417574686f720000789c2b4e4d2e4a2d0100089b028aec91bb700000002269545874584d4c3a"
-        + "636f6d2e61646f62652e786d7000000000003c783a786d706d6574612f3e18d267b10000000774494d4507ea0b1c"
-        + "051500276a6f8d0000000049454e44ae426082")
+        + "162501495224f00000000b655849664d4d002a00000008475053a9d937590000000a49444154789c636000000002"
+        + "000148afa471000000167a545874417574686f720000789c2b4e4d2e4a2d0100089b028aec91bb70000000226954"
+        + "5874584d4c3a636f6d2e61646f62652e786d7000000000003c783a786d706d6574612f3e18d267b1000000077449"
+        + "4d4507ea0b1c051500276a6f8d0000000049454e44ae426082")
     // What Masker.dropMetadataChunks returns for goldenInput (checked once against a verbatim copy
-    // of that function): IHDR sRGB pHYs iDOT IDAT IEND.
+    // of that function): IHDR sRGB pHYs IDAT IEND.
     private lazy var goldenOutput = hex(
         "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489000000017352474200aece1ce9"
-        + "0000000970485973000016250000162501495224f00000001c69444f54000102030405060708090a0b0c0d0e0f10"
-        + "1112131415161718191a1b156e76640000000a49444154789c636000000002000148afa4710000000049454e44ae"
-        + "426082")
+        + "0000000970485973000016250000162501495224f00000000a49444154789c636000000002000148afa471000000"
+        + "0049454e44ae426082")
 
     /// Asserts `strip` throws exactly `expected`.
     private func assertStripThrows(_ data: Data, _ expected: MetadataScrubPNG.ScrubError,
@@ -171,6 +179,11 @@ final class MetadataScrubPNGTests: XCTestCase {
         XCTAssertThrowsError(try MetadataScrubPNG.strip(swallow))
         XCTAssertFalse(MetadataScrubPNG.check(swallow).isEmpty)
 
+        // The length field is capped at 2^31 - 1 before it becomes an Int (holds on 32-bit too).
+        XCTAssertEqual(MetadataScrubPNG.chunkLength([0x7F, 0xFF, 0xFF, 0xFF], at: 0), 0x7FFF_FFFF)
+        XCTAssertNil(MetadataScrubPNG.chunkLength([0x80, 0x00, 0x00, 0x00], at: 0))
+        XCTAssertNil(MetadataScrubPNG.chunkLength([0x00, 0xFF, 0xFF, 0xFF, 0xFF], at: 1))
+
         // Cut mid-chunk and cut inside a chunk header.
         let full = [UInt8](minimal)
         assertStripThrows(Data(full[0..<(idatOffset + 15)]), .truncated(offset: idatOffset))
@@ -189,8 +202,8 @@ final class MetadataScrubPNGTests: XCTestCase {
         XCTAssertEqual(kinds(noIHDR), ["structure:IHDR"])
         XCTAssertThrowsError(try MetadataScrubPNG.strip(noIHDR))
 
-        // No IHDR, and the first chunk is an allowed one that happens to be 13 bytes long.
-        let allowedFirst = png(chunk("sRGB", Array(repeating: 0, count: 13)), idat, iend)
+        // No IHDR: the first chunk is an allowed one holding 13 bytes that would be a legal IHDR.
+        let allowedFirst = png(chunk("sRGB", ihdrData), idat, iend)
         XCTAssertEqual(kinds(allowedFirst), ["structure:IHDR"])
         XCTAssertThrowsError(try MetadataScrubPNG.strip(allowedFirst))
 
@@ -214,6 +227,11 @@ final class MetadataScrubPNGTests: XCTestCase {
         let shortIHDR = png(chunk("IHDR", Array(ihdrData.dropLast())), idat, iend)
         XCTAssertEqual(kinds(shortIHDR), ["structure:IHDR"])
         XCTAssertThrowsError(try MetadataScrubPNG.strip(shortIHDR))
+
+        // IHDR with a valid 13-byte header and one extra byte after it.
+        let longIHDR = png(chunk("IHDR", ihdrData + [0x41]), idat, iend)
+        XCTAssertEqual(kinds(longIHDR), ["structure:IHDR"])
+        XCTAssertThrowsError(try MetadataScrubPNG.strip(longIHDR))
 
         // A second IHDR later in the file.
         let twoIHDR = png(ihdr, idat, ihdr, iend)
@@ -239,9 +257,13 @@ final class MetadataScrubPNGTests: XCTestCase {
         let fixtures: [Data] = [
             goldenInput, goldenOutput, minimal,
             png(ihdr, chunk("cICP", [1, 13, 0, 1]), idat, iend),
-            png(ihdr, chunk("PLTE", [0, 0, 0]), chunk("tRNS", [0]), idat, idat, chunk("tEXt", [0x61, 0]), iend),
-            png(ihdr, chunk("gAMA", [0, 0, 0xB1, 0x8F]), chunk("iCCP", Array("sRGB\u{0}\u{0}x".utf8)),
-                chunk("cHRM", Array(repeating: 1, count: 32)), chunk("sBIT", [8, 8, 8, 8]), idat, iend),
+            // Palette image: PLTE before two consecutive IDATs, a text chunk after them.
+            png(ihdrOf(colour: 3, depth: 8), chunk("PLTE", [0, 0, 0, 255, 255, 255]), idat, idat,
+                chunk("tEXt", [0x61, 0]), iend),
+            // Every allowlisted ancillary once, each at its exact length, all before IDAT.
+            png(ihdr, chunk("sRGB", [0]), chunk("gAMA", [0, 0, 0xB1, 0x8F]),
+                chunk("cHRM", Array(repeating: 1, count: 32)), chunk("sBIT", [8, 8, 8, 8]),
+                chunk("pHYs", [0, 0, 0x16, 0x25, 0, 0, 0x16, 0x25, 1]), idat, iend),
         ]
         for f in fixtures {
             let out = try MetadataScrubPNG.strip(f)
@@ -256,6 +278,143 @@ final class MetadataScrubPNGTests: XCTestCase {
                 return XCTFail("want .structure from the output check, got \(error)")
             }
         }
+    }
+
+    // Review fix 1: an allowlisted name is not enough. Each allowlisted chunk must have its exact
+    // length and sane values, so none of them can carry hidden bytes.
+    func testAllowlistedChunksNeedExactLengthsAndValues() {
+        let text60 = Array(String(repeating: "secret-token ", count: 5).prefix(60).utf8)
+        let bad: [(String, [UInt8])] = [
+            ("sRGB", chunk("sRGB", text60)),            // 60 bytes of text in sRGB
+            ("sRGB", chunk("sRGB", [0, 0])),
+            ("sRGB", chunk("sRGB", [4])),               // rendering intent is 0...3
+            ("gAMA", chunk("gAMA", [0, 0, 0xB1, 0x8F, 0])),
+            ("gAMA", chunk("gAMA", text60)),
+            ("cHRM", chunk("cHRM", Array(repeating: 1, count: 33))),
+            ("cHRM", chunk("cHRM", text60)),
+            ("pHYs", chunk("pHYs", [0, 0, 0x16, 0x25, 0, 0, 0x16, 0x25, 1, 0])),
+            ("pHYs", chunk("pHYs", [0, 0, 0x16, 0x25, 0, 0, 0x16, 0x25, 2])),   // unit is 0 or 1
+            ("sBIT", chunk("sBIT", [8, 8, 8])),         // RGBA needs 4
+            ("sBIT", chunk("sBIT", text60)),
+            ("sBIT", chunk("sBIT", [8, 8, 8, 0])),      // each value is 1...bit depth
+            ("sBIT", chunk("sBIT", [8, 8, 8, 9])),
+        ]
+        for (name, c) in bad {
+            let file = png(ihdr, c, idat, iend)
+            XCTAssertEqual(kinds(file), ["structure:\(name)"], "\(name) \(c.count - 12) bytes")
+            XCTAssertThrowsError(try MetadataScrubPNG.strip(file))
+        }
+
+        // sBIT length follows the colour type: grey 1, RGB 3, palette 3, grey + alpha 2.
+        XCTAssertEqual(kinds(png(ihdrOf(colour: 0, depth: 8), chunk("sBIT", [8]), idat, iend)), [])
+        XCTAssertEqual(kinds(png(ihdrOf(colour: 0, depth: 8), chunk("sBIT", [8, 8]), idat, iend)), ["structure:sBIT"])
+        XCTAssertEqual(kinds(png(ihdrOf(colour: 2, depth: 8), chunk("sBIT", [8, 8, 8]), idat, iend)), [])
+        XCTAssertEqual(kinds(png(ihdrOf(colour: 4, depth: 16), chunk("sBIT", [16, 16]), idat, iend)), [])
+        XCTAssertEqual(kinds(png(ihdrOf(colour: 4, depth: 8), chunk("sBIT", [8]), idat, iend)), ["structure:sBIT"])
+        XCTAssertEqual(kinds(png(ihdrOf(colour: 3, depth: 2), chunk("sBIT", [8, 8, 8]),
+                                 chunk("PLTE", [0, 0, 0]), idat, iend)), [], "palette samples are 8-bit")
+
+        // IHDR fields: width and height not 0, a legal colour type and bit depth pair,
+        // compression and filter 0, interlace 0 or 1.
+        for header in [ihdrOf(colour: 6, depth: 8, width: 0), ihdrOf(colour: 6, depth: 8, height: 0),
+                       ihdrOf(colour: 6, depth: 8, width: 0x8000_0000), ihdrOf(colour: 5, depth: 8),
+                       ihdrOf(colour: 6, depth: 4), ihdrOf(colour: 2, depth: 1), ihdrOf(colour: 3, depth: 16),
+                       ihdrOf(colour: 0, depth: 3), ihdrOf(colour: 6, depth: 8, compression: 1),
+                       ihdrOf(colour: 6, depth: 8, filter: 1), ihdrOf(colour: 6, depth: 8, interlace: 2)] {
+            let file = png(header, idat, iend)
+            XCTAssertEqual(kinds(file), ["structure:IHDR"])
+            XCTAssertThrowsError(try MetadataScrubPNG.strip(file))
+        }
+        XCTAssertEqual(kinds(png(ihdrOf(colour: 0, depth: 16, interlace: 1), idat, iend)), [])
+
+        // An ancillary name with no length rule is refused, so adding a name to `allowed`
+        // without a rule cannot keep it unchecked.
+        let header = MetadataScrubPNG.Header(ArraySlice(ihdrData))!
+        XCTAssertNotNil(MetadataScrubPNG.ancillaryProblem("iDOT", ArraySlice(Array(repeating: 0, count: 28)),
+                                                          header: header))
+    }
+
+    func testAllowlistedAncillaryAtMostOnceAndBeforeIDAT() {
+        let srgb = chunk("sRGB", [0])
+        let phys = chunk("pHYs", [0, 0, 0x16, 0x25, 0, 0, 0x16, 0x25, 1])
+        for (name, file) in [("sRGB", png(ihdr, srgb, srgb, idat, iend)),               // twice
+                             ("sRGB", png(ihdr, idat, srgb, iend)),                     // after IDAT
+                             ("sRGB", png(ihdr, idat, srgb, srgb, srgb, iend)),         // three after IDAT
+                             ("pHYs", png(ihdr, phys, idat, phys, iend)),
+                             ("gAMA", png(ihdr, idat, chunk("gAMA", [0, 0, 0xB1, 0x8F]), iend))] {
+            XCTAssertEqual(kinds(file), ["structure:\(name)"])
+            XCTAssertThrowsError(try MetadataScrubPNG.strip(file))
+        }
+        // Metadata chunks may still repeat and sit after IDAT: they are dropped, not kept.
+        let text = chunk("tEXt", Array("a\u{0}b".utf8))
+        XCTAssertEqual(try MetadataScrubPNG.strip(png(ihdr, text, text, idat, text, iend)), minimal)
+    }
+
+    func testPLTEOnlyWhereAllowedBeforeIDATAndSized() {
+        let rgb3 = ihdrOf(colour: 2, depth: 8), pal = ihdrOf(colour: 3, depth: 8)
+        let two = chunk("PLTE", [0, 0, 0, 255, 255, 255])
+        // Allowed: palette images (required there), and optional for RGB and RGBA.
+        for file in [png(pal, two, idat, iend), png(rgb3, two, idat, iend), png(ihdr, two, idat, iend),
+                     png(pal, chunk("PLTE", Array(repeating: 7, count: 768)), idat, iend)] {
+            XCTAssertEqual(kinds(file), [])
+            XCTAssertNoThrow(try MetadataScrubPNG.strip(file))
+        }
+        let bad: [Data] = [
+            png(pal, chunk("PLTE", [0, 0, 0, 1]), idat, iend),                          // not a multiple of 3
+            png(pal, chunk("PLTE", []), idat, iend),                                    // empty
+            png(pal, chunk("PLTE", Array(repeating: 7, count: 771)), idat, iend),       // 257 entries
+            png(ihdrOf(colour: 3, depth: 1), chunk("PLTE", Array(repeating: 7, count: 9)), idat, iend),  // 3 > 2^1
+            png(rgb3, idat, two, iend),                                                 // after IDAT
+            png(pal, two, two, idat, iend),                                             // twice
+            png(ihdrOf(colour: 0, depth: 8), two, idat, iend),                          // greyscale has none
+            png(ihdrOf(colour: 4, depth: 8), two, idat, iend),                          // grey + alpha has none
+        ]
+        for file in bad {
+            XCTAssertEqual(kinds(file), ["structure:PLTE"])
+            XCTAssertThrowsError(try MetadataScrubPNG.strip(file))
+        }
+        // A palette image with no PLTE at all.
+        XCTAssertEqual(kinds(png(pal, idat, iend)), ["structure:PLTE"])
+    }
+
+    func testIDATChunksMustBeConsecutive() {
+        // IDAT, a dropped chunk, IDAT: the second run is refused, not stitched together.
+        let split = png(ihdr, idat, chunk("tEXt", Array("a\u{0}b".utf8)), idat, iend)
+        XCTAssertEqual(kinds(split), ["structure:IDAT"])
+        XCTAssertThrowsError(try MetadataScrubPNG.strip(split))
+        XCTAssertEqual(kinds(png(ihdr, idat, idat, idat, iend)), [])
+    }
+
+    // Review fixes 2 and 3: chunks this parser cannot check (iCCP) or whose removal would change
+    // the picture (tRNS, and the APNG chunks acTL, fcTL, fdAT) are refused, never dropped.
+    func testICCPTransparencyAndAnimationChunksAreRefused() {
+        let cases: [(String, [UInt8])] = [
+            ("iCCP", Array("sRGB\u{0}\u{0}".utf8) + [0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]),
+            ("tRNS", [0, 0]),
+            ("acTL", [0, 0, 0, 1, 0, 0, 0, 0]),
+            ("fcTL", Array(repeating: 0, count: 26)),
+        ]
+        for (name, data) in cases {
+            let file = png(ihdrOf(colour: 0, depth: 8), chunk(name, data), idat, iend)
+            XCTAssertEqual(kinds(file), ["notAllowed:\(name)"])
+            XCTAssertThrowsError(try MetadataScrubPNG.strip(file), name) { error in
+                guard case .structure? = error as? MetadataScrubPNG.ScrubError else {
+                    return XCTFail("\(name): want .structure, got \(error)")
+                }
+            }
+        }
+        // fdAT sits after the IDAT run, as APNG frames do.
+        let fdAT = png(ihdr, chunk("acTL", [0, 0, 0, 2, 0, 0, 0, 0]), idat, chunk("fdAT", [0, 0, 0, 1, 0]), iend)
+        XCTAssertThrowsError(try MetadataScrubPNG.strip(fdAT))
+        XCTAssertFalse(MetadataScrubPNG.allowed.contains("iCCP"))
+    }
+
+    func testIDOTIsDropped() throws {
+        // Apple's iDOT holds byte offsets into the file (stale once chunks are dropped) and lets
+        // Apple's decoder show a different picture from every other decoder. Not kept.
+        let withIDOT = png(ihdr, chunk("iDOT", Array(repeating: 0, count: 28)), idat, iend)
+        XCTAssertEqual(try MetadataScrubPNG.strip(withIDOT), minimal)
+        XCTAssertEqual(kinds(withIDOT), ["notAllowed:iDOT"])
     }
 
     func testCRC32KnownVectors() {

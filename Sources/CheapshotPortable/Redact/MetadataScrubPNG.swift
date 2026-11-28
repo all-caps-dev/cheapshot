@@ -12,6 +12,12 @@ import Foundation
 // job is to remove what ImageIO adds (text, EXIF, time) and to refuse anything it does not fully
 // understand. Foundation only, so it builds on Windows; that is why CRC-32 is written out here
 // instead of coming from zlib.
+//
+// An allowlisted name is not enough: every kept chunk has its exact length and checked values,
+// appears at most once, and sits where the PNG spec puts it, so no kept chunk can carry extra
+// bytes. Known limit: IDAT holds a zlib stream, and bytes after the end of that stream inside an
+// IDAT cannot be found without inflating it, which this parser does not do. The encoder writes
+// those IDATs itself from a redrawn canvas, and Verify decodes the result.
 public enum MetadataScrubPNG {
 
     public enum ScrubError: Error, Equatable, CustomStringConvertible {
@@ -48,11 +54,25 @@ public enum MetadataScrubPNG {
         }
     }
 
-    /// The only chunks an output may hold. The four critical chunks, colour and size information,
-    /// and Apple's iDOT (a decode hint ImageIO writes). Everything else is removed or refused.
+    /// The only chunks an output may hold: the four critical chunks, plus fixed-length colour and
+    /// size chunks whose every byte is checked. Everything else is removed or refused.
+    ///
+    /// Left out on purpose (CHE-53 review, a change from plan 3.6):
+    /// - iCCP: a free-text name plus compressed data this parser cannot inflate. The encoder draws
+    ///   into sRGB, so ImageIO writes sRGB, not iCCP (measured on macOS 27.2: IHDR sRGB eXIf IDAT
+    ///   IEND). Refused, see `refused`.
+    /// - iDOT: Apple's decode hint. It holds byte offsets into the file, which go stale once
+    ///   chunks are dropped, and it can make Apple's decoder show a different picture from every
+    ///   other decoder. Dropped like any other ancillary chunk.
     public static let allowed: Set<String> = [
-        "IHDR", "PLTE", "IDAT", "IEND", "sRGB", "iCCP", "pHYs", "gAMA", "cHRM", "sBIT", "iDOT",
+        "IHDR", "PLTE", "IDAT", "IEND", "sRGB", "pHYs", "gAMA", "cHRM", "sBIT",
     ]
+
+    /// Ancillary chunks that are never kept and never dropped: `strip` throws on them. iCCP cannot
+    /// be checked (see `allowed`). tRNS (transparency) and the APNG chunks acTL, fcTL, fdAT
+    /// (animation frames) change the picture when removed, so dropping them would quietly write a
+    /// different image.
+    static let refused: Set<String> = ["iCCP", "tRNS", "acTL", "fcTL", "fdAT"]
 
     static let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
 
@@ -60,8 +80,9 @@ public enum MetadataScrubPNG {
     static let maxChunkLength = 0x7FFF_FFFF
 
     /// Removes every chunk outside `allowed`. Throws on anything it does not fully understand
-    /// (bad signature, bad CRC, truncation, bytes after IEND, an unknown critical chunk), so it
-    /// never returns its input for bad data. The bytes it returns always pass `check`.
+    /// (bad signature, bad CRC, truncation, bytes after IEND, a malformed or misplaced allowlisted
+    /// chunk, an unknown critical chunk, a chunk in `refused`), so it never returns its input for
+    /// bad data. The bytes it returns always pass `check`.
     public static func strip(_ data: Data) throws -> Data {
         try strip(data, keeping: { allowed.contains($0) })
     }
@@ -81,6 +102,8 @@ public enum MetadataScrubPNG {
         for c in chunks {
             if keep(c.type) {
                 out.append(contentsOf: bytes[c.start..<c.end])   // whole chunk: length, type, data, CRC
+            } else if refused.contains(c.type) {
+                throw ScrubError.structure("\(c.type) at byte \(c.start) cannot be kept or dropped safely")
             } else if c.isCritical {
                 // Critical chunks we do not know cannot be dropped safely and are never kept.
                 throw ScrubError.unknownCriticalChunk(c.type, offset: c.start)
@@ -100,8 +123,9 @@ public enum MetadataScrubPNG {
     }
 
     /// Empty means allowlist-clean. Flags every chunk outside `allowed`. Input that will not
-    /// walk (bad signature, bad CRC, truncation, missing IHDR, IDAT or IEND, bytes after IEND)
-    /// is one violation naming the first problem, never [].
+    /// walk (bad signature, bad CRC, truncation, missing IHDR, IDAT or IEND, bytes after IEND, an
+    /// allowlisted chunk with the wrong length, values, count or place) is one violation naming
+    /// the first problem, never [].
     public static func check(_ data: Data) -> [Violation] {
         let chunks: [Chunk]
         do {
@@ -146,8 +170,12 @@ public enum MetadataScrubPNG {
     /// - the 8-byte signature;
     /// - every length is bounds-checked before it is used (never trusted to skip ahead);
     /// - every type is four ASCII letters; every CRC is verified, kept chunks or not;
-    /// - IHDR comes first, has length 13, and appears once;
-    /// - at least one IDAT before IEND;
+    /// - IHDR comes first, has length 13 and legal field values, and appears once;
+    /// - PLTE only for colour types 2, 3, 6 (required for 3), once, before IDAT, 1 to 256 entries
+    ///   (at most 2^bit depth for a palette image);
+    /// - each allowlisted ancillary chunk at most once, before the first IDAT, with its exact
+    ///   length and checked values (`ancillaryProblem`);
+    /// - IDAT chunks consecutive, at least one before IEND;
     /// - the walk stops at IEND, which must be empty and must end exactly at the end of the data.
     static func walk(_ bytes: [UInt8]) throws -> [Chunk] {
         guard bytes.count >= signature.count, bytes[0..<signature.count].elementsEqual(signature) else {
@@ -155,7 +183,9 @@ public enum MetadataScrubPNG {
         }
 
         var chunks: [Chunk] = []
-        var sawIDAT = false
+        var header: Header?                 // set by IHDR, the first chunk
+        var idat = IDATState.notYet
+        var seen: Set<String> = []          // allowlisted non-IDAT chunks seen so far
         var i = signature.count
 
         while i < bytes.count {
@@ -163,9 +193,11 @@ public enum MetadataScrubPNG {
             guard bytes.count - i >= 12 else {
                 throw WalkFailure(error: .truncated(offset: i), kind: "truncated", chunk: "", offset: i)
             }
-            let length = bytes[i..<i + 4].reduce(0) { $0 << 8 | Int($1) }
+            guard let length = chunkLength(bytes, at: i) else {
+                throw WalkFailure(error: .truncated(offset: i), kind: "truncated", chunk: "", offset: i)
+            }
             // Bounds check against what is left, written as a subtraction so it cannot overflow.
-            guard length <= maxChunkLength, length <= bytes.count - i - 12 else {
+            guard length <= bytes.count - i - 12 else {
                 throw WalkFailure(error: .truncated(offset: i), kind: "truncated", chunk: "", offset: i)
             }
 
@@ -188,21 +220,62 @@ public enum MetadataScrubPNG {
                 guard type == "IHDR" else {
                     throw WalkFailure.structure("first chunk is \(type), not IHDR", chunk: "IHDR", offset: i)
                 }
-                guard length == 13 else {
-                    throw WalkFailure.structure("IHDR has length \(length), not 13", chunk: "IHDR", offset: i)
+                // Header checks the length (13) and every field value.
+                guard let h = Header(bytes[i + 8..<dataEnd]) else {
+                    throw WalkFailure.structure("IHDR must be 13 bytes of legal values", chunk: "IHDR", offset: i)
                 }
+                header = h
             } else if type == "IHDR" {
                 throw WalkFailure.structure("a second IHDR at byte \(i)", chunk: "IHDR", offset: i)
             }
+            // Set above: the first chunk is IHDR, or the walk already threw.
+            let h = header!
+
+            // IDAT chunks form one unbroken run. Any other chunk after the run starts ends it.
+            if type == "IDAT" {
+                guard idat != .ended else {
+                    throw WalkFailure.structure("IDAT chunks are not consecutive", chunk: "IDAT", offset: i)
+                }
+                guard h.colourType != 3 || seen.contains("PLTE") else {
+                    throw WalkFailure.structure("palette image has no PLTE before IDAT", chunk: "PLTE", offset: i)
+                }
+                idat = .inRun
+            } else if idat == .inRun {
+                idat = .ended
+            }
+
+            // PLTE: only where the colour type allows it, once, before IDAT, sized in whole entries.
+            if type == "PLTE" {
+                let entries = length / 3
+                let maxEntries = h.colourType == 3 ? min(256, 1 << h.bitDepth) : 256
+                guard [2, 3, 6].contains(h.colourType), idat == .notYet, !seen.contains("PLTE"),
+                      length % 3 == 0, entries >= 1, entries <= maxEntries else {
+                    throw WalkFailure.structure("PLTE is misplaced, repeated or the wrong size", chunk: "PLTE", offset: i)
+                }
+                seen.insert("PLTE")
+            }
+
+            // Allowlisted ancillary chunks: once each, before IDAT, exact length and values.
+            if typeBytes.first! & 0x20 != 0, allowed.contains(type) {
+                guard idat == .notYet else {
+                    throw WalkFailure.structure("\(type) after IDAT", chunk: type, offset: i)
+                }
+                guard !seen.contains(type) else {
+                    throw WalkFailure.structure("a second \(type)", chunk: type, offset: i)
+                }
+                if let why = ancillaryProblem(type, bytes[i + 8..<dataEnd], header: h) {
+                    throw WalkFailure.structure(why, chunk: type, offset: i)
+                }
+                seen.insert(type)
+            }
 
             chunks.append(Chunk(type: type, start: i, end: end, isCritical: typeBytes.first! & 0x20 == 0))
-            if type == "IDAT" { sawIDAT = true }
 
             if type == "IEND" {
                 guard length == 0 else {
                     throw WalkFailure.structure("IEND has length \(length), not 0", chunk: "IEND", offset: i)
                 }
-                guard sawIDAT else {
+                guard idat != .notYet else {
                     throw WalkFailure.structure("no IDAT before IEND", chunk: "IDAT", offset: i)
                 }
                 // The walk ends here. Anything after IEND, a chunk or a single byte, is refused,
@@ -221,6 +294,70 @@ public enum MetadataScrubPNG {
             throw WalkFailure.structure("no IHDR", chunk: "IHDR", offset: i)
         }
         throw WalkFailure.structure("no IEND", chunk: "IEND", offset: i)
+    }
+
+    /// The 4-byte big-endian length field at `i` (the caller has checked 4 bytes are there), or nil
+    /// when it is over the spec cap of 2^31 - 1. Read as UInt32 and capped before converting to
+    /// Int, so the bound holds on a 32-bit Int too, where 0xFFFFFFFF would not fit.
+    static func chunkLength(_ bytes: [UInt8], at i: Int) -> Int? {
+        let length32 = bytes[i..<i + 4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        guard length32 <= UInt32(maxChunkLength) else { return nil }
+        return Int(length32)
+    }
+
+    /// Where the walk is relative to the IDAT run.
+    enum IDATState { case notYet, inRun, ended }
+
+    /// The IHDR fields the other rules need, built only from legal values: width and height
+    /// 1 to 2^31 - 1, a colour type and bit depth pair the spec allows, compression and filter
+    /// method 0, interlace 0 or 1. Every one of the 13 bytes is checked, so none can hide data.
+    struct Header {
+        let colourType: UInt8
+        let bitDepth: UInt8
+
+        init?(_ d: ArraySlice<UInt8>) {
+            let b = Array(d)                       // re-index from 0
+            guard b.count == 13 else { return nil }
+            let width = b[0..<4].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            let height = b[4..<8].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+            let depth = b[8], colour = b[9]
+            let depths: [UInt8: [UInt8]] = [0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16]]
+            guard (1...0x7FFF_FFFF).contains(width), (1...0x7FFF_FFFF).contains(height),
+                  depths[colour]?.contains(depth) == true,
+                  b[10] == 0, b[11] == 0, b[12] <= 1 else { return nil }
+            colourType = colour
+            bitDepth = depth
+        }
+    }
+
+    /// nil when an allowlisted ancillary chunk's data is exactly what the spec allows, else why
+    /// not. Fixed lengths everywhere, so no chunk can carry extra bytes.
+    static func ancillaryProblem(_ type: String, _ d: ArraySlice<UInt8>, header h: Header) -> String? {
+        let b = Array(d)                           // re-index from 0
+        switch type {
+        case "sRGB":
+            // One byte: the rendering intent, 0 to 3.
+            return b.count == 1 && b[0] <= 3 ? nil : "sRGB must be 1 byte, intent 0 to 3"
+        case "gAMA":
+            return b.count == 4 ? nil : "gAMA must be 4 bytes"
+        case "cHRM":
+            return b.count == 32 ? nil : "cHRM must be 32 bytes"
+        case "pHYs":
+            // X and Y pixels per unit (4 bytes each), then the unit: 0 unknown, 1 metre.
+            return b.count == 9 && b[8] <= 1 ? nil : "pHYs must be 9 bytes, unit 0 or 1"
+        case "sBIT":
+            // One significant-bits value per channel: grey 1, RGB 3, palette 3, grey + alpha 2,
+            // RGBA 4. Each is 1 to the sample depth (8 for palette images).
+            let channels: [UInt8: Int] = [0: 1, 2: 3, 3: 3, 4: 2, 6: 4]
+            let maxBits = h.colourType == 3 ? 8 : h.bitDepth
+            guard b.count == channels[h.colourType], b.allSatisfy({ $0 >= 1 && $0 <= maxBits }) else {
+                return "sBIT length or values do not match the colour type"
+            }
+            return nil
+        default:
+            // An allowlisted ancillary chunk with no rule above: refuse rather than keep unchecked.
+            return "\(type) has no length rule"
+        }
     }
 
     private static func isASCIILetter(_ b: UInt8) -> Bool {
