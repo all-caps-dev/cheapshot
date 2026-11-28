@@ -54,6 +54,12 @@ final class RuleCatalogTests: XCTestCase {
         XCTAssertNil(RuleCatalog.entry(named: "\u{17F}ecret"))
         XCTAssertNil(RuleCatalog.preset(named: "\u{17F}ecrets-only"))
         XCTAssertNil(RuleCatalog.preset(named: "everyt\u{0130}ng"))  // dotted capital I
+        // The two preset inputs above can never lowercase to a preset name, so they would pass
+        // without the guard. Pin the guard itself: the Kelvin sign is the one non-ASCII scalar
+        // that lowercases to a single ASCII letter (k), and it must still count as non-ASCII.
+        XCTAssertEqual("\u{212A}".lowercased(), "k")
+        XCTAssertFalse(RuleCatalog.isASCII("\u{212A}eys-only"))
+        XCTAssertTrue(RuleCatalog.isASCII("keys-only"))
         // The plain ASCII spellings still work in any case.
         XCTAssertEqual(RuleCatalog.resolve("Secret"), ["SECRET"])
         XCTAssertNotNil(RuleCatalog.preset(named: "SECRETS-ONLY"))
