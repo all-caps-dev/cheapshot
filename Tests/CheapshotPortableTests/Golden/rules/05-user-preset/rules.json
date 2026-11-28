@@ -1,0 +1,2 @@
+{"version": 2, "preset": "client-share",
+ "presets": {"client-share": {"disabled": ["group:network", "EMAIL"]}}}

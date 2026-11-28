@@ -235,6 +235,19 @@ final class ClipboardModeTests: XCTestCase {
         XCTAssertTrue(try ledgerEntries().isEmpty)
     }
 
+    /// Rules file v2 (#41, merged with --clipboard): a weakened clipboard read carries the same
+    /// "rules" mark in --json as a file read, on success and on failure.
+    func testWeakenedClipboardReadCarriesTheRulesMark() async throws {
+        try #"{"version": 2, "preset": "secrets-only"}"#.write(to: tmp.appendingPathComponent("rules.json"), atomically: true, encoding: .utf8)
+        let ok = await run(["--clipboard", "--json"], clipboard: FakeClipboard(image: try png(lines: secretLines)))
+        XCTAssertEqual(ok.code, 0, ok.err)
+        XCTAssertTrue(ok.err.contains("built-in rules are off (preset secrets-only)"), ok.err)
+        XCTAssertEqual((try json(ok.out)["rules"] as? [String: Any])?["preset"] as? String, "secrets-only")
+        let empty = await run(["--clipboard", "--json"], clipboard: FakeClipboard())
+        XCTAssertEqual(empty.code, 1)
+        XCTAssertEqual((try json(empty.out)["rules"] as? [String: Any])?["preset"] as? String, "secrets-only")
+    }
+
     func testEmptyClipboardExits1() async throws {
         let r = await run(["--clipboard", "--json"], clipboard: FakeClipboard())
         XCTAssertEqual(r.code, 1)

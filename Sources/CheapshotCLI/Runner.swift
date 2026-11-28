@@ -5,7 +5,7 @@ import CheapshotCore
 
 public enum CLI {
     public static func run(arguments: [String], io: CLIIO = .standard) async -> Int32 {
-        let opts: Options
+        var opts: Options
         do { opts = try Options.parse(arguments) }
         catch let e as UsageError { io.err("cheapshot: \(e.message)\ntry: cheapshot --help\n"); return 2 }
         catch { io.err("cheapshot: \(error)\n"); return 2 }
@@ -23,12 +23,14 @@ public enum CLI {
         default: break
         }
 
+        if case .listRules(let json) = opts.command { return runListRules(opts, json: json, io: io) }
+
         let redactor: Redactor?
-        do { redactor = try makeRedactor(opts, io) }
+        do { (redactor, opts.rulesMark) = try makeRedactor(opts, io) }
         catch { io.err("cheapshot: \(error)\n"); return 2 }
 
         switch opts.command {
-        case .help, .version, .ledger, .allow, .notePassthrough: preconditionFailure("handled above")
+        case .help, .version, .ledger, .allow, .notePassthrough, .listRules: preconditionFailure("handled above")
         case .mask(let path, let out): return runMask(opts, path: path, out: out, redactor: redactor ?? Redactor(), io: io)
         case .text(let path): return runText(opts, path: path, redactor: redactor, io: io)
         case .video(let path): return await runVideo(opts, path: path, redactor: redactor, io: io)
@@ -49,13 +51,13 @@ public enum CLI {
         do { paths = try newest(in: dir, count: count) }
         catch {
             let message = "cannot read directory: \(error.localizedDescription)"
-            if opts.json { _ = emit(payload([["file": dir, "error": message]], imageTokens: 0, textTokens: 0), io) }
+            if opts.json { _ = emit(payload([["file": dir, "error": message]], imageTokens: 0, textTokens: 0, rules: opts.rulesMark), io) }
             io.err("cheapshot: cannot read directory \(dir): \(error.localizedDescription)\n")
             return 1
         }
         guard !paths.isEmpty else {
             let message = "no images or PDFs in \(dir)"
-            if opts.json { _ = emit(payload([["file": dir, "error": message]], imageTokens: 0, textTokens: 0), io) }
+            if opts.json { _ = emit(payload([["file": dir, "error": message]], imageTokens: 0, textTokens: 0, rules: opts.rulesMark), io) }
             io.err("cheapshot: \(message)\n")
             return 1
         }
@@ -69,10 +71,75 @@ public enum CLI {
     /// app picks rules the same way. Before #290 item 4 only --rules worked, so the Read hook and
     /// the MCP server (which never pass --rules) ran built-in rules only. A file named with
     /// --rules or $CHEAPSHOT_RULES that is missing or bad throws here, and the run exits 2.
-    static func makeRedactor(_ opts: Options, _ io: CLIIO) throws -> Redactor? {
-        guard opts.redact else { return nil }
+    ///
+    /// Rules file v2 (NOV-156): when the file or --preset switches any built-in rule off, this
+    /// prints one stderr line and returns a ``RulesMark`` that the run puts in --json and the
+    /// ledger. A run with every built-in on prints and returns nothing extra, so its output is
+    /// byte-identical to before.
+    static func makeRedactor(_ opts: Options, _ io: CLIIO) throws -> (Redactor?, RulesMark?) {
+        guard opts.redact else { return (nil, nil) }
+        let selection = try ruleSelection(opts, io)
+        guard selection.isWeakened else { return (Redactor(selection: selection), nil) }
+        let mark = RulesMark(preset: selection.preset, disabled: selection.disabled,
+                             partial: selection.partialByName)
+        io.err(mark.notice)
+        return (Redactor(selection: selection), mark)
+    }
+
+    /// Whether a rules file may switch built-in rules off when --all-rules is not given. This is
+    /// the one switch for Ryan's open question Q5 (plan 8): A and B keep `.honour` (under A the
+    /// hook and the MCP server pass --all-rules, CS-33); C is `.locked([.credentials])`.
+    static let defaultTogglePolicy: RuleTogglePolicy = .honour
+
+    static func togglePolicy(_ opts: Options) -> RuleTogglePolicy {
+        opts.allRules ? .allRules : defaultTogglePolicy
+    }
+
+    static func ruleSelection(_ opts: Options, _ io: CLIIO) throws -> RuleSelection {
         let rules = Pipeline.rulesSource(explicitPath: opts.rulesPath, environment: io.environment, home: io.home)
-        return try Pipeline.redactor(rules: rules) { io.err("cheapshot: warning: \($0)\n") }
+        return try Pipeline.ruleSelection(rules: rules, presetOverride: opts.preset, policy: togglePolicy(opts)) {
+            io.err("cheapshot: warning: \($0)\n")
+        }
+    }
+
+    /// `--list-rules [--json]`: every built-in rule with its group and whether it is on under the
+    /// current rules file, --preset and --all-rules, then the file's custom rules. Exit 2 when the
+    /// rules cannot be loaded, the same as a read.
+    static func runListRules(_ opts: Options, json: Bool, io: CLIIO) -> Int32 {
+        let selection: RuleSelection
+        do { selection = try ruleSelection(opts, io) }
+        catch { io.err("cheapshot: \(error)\n"); return 2 }
+        let off = Set(selection.disabled)
+        // A rule that is on but leans on one that is off (BANK_ACCT without ROUTING) is partial.
+        let partial = selection.partialByName
+        if json {
+            let rules: [[String: Any]] = RuleCatalog.entries.map {
+                var row: [String: Any] = ["name": $0.name, "group": $0.group.rawValue, "label": $0.label,
+                                          "description": $0.description, "on": !off.contains($0.name)]
+                if let lost = partial[$0.name] { row["partial"] = lost }
+                return row
+            }
+            let object: [String: Any] = [
+                "version": cheapshotVersion, "preset": selection.preset,
+                "presets": RuleCatalog.presets.map(\.name),
+                "disabled": selection.disabled, "partial": partial, "rules": rules,
+                "custom": selection.customRules.map(\.name),
+            ]
+            return emit(object, io) ? 0 : 1
+        }
+        let width = RuleCatalog.names.map(\.count).max() ?? 0
+        let partNote = partial.isEmpty ? "" : ", \(partial.count) partial"
+        var text = "preset: \(selection.preset)  (\(RuleCatalog.names.count - off.count) of \(RuleCatalog.names.count) built-in rules on\(partNote))\n"
+        for e in RuleCatalog.entries {
+            let pad = String(repeating: " ", count: width - e.name.count)
+            let note = partial[e.name].map { "  partial (\($0))" } ?? ""
+            text += "\(off.contains(e.name) ? "off" : "on ")  \(e.name)\(pad)  \(e.group.rawValue.padding(toLength: 11, withPad: " ", startingAt: 0))  \(e.label)\(note)\n"
+        }
+        if !selection.customRules.isEmpty {
+            text += "custom rules (run first): " + selection.customRules.map(\.name).joined(separator: ", ") + "\n"
+        }
+        io.out(text)
+        return 0
     }
 
     /// One JSON object per recognized line: 1-based number, redacted text, integer box with a
@@ -107,8 +174,11 @@ public enum CLI {
         catch { io.err("cheapshot: \(error)\n"); return false }
     }
 
-    static func payload(_ results: [[String: Any]], imageTokens: Int, textTokens: Int) -> [String: Any] {
-        ["version": cheapshotVersion, "results": results, "image_tokens": imageTokens, "text_tokens": textTokens]
+    /// `rules` is the run's ``RulesMark``: present only when a built-in rule was off.
+    static func payload(_ results: [[String: Any]], imageTokens: Int, textTokens: Int, rules: RulesMark? = nil) -> [String: Any] {
+        var p: [String: Any] = ["version": cheapshotVersion, "results": results, "image_tokens": imageTokens, "text_tokens": textTokens]
+        if let rules = rules { p["rules"] = rules.json }
+        return p
     }
 
     /// See `Pipeline.savings`.
@@ -130,7 +200,8 @@ public enum CLI {
     static func record(_ entry: LedgerEntry, _ opts: Options, _ io: CLIIO) {
         guard !opts.noLedger else { return }
         // #290 item 4: a raw run is visible in the ledger.
-        let entry = Pipeline.ledgerEntry(entry, redacted: opts.redact)
+        var entry = Pipeline.ledgerEntry(entry, redacted: opts.redact)
+        if let mark = opts.rulesMark { entry.rulesOff = mark.disabled.count }
         do { try ledger(io).append(entry) } catch { io.err("cheapshot: ledger not written: \(error)\n") }
     }
 
@@ -415,10 +486,12 @@ public enum CLI {
                 return ["reason": b.reason.rawValue,
                         "bbox": [Int(r.minX), Int(r.minY), Int(r.maxX), Int(r.maxY)]]
             }
-            guard emit(["version": cheapshotVersion, "file": path, "masked": allowed, "boxes": boxes,
-                        "box_count": result.boxes.count, "redactions": result.report.counts,
-                        "width": result.image.width, "height": result.image.height,
-                        "rounds": result.rounds, "allowed_seconds": allowSeconds], io) else { return 1 }
+            var object: [String: Any] = ["version": cheapshotVersion, "file": path, "masked": allowed, "boxes": boxes,
+                                         "box_count": result.boxes.count, "redactions": result.report.counts,
+                                         "width": result.image.width, "height": result.image.height,
+                                         "rounds": result.rounds, "allowed_seconds": allowSeconds]
+            if let mark = opts.rulesMark { object["rules"] = mark.json }
+            guard emit(object, io) else { return 1 }
         } else {
             let counts = result.report.counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
             io.out("masked: \(allowed)\n")
@@ -437,7 +510,7 @@ public enum CLI {
             raw = io.readStdin()
         } else {
             guard let s = try? String(contentsOfFile: path, encoding: .utf8) else {
-                if opts.json { _ = emit(payload([["file": path, "error": "cannot read"]], imageTokens: 0, textTokens: 0), io) }
+                if opts.json { _ = emit(payload([["file": path, "error": "cannot read"]], imageTokens: 0, textTokens: 0, rules: opts.rulesMark), io) }
                 io.err("cheapshot: cannot read \(path)\n")
                 return 1
             }
@@ -447,7 +520,7 @@ public enum CLI {
         let (text, report, tt) = (read.text, read.report, read.textTokens)
         if opts.json {
             guard emit(payload([["file": path, "text": text, "redactions": report.counts,
-                                 "image_tokens": 0, "text_tokens": tt]], imageTokens: 0, textTokens: tt), io) else { return 1 }
+                                 "image_tokens": 0, "text_tokens": tt]], imageTokens: 0, textTokens: tt, rules: opts.rulesMark), io) else { return 1 }
         } else {
             io.out(text + "\n")
         }
@@ -523,7 +596,7 @@ public enum CLI {
 
         let totalImage = pdfs.imageTokens + images.imageTokens
         let totalText = pdfs.textTokens + images.textTokens
-        if opts.json, !emit(payload(results, imageTokens: totalImage, textTokens: totalText), io) { return 1 }
+        if opts.json, !emit(payload(results, imageTokens: totalImage, textTokens: totalText, rules: opts.rulesMark), io) { return 1 }
         let ok = paths.count - failed
         // One line per kind present, so a PDF run never reports itself as measured image savings.
         for entry in Pipeline.ledgerEntries(pdfs: pdfs, images: images, redacted: opts.redact) { record(entry, opts, io) }
@@ -576,7 +649,7 @@ public enum CLI {
                 var r = entry ?? ["file": "clipboard"]
                 r["error"] = message
                 let it = r["image_tokens"] as? Int ?? 0, tt = r["text_tokens"] as? Int ?? 0
-                _ = emit(payload([r], imageTokens: it, textTokens: tt), io)
+                _ = emit(payload([r], imageTokens: it, textTokens: tt, rules: opts.rulesMark), io)
             }
             io.err("cheapshot: \(message)\n")
             return code
@@ -675,7 +748,7 @@ public enum CLI {
         // Stricter than a file read (plan 4.3): blank text is a failed run, not an empty success.
         if let b = blank { return fail(b.message, code: b.code, entry: entry) }
         if opts.json {
-            guard emit(payload([entry], imageTokens: it, textTokens: tt), io) else { return 1 }
+            guard emit(payload([entry], imageTokens: it, textTokens: tt, rules: opts.rulesMark), io) else { return 1 }
         } else {
             io.out(text + "\n")
         }
@@ -695,7 +768,7 @@ public enum CLI {
     static func runVideo(_ opts: Options, path: String, redactor: Redactor?, io: CLIIO,
                          transcriber: (Options, Redactor?) -> VideoTranscriber = ffmpegTranscriber) async -> Int32 {
         guard FileManager.default.fileExists(atPath: path) else {
-            if opts.json { _ = emit(payload([["file": path, "error": "no such video"]], imageTokens: 0, textTokens: 0), io) }
+            if opts.json { _ = emit(payload([["file": path, "error": "no such video"]], imageTokens: 0, textTokens: 0, rules: opts.rulesMark), io) }
             io.err("cheapshot: no such video \(path)\n")
             return 1
         }
@@ -703,12 +776,12 @@ public enum CLI {
         let t: VideoTranscript
         do { t = try await transcriber.transcribe(URL(fileURLWithPath: path), maxFrames: opts.maxFrames) }
         catch {
-            if opts.json { _ = emit(payload([["file": path, "error": "\(error)"]], imageTokens: 0, textTokens: 0), io) }
+            if opts.json { _ = emit(payload([["file": path, "error": "\(error)"]], imageTokens: 0, textTokens: 0, rules: opts.rulesMark), io) }
             io.err("cheapshot: \(error)\n")
             return 1
         }
         guard t.frameCount > 0 else {
-            if opts.json { _ = emit(payload([["file": path, "error": "no frames extracted"]], imageTokens: 0, textTokens: 0), io) }
+            if opts.json { _ = emit(payload([["file": path, "error": "no frames extracted"]], imageTokens: 0, textTokens: 0, rules: opts.rulesMark), io) }
             io.err("cheapshot: no frames extracted\n")
             return 1
         }
@@ -722,7 +795,7 @@ public enum CLI {
                                  "segments": segs, "frames": t.frameCount, "failed_frames": t.failedFrames,
                                  "redactions": t.redactions.counts,
                                  "image_tokens": t.imageTokens, "text_tokens": tt]],
-                               imageTokens: t.imageTokens, textTokens: tt), io) else { return 1 }
+                               imageTokens: t.imageTokens, textTokens: tt, rules: opts.rulesMark), io) else { return 1 }
         } else {
             io.out(body.trimmingCharacters(in: .whitespacesAndNewlines) + "\n")
         }

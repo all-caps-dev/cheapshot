@@ -18,6 +18,7 @@ public struct Options: Equatable {
         case files([String])
         case newest(dir: String, count: Int)
         case cleanshot(count: Int)
+        case listRules(json: Bool)       // the rule catalog with each rule on or off (NOV-156)
         /// Image bytes or one copied file from the general pasteboard, always redacted (NOV-155).
         case clipboard
     }
@@ -31,6 +32,13 @@ public struct Options: Equatable {
     /// Explicit frame times for a --video run. nil means scene detection picks the frames.
     public var frameTimes: [TimeInterval]? = nil
     public var rulesPath: String? = nil
+    /// --preset: replaces the rules file's preset for this run (rules file v2, NOV-156).
+    public var preset: String? = nil
+    /// --all-rules: ignore every toggle and preset in the rules file; all built-in rules run.
+    public var allRules = false
+    /// Set by the runner once the rules are loaded, never by the parser: which built-ins are off
+    /// this run. Nil on a run with every built-in on, which is every default run.
+    public var rulesMark: RulesMark? = nil
     public var pages: ClosedRange<Int>? = nil
 
     public init(command: Command) { self.command = command }
@@ -98,7 +106,8 @@ public struct Options: Equatable {
         }
     }
 
-    /// `cheapshot mask [--out <file.png>] [--min-conf <f>] [--rules <file>] [--json] [--] <image>`.
+    /// `cheapshot mask [--out <file.png>] [--min-conf <f>] [--rules <file>] [--all-rules] [--json] [--] <image>`.
+    /// No --preset: a mask is a copy for an agent, and a preset can only switch rules off.
     /// Its own small parser, so a flag that makes no sense here (--raw above all: a mask with
     /// redaction off would paint nothing) is a usage error instead of being silently accepted.
     static func parseMask(_ args: [String]) throws -> Options {
@@ -124,6 +133,7 @@ public struct Options: Equatable {
                 out = v
             case "--json":     o.json = true
             case "--rules":    o.rulesPath = try value(a)
+            case "--all-rules": o.allRules = true
             case "--min-conf":
                 let v = try value(a)
                 guard let n = Float(v), n.isFinite, n >= 0, n <= 1 else {
@@ -177,7 +187,7 @@ public struct Options: Equatable {
         var text: String? = nil
         var video: String? = nil
         var clipboard = false
-        var ledger = false, migrate = false, byMode = false
+        var ledger = false, migrate = false, byMode = false, listRules = false
         var days: Int? = nil
         var i = 0
 
@@ -234,6 +244,9 @@ public struct Options: Equatable {
             case "--max-frames": o.maxFrames = try positiveInt(a)
             case "--dedupe":    o.dedupe = try unitNumber(a)
             case "--rules":     o.rulesPath = try value(a)
+            case "--preset":    o.preset = try value(a)
+            case "--all-rules": o.allRules = true
+            case "--list-rules": listRules = true
             case "--pages":     o.pages = try parsePages(try value(a))
             case "--text":      text = try value(a)
             case "--video":     video = try value(a)
@@ -268,6 +281,7 @@ public struct Options: Equatable {
         // A mode flag runs its own input, so a leftover file would be silently dropped.
         // Report the clash instead of guessing which one the caller meant.
         let mode: String? = ledger ? "--ledger"
+            : listRules ? "--list-rules"
             : text != nil ? "--text"
             : video != nil ? "--video"
             : newest != nil ? "--newest"
@@ -277,6 +291,18 @@ public struct Options: Equatable {
             throw UsageError(message: "files cannot be combined with \(m): \(positional.joined(separator: " "))")
         }
 
+        if listRules {
+            // Report a clash instead of dropping the other flag (the rule for modes above).
+            let other: [(Bool, String)] = [(ledger, "--ledger"), (text != nil, "--text"), (video != nil, "--video"),
+                                           (newest != nil, "--newest"), (cleanshot != nil, "--cleanshot"),
+                                           (o.frameTimes != nil, "--frames-at or --chapters"), (migrate, "--migrate"),
+                                           (days != nil, "--days"), (byMode, "--by-mode"), (!o.redact, "--raw"),
+                                           (clipboard, "--clipboard")]
+            if let clash = other.first(where: { $0.0 }) {
+                throw UsageError(message: "--list-rules cannot be combined with \(clash.1)")
+            }
+            o.command = .listRules(json: o.json); return o
+        }
         // --clipboard is its own input and always redacts (plan 4.3). Everything that would pick
         // another input, or switch redaction off, is refused rather than quietly ignored.
         if clipboard {
@@ -304,5 +330,33 @@ public struct Options: Equatable {
         guard !positional.isEmpty else { throw UsageError(message: "no input files") }
         o.command = .files(positional)
         return o
+    }
+}
+
+/// Which built-in rules a run switched off, for the weakened-run marks: one stderr line, a
+/// `rules` key in --json and `rules_off` on the ledger line (plan 4.4).
+public struct RulesMark: Equatable {
+    public let preset: String
+    /// Built-in names, in catalog order.
+    public let disabled: [String]
+    /// Built-in names still on but catching less, each with the reason ("no MICR cue").
+    public let partial: [String: String]
+    public init(preset: String, disabled: [String], partial: [String: String] = [:]) {
+        self.preset = preset; self.disabled = disabled; self.partial = partial
+    }
+
+    /// The --json `rules` value. `partial` appears only when a rule is partial.
+    var json: [String: Any] {
+        var j: [String: Any] = ["preset": preset, "disabled": disabled]
+        if !partial.isEmpty { j["partial"] = partial }
+        return j
+    }
+
+    /// The stderr line.
+    var notice: String {
+        let n = disabled.count
+        var line = "cheapshot: \(n) built-in rule\(n == 1 ? " is" : "s are") off (preset \(preset))"
+        for name in partial.keys.sorted() { line += "; \(name) is partial (\(partial[name]!))" }
+        return line + "\n"
     }
 }
