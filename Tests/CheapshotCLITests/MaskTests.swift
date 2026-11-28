@@ -446,8 +446,10 @@ extension MaskTests {
     }
 
     /// The sentence both failure tests expect on stderr; kept loose enough to survive rewording
-    /// of the tail but specific enough that an unrelated failure does not pass.
-    static let blankMessage = "looks like a screenshot"
+    /// of the tail but specific enough that an unrelated failure does not pass. It says the read
+    /// could not be confirmed, not that there was no text, because the gate also refuses when the
+    /// warm passes saw clean text but produced no box (MaskGateTests).
+    static let blankMessage = "could not confirm a complete read of what looks like a screenshot"
 
     /// Default output path, plain text: no copy in the scratch folder, no allow file at all,
     /// non-zero exit, the reason on stderr and nothing on stdout. On the old code this image was
@@ -461,6 +463,7 @@ extension MaskTests {
         XCTAssertTrue(r.err.hasPrefix("cheapshot: "), r.err)
         XCTAssertTrue(r.err.contains(Self.blankMessage), r.err)
         XCTAssertTrue(r.err.contains("a person can approve the original from a terminal"), "the refusal names the way out: \(r.err)")
+        XCTAssertFalse(r.err.contains("found no text"), "the refusal must not claim there was no text: \(r.err)")
         XCTAssertFalse(r.err.contains("cheapshot allow"), "the refusal keeps the allow command out of what the model reads: \(r.err)")
         XCTAssertEqual(r.out, "", "nothing may claim a masked copy")
         XCTAssertEqual(defaultMaskFolderContents(), [], "no copy may be written")
@@ -532,7 +535,7 @@ extension MaskTests {
 
     /// Faint text only, every line under --min-conf 0.99: the checked read keeps no line, but
     /// Vision did see text, so this is not a blank read. Before the fix mask refused it with
-    /// "OCR found no text"; it must write a masked copy with each faint line painted as
+    /// the blank-read message; it must write a masked copy with each faint line painted as
     /// low-confidence, and allow that copy.
     func testFaintTextUnderAHighFloorIsMaskedNotRefused() async throws {
         let lines = ["qzx7 Kp0w vrrt", "Jh8l mmq3 Zx"]          // nonsense, so Vision is unsure of it

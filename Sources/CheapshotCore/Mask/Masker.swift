@@ -193,6 +193,29 @@ public enum Masker {
         return out
     }
 
+    /// The refusal `mask` throws when `refusesBlank` says no. True whether the warm passes saw no
+    /// text at all or saw clean text that produced no box, and never names the allow command.
+    static let blankRefusal = "OCR could not confirm a complete read of what looks like a screenshot, even after a retry, so nothing was masked or written; a person can approve the original from a terminal"
+
+    /// The CHE-24 gate, pure so it can be unit-tested without Vision (MaskGateTests).
+    ///
+    /// A screenshot-like image whose checked read was not `.ok`, after the retry, is a likely OCR
+    /// failure, not a text-free image: masking on would paint nothing and allow a copy that is the
+    /// original, so the model would get the raw pixels the mask was meant to keep from it. Fail
+    /// closed instead: no copy, no allow entry. A non-screenshot-like image (a photo) is not retried
+    /// and not gated: an empty read there is an answer, not a failure.
+    ///
+    /// Keyed on `screenshotLike` and "anything but .ok" rather than `retried && .empty`, so a future
+    /// status or a change to when the retry runs still fails closed here. The checked lines are
+    /// filtered at the floor, so faint text alone also reads as empty there; the confidence-0 passes
+    /// in `findBoxes` still see it and paint it as low-confidence, so `boxes` is non-empty and this
+    /// lets it through. It keys on boxes, not lines: if the checked read cold-failed and a warmer
+    /// pass saw only clean lines above the floor, there is nothing to paint and the copy would be
+    /// the original, so that still refuses.
+    static func refusesBlank(screenshotLike: Bool, status: OCR.Status, boxes: [MaskBox]) -> Bool {
+        screenshotLike && status != .ok && boxes.isEmpty
+    }
+
     /// Mask, then OCR the masked copy again: anything it still flags outside the painted area is
     /// added and painted too, up to `maxRounds`. If the last re-read still finds something new,
     /// this throws rather than hand back a copy that may still show a secret.
@@ -200,20 +223,8 @@ public enum Masker {
         // The same checked OCR the read path uses, cold-start retry included (CHE-24).
         let checked = try OCR.recognizeLayoutChecked(image: image, minConfidence: minConfidence)
         let firstBoxes = try findBoxes(in: image, redactor: redactor, minConfidence: minConfidence)
-        // A screenshot-like image that read blank at every confidence, after the retry, is a
-        // likely OCR failure, not a text-free image: masking on would paint nothing and allow a
-        // copy that is the original, so the model would get the raw pixels the mask was meant to
-        // keep from it. Fail closed instead: no copy, no allow entry. A non-screenshot-like image
-        // (a photo) is not retried and not gated: an empty read there is an answer, not a failure.
-        // Keyed on `screenshotLike` and "anything but .ok" rather than `retried && .empty`, so a
-        // future status or a change to when the retry runs still fails closed here.
-        // `checked.lines` is filtered at the floor, so faint text alone also reads as empty there;
-        // the confidence-0 passes in `findBoxes` still see it and paint it as low-confidence. So the
-        // gate throws only when they produced no box either. It keys on boxes, not lines: if the
-        // checked read cold-failed and a warmer pass saw only clean lines above the floor, there is
-        // nothing to paint and the copy would be the original, so that still fails closed.
-        if checked.screenshotLike, checked.status != .ok, firstBoxes.isEmpty {
-            throw Failure(message: "OCR found no text in what looks like a screenshot, even after a retry, so nothing was masked or written; if the image really has no text, a person can approve the original from a terminal")
+        if refusesBlank(screenshotLike: checked.screenshotLike, status: checked.status, boxes: firstBoxes) {
+            throw Failure(message: blankRefusal)
         }
         // The counts the user sees match a plain `cheapshot --json` run of the same image.
         let shown = checked.lines
