@@ -1,13 +1,13 @@
 #!/bin/sh
-# Runs the redaction tests (golden cases, redactor, validators, rule files) and fails unless
+# Runs the redaction tests (golden cases, redactor, validators, rule files, rule catalog) and fails unless
 # they really ran: swift test exits 0 when a filter matches nothing, so the exit code alone
 # proves nothing. Used as the gating step of the windows-core job in ci.yml; runs on macOS too.
 #
 # Usage: scripts/check-redaction-tests.sh [filter]
 # The filter argument exists only to prove the guard: a filter that matches nothing must fail.
 cd "$(dirname "$0")/.." || exit 1
-filter="${1:-CheapshotPortableTests.(GoldenTests|RedactorTests|ValidatorsTests|RuleFileTests)}"
-expected=41   # 2 Golden + 18 Redactor + 15 Validators + 6 RuleFile; change when tests are added
+filter="${1:-CheapshotPortableTests.(GoldenTests|GoldenRulesTests|RedactorTests|ValidatorsTests|RuleFileTests|RuleFileV2Tests|RuleCatalogTests)}"
+expected=75   # 2 Golden + 11 GoldenRules + 18 Redactor + 15 Validators + 6 RuleFile + 17 RuleFileV2 + 6 RuleCatalog; change when tests are added
 log="${TMPDIR:-/tmp}/cheapshot-redaction-tests.$$.log"
 
 swift test --filter "$filter" >"$log" 2>&1

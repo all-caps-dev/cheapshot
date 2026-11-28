@@ -1,0 +1,5 @@
+user [EMAIL] at [IPV4]
+password=[SECRET]
+card [CARD]
+call [PHONE]
+ticket INT-123456 badge [BADGE]
