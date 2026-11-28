@@ -32,9 +32,10 @@ cheapshot shot.png                 # OCR one file, redacted
 cheapshot --json shot.png          # text, lines with boxes, redaction counts
 cheapshot --cleanshot              # newest CleanShot capture (falls back to ~/Desktop)
 cat notes.txt | cheapshot --text - # redact text, no OCR
+cheapshot --clipboard              # the copied image or file, always redacted; never clipboard text
 ```
 
-Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 usage error. An empty or unreadable `--newest` or `--cleanshot` folder is an input failure: exit 1, and the message names the folder.
+Exit codes: 0 ok, 1 an input failed (its `--json` entry carries `"error"`), 2 usage error, 3 (`--clipboard` only) blank after a retry, likely a cold start, so try again. An empty or unreadable `--newest` or `--cleanshot` folder is an input failure: exit 1, and the message names the folder.
 
 ## Redaction
 
