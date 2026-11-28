@@ -563,8 +563,8 @@ public enum CLI {
 
     // MARK: - --clipboard
 
-    /// `cheapshot --clipboard` (NOV-155): reads image bytes from the clipboard, else the one file
-    /// copied in Finder, and prints the redacted text the way a file read does. Never reads
+    /// `cheapshot --clipboard` (NOV-155): reads the one file copied in Finder, else image bytes from
+    /// the clipboard, and prints the redacted text the way a file read does. Never reads
     /// clipboard text, never writes the clipboard, and never prints anything from the clipboard
     /// that has not been through the redactor (not even the copied file's path).
     /// Exit: 0 text read; 1 nothing usable on the clipboard, an unreadable input, an OCR error or
@@ -588,21 +588,9 @@ public enum CLI {
         let text: String
         var blank: (message: String, code: Int32)? = nil
 
-        if let data = clip.readImage() {
-            let read: Pipeline.ImageRead
-            do { read = try Pipeline.readImage(data: data, redaction: redaction, minConfidence: opts.minConfidence) }
-            catch Pipeline.ReadError.unreadableImage { return fail("cannot read the image on the clipboard") }
-            catch { return fail("clipboard image: \(error)") }
-            images.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
-            var e = imageEntry(read, file: "clipboard")
-            e["source"] = "image"
-            (entry, text) = (e, read.text)
-            if read.status == .empty {
-                blank = read.retried
-                    ? ("no text found in the clipboard image after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
-                    : ("no text found in the clipboard image", 1)
-            }
-        } else if let url = clip.readFileURL() {
+        // A file copied in Finder comes first: Finder also puts the file's icon on the clipboard
+        // as TIFF, and reading that would OCR the icon instead of the file.
+        if let url = clip.readFileURL() {
             // A file copied in Finder runs through the normal file readers. Its path came from the
             // clipboard, so messages name "the copied file" and never print the path.
             var isDir: ObjCBool = false
@@ -620,7 +608,9 @@ public enum CLI {
                 e["source"] = "file_url"
                 e["document"] = ["sha256": read.document.sha256, "pages": read.document.pageCount]
                 (entry, text) = (e, read.text)
-                if read.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // `read.text` always carries a `--- page N ---` header per page, so blank means
+                // no page produced a line, not an empty string.
+                if read.document.pages.allSatisfy({ $0.lines.isEmpty }) {
                     blank = ("no text found in the PDF copied to the clipboard", 1)
                 }
             } else {
@@ -637,6 +627,20 @@ public enum CLI {
                         ? ("no text found in the file copied to the clipboard after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
                         : ("no text found in the file copied to the clipboard", 1)
                 }
+            }
+        } else if let data = clip.readImage() {
+            let read: Pipeline.ImageRead
+            do { read = try Pipeline.readImage(data: data, redaction: redaction, minConfidence: opts.minConfidence) }
+            catch Pipeline.ReadError.unreadableImage { return fail("cannot read the image on the clipboard") }
+            catch { return fail("clipboard image: \(error)") }
+            images.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
+            var e = imageEntry(read, file: "clipboard")
+            e["source"] = "image"
+            (entry, text) = (e, read.text)
+            if read.status == .empty {
+                blank = read.retried
+                    ? ("no text found in the clipboard image after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
+                    : ("no text found in the clipboard image", 1)
             }
         } else {
             return fail("no image on the clipboard (clipboard text is never read; use: pbpaste | cheapshot --text -)")

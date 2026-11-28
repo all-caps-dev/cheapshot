@@ -19,7 +19,7 @@ public enum Output {
           cheapshot --cleanshot [n]
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
-          cheapshot --clipboard            read the image (or the one copied file) on the clipboard,
+          cheapshot --clipboard            read the one file copied in Finder, else the image on the clipboard,
                                            always redacted. Never reads clipboard text: use
                                            pbpaste | cheapshot --text - for that. macOS only
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]

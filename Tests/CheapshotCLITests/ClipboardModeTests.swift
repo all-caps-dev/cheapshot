@@ -144,6 +144,29 @@ final class ClipboardModeTests: XCTestCase {
         XCTAssertEqual(try ledgerEntries().first?["mode"] as? String, "pdf")
     }
 
+    func testCopiedFileWinsOverTheIconImageFinderAlsoPuts() async throws {
+        let file = tmp.appendingPathComponent("real.png")
+        try png(lines: secretLines).write(to: file)
+        let icon = try png(lines: [], width: 120, height: 120)   // blank: reading it would exit 1
+        let r = await run(["--clipboard", "--json"], clipboard: FakeClipboard(image: icon, fileURLs: [file]))
+        XCTAssertEqual(r.code, 0, r.err)
+        let c = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])[0]
+        XCTAssertEqual(c["source"] as? String, "file_url")
+        XCTAssertTrue((c["text"] as? String ?? "").contains("deploy key below"))
+    }
+
+    func testBlankCopiedPDFExits1() async throws {
+        let url = tmp.appendingPathComponent("blank.pdf")
+        var box = CGRect(x: 0, y: 0, width: 300, height: 300)
+        let ctx = try XCTUnwrap(CGContext(url as CFURL, mediaBox: &box, nil))
+        ctx.beginPDFPage(nil); ctx.endPDFPage(); ctx.closePDF()
+        let r = await run(["--clipboard", "--json"], clipboard: FakeClipboard(fileURLs: [url]))
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(r.err.contains("no text found in the PDF"), r.err)
+        let c = try XCTUnwrap(try json(r.out)["results"] as? [[String: Any]])[0]
+        XCTAssertNotNil(c["error"])
+    }
+
     // MARK: - nothing usable: exit 1, clipboard untouched, nothing from it printed
 
     func testTextOnlyClipboardIsRefusedAndNeverEchoed() async throws {
