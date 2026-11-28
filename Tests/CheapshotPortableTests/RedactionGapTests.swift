@@ -1,7 +1,8 @@
-// Not on Windows: XCTExpectFailure is Apple XCTest only (swift-corelibs-xctest has none). These
+// Apple platforms only: XCTExpectFailure is Apple XCTest only (swift-corelibs-xctest, used on
+// Windows and Linux, has none). These
 // are expected-failure gap markers, not part of the gated redaction count (PR #23 moved them here
 // with GoldenTests, whose joinMarker they use).
-#if !os(Windows)
+#if canImport(Darwin)
 import XCTest
 @testable import CheapshotPortable
 

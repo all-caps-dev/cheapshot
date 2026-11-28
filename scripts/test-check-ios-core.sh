@@ -53,14 +53,14 @@ devices_17_18="== Devices ==
 golden_line='Test Case '"'"'-[CheapshotPortableTests.GoldenTests testGoldenCases]'"'"' passed (0.412 seconds).'
 ok_out="$golden_line"'
 Test Suite '"'"'All tests'"'"' passed at 2026-11-25 16:00:00.000.
-	 Executed 178 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
+	 Executed 190 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
 ** TEST EXECUTE SUCCEEDED **'
 
 two_bundles="$golden_line"'
 Test Suite '"'"'CheapshotPortableTests.xctest'"'"' passed at 2026-11-27 16:00:00.000.
-	 Executed 99 tests, with 0 failures (0 unexpected) in 2.0 (2.0) seconds
+	 Executed 105 tests, with 0 failures (0 unexpected) in 2.0 (2.0) seconds
 Test Suite '"'"'CheapshotCoreTests.xctest'"'"' passed at 2026-11-27 16:00:03.000.
-	 Executed 79 tests, with 0 failures (0 unexpected) in 1.0 (1.0) seconds
+	 Executed 85 tests, with 0 failures (0 unexpected) in 1.0 (1.0) seconds
 ** TEST EXECUTE SUCCEEDED **'
 one_bundle="$golden_line"'
 Test Suite '"'"'CheapshotPortableTests.xctest'"'"' passed at 2026-11-27 16:00:00.000.
@@ -86,7 +86,7 @@ case_() {
   LAST_DIR="$d"
 }
 
-case_ "178 tests on iOS 18.2 passes" 0 true "$runtimes_17_18" "$devices_17_18" "$ok_out" 0 "ok: CheapshotCore builds for iOS"
+case_ "190 tests on iOS 18.2 passes" 0 true "$runtimes_17_18" "$devices_17_18" "$ok_out" 0 "ok: CheapshotCore builds for iOS"
 grep -q "id=$U18" "$LAST_DIR/test-args" && { pass=$((pass+1)); echo "ok    picks the iPhone under the newest iOS 17+ runtime"; } \
   || { fail=$((fail+1)); echo "FAIL  destination was: $(cat "$LAST_DIR/test-args")"; }
 case_ "the chosen runtime and device are printed" 0 true "$runtimes_17_18" "$devices_17_18" "$ok_out" 0 "iOS 18.2.*$U18"
@@ -97,11 +97,11 @@ case_ "no Executed line fails" 1 true "$runtimes_17_18" "$devices_17_18" "** TES
 case_ "too few tests fails" 1 true "$runtimes_17_18" "$devices_17_18" \
   "	 Executed 12 tests, with 0 failures (0 unexpected) in 0.1 (0.1) seconds" 0 "ran 12 tests"
 case_ "xcodebuild failure fails even with a big count" 1 true "$runtimes_17_18" "$devices_17_18" \
-  "	 Executed 178 tests, with 2 failures (0 unexpected) in 3.1 (3.2) seconds
+  "	 Executed 190 tests, with 2 failures (0 unexpected) in 3.1 (3.2) seconds
 ** TEST EXECUTE FAILED **" 65 "exit 65"
 # PR #22 review: a high count is not enough; the golden cases must be seen passing by name.
 case_ "high count but no golden line fails" 1 true "$runtimes_17_18" "$devices_17_18" \
-  "	 Executed 178 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
+  "	 Executed 190 tests, with 0 failures (0 unexpected) in 3.1 (3.2) seconds
 ** TEST EXECUTE SUCCEEDED **" 0 "golden redaction cases did not run"
 case_ "the old floor of 140 now fails" 1 true "$runtimes_17_18" "$devices_17_18" \
   "$golden_line
@@ -116,7 +116,7 @@ case_ "runtime with no iPhone on CI fails" 1 true "$runtimes_17_18" "== Devices 
 -- iOS 18.2 --
     iPad Air 13-inch (M2) ($UPAD) (Shutdown) " "$ok_out" 0 "no iPhone Simulator"
 
-case_ "two bundles with no whole-run line are added up" 0 true "$runtimes_17_18" "$devices_17_18" "$two_bundles" 0 "178 Core tests pass"
+case_ "two bundles with no whole-run line are added up" 0 true "$runtimes_17_18" "$devices_17_18" "$two_bundles" 0 "190 Core tests pass"
 case_ "one bundle alone is too few" 1 true "$runtimes_17_18" "$devices_17_18" "$one_bundle" 0 "ran 99 tests"
 
 echo "passed: $pass  failed: $fail"

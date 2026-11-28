@@ -19,12 +19,13 @@ set -e
 cd "$(dirname "$0")/.."
 dd="${DERIVED_DATA:-.build/xcode-ios}"
 scheme=CheapshotCore-iOS
-# The scheme runs two bundles: CheapshotCoreTests (90 tests on macOS, 11 of them macOS only:
-# 9 ffmpeg, 2 that compare with AppKit's NSImage) and CheapshotPortableTests (99), so 178 run on
-# iOS. 175 leaves room for a test removed on purpose, while still failing on 0 or on a run that
-# skipped a whole bundle or any suite of 4 or more (PR #22 review: at 140, all of
-# LayoutTests could go missing unnoticed).
-min_tests="${MIN_TESTS:-175}"
+# The scheme runs two bundles, CheapshotCoreTests and CheapshotPortableTests (macOS-only Core
+# tests such as ffmpeg and the AppKit NSImage comparisons do not build for iOS). The ios-core run
+# on PR #23's af252c2 executed 190 (Core 85 + Portable 105). 187 leaves room for a test removed on
+# purpose, while still failing on 0 or on a run that skipped a whole bundle or any suite of 4 or
+# more (PR #22 review: at 140, all of LayoutTests could go missing unnoticed). Raise it when
+# tests are added.
+min_tests="${MIN_TESTS:-187}"
 
 echo "== build: CheapshotCore for an iOS device"
 xcodebuild build -quiet -scheme "$scheme" -destination 'generic/platform=iOS' \
