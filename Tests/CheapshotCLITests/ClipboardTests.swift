@@ -13,8 +13,10 @@ final class FakeClipboard: ClipboardSource {
     private(set) var changeCount = 1
     private(set) var reads = 0
     private(set) var writes: [ClipboardPayload] = []
-    /// Called on every image read, so a test can copy something mid-run (the change-count race).
+    /// Called on every read, so a test can copy something mid-run (the change-count race).
     var onRead: (() -> Void)?
+    /// When true, `replace` clears but reports a failed write, as a broken pasteboard would.
+    var failWrites = false
 
     init(image: Data? = nil, fileURLs: [URL] = [], text: String? = nil) {
         self.image = image; self.fileURLs = fileURLs; self.text = text
@@ -23,18 +25,22 @@ final class FakeClipboard: ClipboardSource {
     /// The user copied something: content changes and the count moves.
     func userCopied(text: String) { image = nil; fileURLs = []; self.text = text; changeCount += 1 }
 
+    /// Something else wrote the clipboard (content left as is, so a read still sees it).
+    func bump() { changeCount += 1 }
+
     func readImage() -> Data? { reads += 1; onRead?(); return image }
-    func readFileURL() -> URL? { reads += 1; return fileURLs.count == 1 ? fileURLs[0] : nil }
+    func readFileURL() -> URL? { reads += 1; onRead?(); return fileURLs.count == 1 ? fileURLs[0] : nil }
 
     @discardableResult
     func replace(with payload: ClipboardPayload) -> Bool {
         writes.append(payload)
         image = nil; fileURLs = []; text = nil
+        changeCount += 1
+        if failWrites { return false }
         switch payload {
         case .text(let s): text = s
         case .png(let d): image = d
         }
-        changeCount += 1
         return true
     }
 }

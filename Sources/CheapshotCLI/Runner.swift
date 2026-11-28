@@ -565,10 +565,16 @@ public enum CLI {
 
     /// `cheapshot --clipboard` (NOV-155): reads the one file copied in Finder, else image bytes from
     /// the clipboard, and prints the redacted text the way a file read does. Never reads
-    /// clipboard text, never writes the clipboard, and never prints anything from the clipboard
-    /// that has not been through the redactor (not even the copied file's path).
-    /// Exit: 0 text read; 1 nothing usable on the clipboard, an unreadable input, an OCR error or
-    /// blank text; 3 blank after a retry on a screenshot-like image (likely a cold start).
+    /// clipboard text, and never prints anything from the clipboard that has not been through the
+    /// redactor (not even the copied file's path).
+    /// With `--clipboard-out` (CHE-86, CHE-87; Q8 "same type as input") it then puts the result
+    /// back as the clipboard's only item: a masked PNG for an image (bytes or a copied image file),
+    /// redacted text for a copied PDF. Nothing is written when the read failed or was blank, when
+    /// the mask could not be proven, or when the clipboard changed while the read ran.
+    /// Exit: 0 text read (and written back); 1 nothing usable on the clipboard, an unreadable
+    /// input, an OCR error, blank text, the clipboard changed, or the write failed; 3 blank after a
+    /// retry on a screenshot-like image (likely a cold start), or a masked copy that could not be
+    /// proven safe.
     static func runClipboard(_ opts: Options, redactor: Redactor, io: CLIIO) -> Int32 {
         let redaction = Pipeline.Redaction.redact(redactor)
         func fail(_ message: String, code: Int32 = 1, entry: [String: Any]? = nil) -> Int32 {
@@ -582,11 +588,16 @@ public enum CLI {
             return code
         }
         guard let clip = io.clipboard else { return fail("--clipboard is not supported on this platform") }
+        // Read before anything else, and compared again just before a write: a copy the user made
+        // while a slow (cold) read ran must never be overwritten (mutation C3).
+        let startCount = clip.changeCount
 
         var pdfs = Pipeline.Totals(), images = Pipeline.Totals()
         let entry: [String: Any]
         let text: String
         var blank: (message: String, code: Int32)? = nil
+        /// The upright pixels to mask for `--clipboard-out`, or nil for a PDF (written back as text).
+        var maskSource: (() throws -> CGImage)? = nil
 
         // A file copied in Finder comes first: Finder also puts the file's icon on the clipboard
         // as TIFF, and reading that would OCR the icon instead of the file.
@@ -622,6 +633,7 @@ public enum CLI {
                 var e = imageEntry(read, file: "clipboard")
                 e["source"] = "file_url"
                 (entry, text) = (e, read.text)
+                maskSource = { try Masker.loadPixels(path: url.path) }
                 if read.status == .empty {
                     blank = read.retried
                         ? ("no text found in the file copied to the clipboard after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
@@ -637,6 +649,10 @@ public enum CLI {
             var e = imageEntry(read, file: "clipboard")
             e["source"] = "image"
             (entry, text) = (e, read.text)
+            maskSource = {
+                guard let image = ImageLoader.load(data: data) else { throw Pipeline.ReadError.unreadableImage }
+                return image
+            }
             if read.status == .empty {
                 blank = read.retried
                     ? ("no text found in the clipboard image after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
@@ -652,10 +668,37 @@ public enum CLI {
         if opts.stats {
             io.err(statsLine(inputs: 1, noun: pdfs.inputs > 0 ? "pdf(s)" : "image(s)", imageTokens: it, textTokens: tt))
         }
-        // Stricter than a file read (plan 4.3): blank text is a failed run, not an empty success.
+        // Stricter than a file read (plan 4.3): blank text is a failed run, not an empty success,
+        // and the clipboard is left exactly as it was (mutation C4).
         if let b = blank { return fail(b.message, code: b.code, entry: entry) }
+
+        var entryOut = entry
+        if opts.clipboardOut {
+            let payload: ClipboardPayload
+            if let source = maskSource {
+                // The same masker `cheapshot mask` uses: every redacted or low-confidence line
+                // painted black, re-read until clean, and a blank screenshot refused (#29). Any
+                // refusal leaves the clipboard alone and exits 3, as an unproven copy.
+                let masked: MaskResult
+                do { masked = try Masker.mask(try source(), redactor: redactor, minConfidence: opts.minConfidence) }
+                catch { return fail("could not make a masked copy that is safe to put back (\(error)); clipboard left untouched", code: 3, entry: entry) }
+                do { payload = .png(try Masker.pngData(masked.image)) }
+                catch { return fail("could not encode the masked copy; clipboard left untouched", entry: entry) }
+                entryOut["clipboard_out"] = "image"
+            } else {
+                // Only redacted text: `text` came out of the redactor (C1: never the raw read).
+                payload = .text(text)
+                entryOut["clipboard_out"] = "text"
+            }
+            guard clip.changeCount == startCount else {
+                return fail("clipboard changed during the read; left untouched", entry: entry)
+            }
+            guard clip.replace(with: payload) else { return fail("could not write the clipboard", entry: entry) }
+            let what = entryOut["clipboard_out"] as? String == "image" ? "the masked image" : "the redacted text"
+            io.err("cheapshot: the clipboard now holds \(what) only (clipboard history and Universal Clipboard may still hold the original)\n")
+        }
         if opts.json {
-            guard emit(payload([entry], imageTokens: it, textTokens: tt), io) else { return 1 }
+            guard emit(payload([entryOut], imageTokens: it, textTokens: tt), io) else { return 1 }
         } else {
             io.out(text + "\n")
         }
