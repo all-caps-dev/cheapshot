@@ -221,13 +221,16 @@ final class RedactorTests: XCTestCase {
         // Liveness: a regex that gives up on a shape is fast and redacts nothing after it, so
         // every shape is followed by a password line that must still be redacted.
         let marker = "Zq9kQ2" + "mW7p"
-        // The iOS Simulator on CI runners is several times slower than macOS (PR #22: 1.36 s and
-        // 2.25 s for two shapes against a 1.0 s limit), so it gets 3.0 s. A runaway regex takes
-        // seconds to minutes, so 3.0 s still catches one; macOS and devices keep 1.0 s.
+        // A runaway regex takes seconds to minutes (the F3 shapes took 10 to 16 s), so the limits
+        // below still catch one while leaving room for slow CI runners. The iOS Simulator is
+        // several times slower than macOS (PR #22: 1.36 s and 2.25 s for two shapes against a
+        // 1.0 s limit), so it gets 3.0 s. macOS runners are noisy too: this test failed on
+        // macos-latest at 1.06 s, 1.15 s and 1.007 s against the old 1.0 s limit, so macOS and
+        // devices get 2.0 s.
         #if targetEnvironment(simulator)
         let limit = 3.0
         #else
-        let limit = 1.0
+        let limit = 2.0
         #endif
         for shape in shapes {
             let start = Date()
