@@ -4,6 +4,10 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ## Unreleased
 
+### Security
+
+- Plugin 0.1.3: the Claude Code hook names `cheapshot mask` only on a binary of 0.6.1 or later. It reads the `version` field of the `--json` run it already makes; below 0.6.1, or when the version is missing, not a string or not a plain `X.Y.Z` (build metadata such as a `make build` stamp is ignored; a pre-release counts only above 0.6.1), it fails closed. The user is told to `brew upgrade all-caps-dev/tap/cheapshot` before asking for a masked copy and is still offered `cheapshot allow`; the model gets the ask-the-user line in place of the mask line, and the plugin skill's rule 2 now tells the model to run mask only when the hook named it. The hook also refuses the allow entry a mask run writes when `cheapshot --version` is below 0.6.1 (or unknown): the entry is used up, the Read is denied with the normal redacted text, and the user is told to update and re-run mask, so when the hook's own `cheapshot` is below 0.6.1, a mask run anyway (from memory, the docs or an old hint) no longer gets its copy to the model (the check reads the binary on the hook's PATH at Read time, not the one that wrote the entry). Together these close the gap in the first 0.6.1 Security bullet for plugin users still on a v0.6.0 binary. cheapshot-mcp unchanged.
+
 ### Redaction
 
 - An empty Cookie pair no longer stops the Cookie rule (CS-05 gap 1). In `Cookie: foo=; sid=<value>` the first pair had no value, so nothing on the line matched and every later value was left in the clear. An empty or `""` value is now read and kept, and the chain goes on to the next pair. The line is now read exactly as one with a non-empty first pair (`foo=bar;`) already was, including that rule's known limits. Known side effect, tracked as strict expected failures in `RedactionGapTests`: past an empty first pair, a cookie value the rule refuses (such as a URL) can swallow a nested `Cookie:` start and leave the value after it in the clear, and a cookie value can split a card number before CARD runs, leaving its last ten digits.
