@@ -25,6 +25,8 @@ final class FakeClipboard: ClipboardSource {
 
     /// The user copied something: content changes and the count moves.
     func userCopied(text: String) { image = nil; fileURLs = []; unresolvableFileItems = 0; self.text = text; changeCount += 1 }
+    /// The user copied one file in Finder: its URL replaces everything and the count moves.
+    func userCopiedFile(_ url: URL) { image = nil; text = nil; unresolvableFileItems = 0; fileURLs = [url]; changeCount += 1 }
 
     /// Counts only reads that hand out image bytes, so a test can prove the image was never read.
     private(set) var imageReads = 0
@@ -36,7 +38,9 @@ final class FakeClipboard: ClipboardSource {
         imageReads += 1
         return image
     }
-    func readFileURLs() -> [URL] { reads += 1; return fileURLs }
+    /// Called on every file-URL read, so a test can copy something between the reads.
+    var onFileRead: (() -> Void)?
+    func readFileURLs() -> [URL] { reads += 1; let urls = fileURLs; onFileRead?(); return urls }
     var fileItemCount: Int { fileURLs.count + unresolvableFileItems }
 
     @discardableResult

@@ -295,7 +295,7 @@ final class RulesFlagsTests: XCTestCase {
         XCTAssertEqual(try Options.parse(["--list-rules", "--json"]).command, .listRules(json: true))
         XCTAssertThrowsError(try Options.parse(["--list-rules", "a.png"]))
         for other in [["--raw"], ["--ledger"], ["--text", "n.txt"], ["--video", "v.mp4"], ["--newest"],
-                      ["--cleanshot"], ["--frames-at", "1,2"], ["--days", "3"], ["--by-mode"], ["--migrate"]] {
+                      ["--cleanshot"], ["--frames-at", "1,2"], ["--days", "3"], ["--by-mode"], ["--migrate"], ["--clipboard"]] {
             XCTAssertThrowsError(try Options.parse(["--list-rules"] + other), "\(other)")
             XCTAssertThrowsError(try Options.parse(other + ["--list-rules"]), "\(other)")
         }
