@@ -35,6 +35,10 @@ public enum CLI {
         case .files(let paths): return runImages(opts, paths: paths, redactor: redactor, io: io)
         case .newest(let dir, let n): return runNewest(opts, dir: dir, count: n, redactor: redactor, io: io)
         case .cleanshot(let n): return runNewest(opts, dir: cleanshotDir(home: io.home), count: n, redactor: redactor, io: io)
+        case .clipboard:
+            // Options refuses --raw with --clipboard, so a nil redactor here is a bug; fail closed.
+            guard let redactor = redactor else { io.err("cheapshot: --clipboard always redacts\n"); return 2 }
+            return runClipboard(opts, redactor: redactor, io: io)
         }
     }
 
@@ -481,14 +485,11 @@ public enum CLI {
                     io.err("cheapshot: \(error)\n")
                     continue
                 }
-                let doc = read.document   // page lines already redacted
+                let doc = read.document
                 pdfs.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
-                results.append(["file": f, "text": read.text, "redactions": read.report.counts,
-                                "image_tokens": read.imageTokens, "text_tokens": read.textTokens,
-                                "source": ["path": doc.path, "sha256": doc.sha256, "pages": doc.pageCount],
-                                "pages": doc.pages.map { ["n": $0.n, "lane": $0.lane.rawValue,
-                                                          "width": $0.width, "height": $0.height,
-                                                          "lines": lineJSON(alreadyRedacted: $0.lines)] as [String: Any] }])
+                var entry = pdfEntry(read, file: f)
+                entry["source"] = ["path": doc.path, "sha256": doc.sha256, "pages": doc.pageCount]
+                results.append(entry)
                 if !opts.json {
                     if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
                     io.out(read.text + "\n")
@@ -513,14 +514,7 @@ public enum CLI {
                 io.err("cheapshot: \(f): no text found after a retry, though it looks like a screenshot\n")
             }
             images.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
-            results.append(["file": f, "text": read.text, "redactions": read.report.counts,
-                            "image_tokens": read.imageTokens, "text_tokens": read.textTokens,
-                            "lines": lineJSON(alreadyRedacted: read.lines),   // lines already redacted
-                            // "empty" with "retried": true is a screenshot-like image that still read blank
-                            // (a likely cold-start OCR failure); "empty" without a retry is a photo or a
-                            // small image. Callers must not treat the first like the second.
-                            "ocr_status": read.status.rawValue, "retried": read.retried,
-                            "screenshot_like": read.screenshotLike])
+            results.append(imageEntry(read, file: f))
             if !opts.json {
                 if paths.count > 1 { io.out("== \((f as NSString).lastPathComponent)\n") }
                 io.out(read.text + "\n")
@@ -542,6 +536,126 @@ public enum CLI {
             io.err(statsLine(inputs: ok, noun: noun, imageTokens: totalImage, textTokens: totalText))
         }
         return failed > 0 ? 1 : 0
+    }
+
+    /// The JSON result for one image read. Shared by file reads and `--clipboard`, so both give
+    /// the same shape (plan 4.3).
+    static func imageEntry(_ read: Pipeline.ImageRead, file: String) -> [String: Any] {
+        ["file": file, "text": read.text, "redactions": read.report.counts,
+         "image_tokens": read.imageTokens, "text_tokens": read.textTokens,
+         "lines": lineJSON(alreadyRedacted: read.lines),   // lines already redacted
+         // "empty" with "retried": true is a screenshot-like image that still read blank
+         // (a likely cold-start OCR failure); "empty" without a retry is a photo or a
+         // small image. Callers must not treat the first like the second.
+         "ocr_status": read.status.rawValue, "retried": read.retried,
+         "screenshot_like": read.screenshotLike]
+    }
+
+    /// The JSON result for one PDF read, without the `source` key: a file read puts the PDF's
+    /// path, hash and page count there, and `--clipboard` puts where the input came from.
+    static func pdfEntry(_ read: Pipeline.PDFRead, file: String) -> [String: Any] {
+        ["file": file, "text": read.text, "redactions": read.report.counts,
+         "image_tokens": read.imageTokens, "text_tokens": read.textTokens,
+         "pages": read.document.pages.map { ["n": $0.n, "lane": $0.lane.rawValue,   // page lines already redacted
+                                             "width": $0.width, "height": $0.height,
+                                             "lines": lineJSON(alreadyRedacted: $0.lines)] as [String: Any] }]
+    }
+
+    // MARK: - --clipboard
+
+    /// `cheapshot --clipboard` (NOV-155): reads image bytes from the clipboard, else the one file
+    /// copied in Finder, and prints the redacted text the way a file read does. Never reads
+    /// clipboard text, never writes the clipboard, and never prints anything from the clipboard
+    /// that has not been through the redactor (not even the copied file's path).
+    /// Exit: 0 text read; 1 nothing usable on the clipboard, an unreadable input, an OCR error or
+    /// blank text; 3 blank after a retry on a screenshot-like image (likely a cold start).
+    static func runClipboard(_ opts: Options, redactor: Redactor, io: CLIIO) -> Int32 {
+        let redaction = Pipeline.Redaction.redact(redactor)
+        func fail(_ message: String, code: Int32 = 1, entry: [String: Any]? = nil) -> Int32 {
+            if opts.json {
+                var r = entry ?? ["file": "clipboard"]
+                r["error"] = message
+                let it = r["image_tokens"] as? Int ?? 0, tt = r["text_tokens"] as? Int ?? 0
+                _ = emit(payload([r], imageTokens: it, textTokens: tt), io)
+            }
+            io.err("cheapshot: \(message)\n")
+            return code
+        }
+        guard let clip = io.clipboard else { return fail("--clipboard is not supported on this platform") }
+
+        var pdfs = Pipeline.Totals(), images = Pipeline.Totals()
+        let entry: [String: Any]
+        let text: String
+        var blank: (message: String, code: Int32)? = nil
+
+        if let data = clip.readImage() {
+            let read: Pipeline.ImageRead
+            do { read = try Pipeline.readImage(data: data, redaction: redaction, minConfidence: opts.minConfidence) }
+            catch Pipeline.ReadError.unreadableImage { return fail("cannot read the image on the clipboard") }
+            catch { return fail("clipboard image: \(error)") }
+            images.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
+            var e = imageEntry(read, file: "clipboard")
+            e["source"] = "image"
+            (entry, text) = (e, read.text)
+            if read.status == .empty {
+                blank = read.retried
+                    ? ("no text found in the clipboard image after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
+                    : ("no text found in the clipboard image", 1)
+            }
+        } else if let url = clip.readFileURL() {
+            // A file copied in Finder runs through the normal file readers. Its path came from the
+            // clipboard, so messages name "the copied file" and never print the path.
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+                return fail("the file copied to the clipboard no longer exists")
+            }
+            guard !isDir.boolValue else { return fail("the item copied to the clipboard is a folder, not an image or PDF") }
+            if url.pathExtension.lowercased() == "pdf" {
+                let read: Pipeline.PDFRead
+                do { read = try Pipeline.readPDF(url: url, pages: nil, minConfidence: opts.minConfidence,
+                                                 forceOCR: opts.forceOCR, redaction: redaction) }
+                catch { return fail("cannot read the PDF copied to the clipboard") }
+                pdfs.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
+                var e = pdfEntry(read, file: "clipboard")
+                e["source"] = "file_url"
+                e["document"] = ["sha256": read.document.sha256, "pages": read.document.pageCount]
+                (entry, text) = (e, read.text)
+                if read.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    blank = ("no text found in the PDF copied to the clipboard", 1)
+                }
+            } else {
+                let read: Pipeline.ImageRead
+                do { read = try Pipeline.readImage(path: url.path, redaction: redaction, minConfidence: opts.minConfidence) }
+                catch Pipeline.ReadError.unreadableImage { return fail("cannot read the file copied to the clipboard as an image") }
+                catch { return fail("file copied to the clipboard: \(error)") }
+                images.add(imageTokens: read.imageTokens, textTokens: read.textTokens, redactions: read.report.total)
+                var e = imageEntry(read, file: "clipboard")
+                e["source"] = "file_url"
+                (entry, text) = (e, read.text)
+                if read.status == .empty {
+                    blank = read.retried
+                        ? ("no text found in the file copied to the clipboard after a retry, though it looks like a screenshot (likely a cold start; try again)", 3)
+                        : ("no text found in the file copied to the clipboard", 1)
+                }
+            }
+        } else {
+            return fail("no image on the clipboard (clipboard text is never read; use: pbpaste | cheapshot --text -)")
+        }
+
+        // A read happened, so it is recorded the way a file read records it, blank or not.
+        for e in Pipeline.ledgerEntries(pdfs: pdfs, images: images, redacted: true) { record(e, opts, io) }
+        let it = pdfs.imageTokens + images.imageTokens, tt = pdfs.textTokens + images.textTokens
+        if opts.stats {
+            io.err(statsLine(inputs: 1, noun: pdfs.inputs > 0 ? "pdf(s)" : "image(s)", imageTokens: it, textTokens: tt))
+        }
+        // Stricter than a file read (plan 4.3): blank text is a failed run, not an empty success.
+        if let b = blank { return fail(b.message, code: b.code, entry: entry) }
+        if opts.json {
+            guard emit(payload([entry], imageTokens: it, textTokens: tt), io) else { return 1 }
+        } else {
+            io.out(text + "\n")
+        }
+        return 0
     }
 
     // MARK: - video

@@ -4,6 +4,10 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ## Unreleased
 
+### Clipboard
+
+- New `cheapshot --clipboard` (NOV-155): reads the image on the clipboard (PNG, TIFF, JPEG or HEIC), or the one file copied in Finder, and prints the redacted text with the same text, counts, JSON and ledger line as a file read. In `--json` the entry has `"file": "clipboard"` and `"source": "image"` or `"file_url"`; a copied PDF puts its hash and page count under `"document"`, never its path. Clipboard text is never read (use `pbpaste | cheapshot --text -`), the clipboard is never written, and `--raw`, files, `--pages` and the other input modes are usage errors with it. Blank text is a failure, stricter than a file read: exit 1, or the new exit 3 when a screenshot-like image is still blank after the retry (likely a cold start). macOS only.
+
 ### Mask
 
 - `cheapshot mask` writes its copy with mode 0600, in the default folder and at `--out` alike (CS-18). An `--out` file used to get the umask default, usually 0644, so a script or another account that read it from there will now get a permission error. Each run without `--out` deletes copies in the default folder older than 1 hour. Mask now refuses to run when `$TMPDIR/cheapshot-masked/` is a symlink, not a folder, owned by another user, or not mode 0700; the error gives the `chmod` that fixes it.

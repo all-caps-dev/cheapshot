@@ -19,6 +19,9 @@ public enum Output {
           cheapshot --cleanshot [n]
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
+          cheapshot --clipboard            read the image (or the one copied file) on the clipboard,
+                                           always redacted. Never reads clipboard text: use
+                                           pbpaste | cheapshot --text - for that. macOS only
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes;
                                            needs a foreground terminal; a speed bump, not a sandbox).
@@ -58,6 +61,8 @@ public enum Output {
 
         EXIT CODES
           0 ok   1 an input failed   2 usage error
+          3 --clipboard only: the read was retried and still came back blank (a cold-start OCR
+            failure is likely; try again)
 
         """
     }
