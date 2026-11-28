@@ -220,8 +220,13 @@ final class RedactorTests: XCTestCase {
         // The iOS Simulator on CI runners is several times slower than macOS (PR #22: 1.36 s and
         // 2.25 s for two shapes against a 1.0 s limit), so it gets 3.0 s. A runaway regex takes
         // seconds to minutes, so 3.0 s still catches one; macOS and devices keep 1.0 s.
+        // Windows Foundation's regex is 4 to 8 times slower on these lines (PR #23's first
+        // windows-core run: 3.7 s to 8.2 s across 9 shapes), so it gets 10 s; a runaway regex
+        // still takes far longer, and the liveness check below is unchanged.
         #if targetEnvironment(simulator)
         let limit = 3.0
+        #elseif os(Windows)
+        let limit = 10.0
         #else
         let limit = 1.0
         #endif

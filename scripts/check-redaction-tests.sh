@@ -7,7 +7,7 @@
 # The filter argument exists only to prove the guard: a filter that matches nothing must fail.
 cd "$(dirname "$0")/.." || exit 1
 filter="${1:-CheapshotPortableTests.(GoldenTests|RedactorTests|ValidatorsTests|RuleFileTests)}"
-expected=40   # 2 Golden + 18 Redactor + 14 Validators + 6 RuleFile; change when tests are added
+expected=41   # 2 Golden + 18 Redactor + 15 Validators + 6 RuleFile; change when tests are added
 log="${TMPDIR:-/tmp}/cheapshot-redaction-tests.$$.log"
 
 swift test --filter "$filter" >"$log" 2>&1

@@ -82,6 +82,15 @@ final class ValidatorsTests: XCTestCase {
         XCTAssertFalse(Validators.secretValue("is required"))        // quoted prose
     }
 
+    // PR #23: a pattern NSRegularExpression rejects never matches on Windows, while Apple's
+    // String.range(of:options: .regularExpression) may still accept it. Compile every shape strictly.
+    func testReferenceShapesAreValidICU() {
+        for p in Validators.referenceShapes {
+            XCTAssertNoThrow(try NSRegularExpression(pattern: p), p)
+        }
+        XCTAssertFalse(Validators.secretValue("\u{2022}\u{2022}\u{25CF}\u{25CF}\u{2022}\u{2022}"))   // bullet mask
+    }
+
     // Review finding 8: decoded UTF-8 is fine, control characters are not.
     func testBasicAuthAcceptsUTF8() {
         XCTAssertTrue(Validators.basicAuth("Basic am9zZTpjb250cmHDsWE="))   // jose:contraña
