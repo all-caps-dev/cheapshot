@@ -6,7 +6,7 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ## 0.6.1 (unreleased)
 
-Four fail-closed safety fixes: the Claude Code hook and `cheapshot mask` no longer let pixels or a readable copy through when OCR fails or reads blank. Ships with plugin 0.1.2 (the hook changed) and cheapshot-mcp 0.1.3 (unchanged). PRs [#21](https://github.com/all-caps-dev/cheapshot/pull/21) to [#30](https://github.com/all-caps-dev/cheapshot/pull/30).
+Safety fixes: the Claude Code hook fails closed when OCR fails or reads blank and no longer trusts the extension alone to decide a file is a PDF; `cheapshot mask` writes 0600 copies and refuses a blank screenshot. Ships with plugin 0.1.2 (the hook changed) and cheapshot-mcp 0.1.3 (unchanged). PRs [#21](https://github.com/all-caps-dev/cheapshot/pull/21) to [#30](https://github.com/all-caps-dev/cheapshot/pull/30).
 
 ### Security
 

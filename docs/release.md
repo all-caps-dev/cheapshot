@@ -20,7 +20,7 @@ This file is now the record of how v0.5.0 went out. The steps below stay as writ
 
 Same path as v0.6.0: no rc, no setup. The release branch (`release/v0.6.1`) sets `Version.swift` to `0.6.1`, adds the `CHANGELOG.md` entry, bumps the plugin to 0.1.2 in `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, and points `packaging/homebrew/cheapshot.rb` and `scripts/check-formula.sh` at v0.6.1. The formula copy here keeps the placeholder hash; the tap job writes the real `url` and `sha256` into the tap.
 
-Merging the branch ships plugin 0.1.2 at once: the marketplace reads `./plugin` from main, so plugin users get the new hook before the tag. The hook works with the v0.6.0 binary.
+Merging the branch ships plugin 0.1.2 at once: the marketplace reads `./plugin` from main, so plugin users get the new hook before the tag. The hook runs with the v0.6.0 binary, but that pairing is not safe: when a screenshot reads blank, the 0.1.2 hook denies the Read and names `cheapshot mask` to the user, and a v0.6.0 `mask` has no blank-read gate (added in #29, CHE-24), so on that same blank read it writes a copy that is the unmasked original and allows it for Read. Tag right after the merge, and tell plugin 0.1.2 users on a v0.6.0 binary to `brew upgrade cheapshot` before following the mask hint. The gap stays open for anyone who does not upgrade.
 
 1. RYAN: merge the release PR.
 2. AGENT: on main, change `## 0.6.1 (unreleased)` in `CHANGELOG.md` to the UTC date the tag will carry, in a one-line PR (or fold it into the release PR just before merge).
