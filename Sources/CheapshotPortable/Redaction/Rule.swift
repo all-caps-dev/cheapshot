@@ -216,6 +216,27 @@ public struct Rule: Sendable {
              pattern: #"\bSet-Cookie["']?[ \t]*:[ \t]*["']?[^\s=;,"]{1,256}="# + cookieValue,
              validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
 
+        // OPENAI_KEY's shape right after a key word, with no CSS-class veto (CS-05 gap 5). A
+        // proxy key the user names can be short lowercase words joined by hyphens
+        // (`sk-my-super-secret-litellm-key`), the exact shape the first OPENAI_KEY rule spares
+        // as a CSS class; after a key word it is a key. It sits after the SECRET rules so a
+        // value they take whole (`password: "sk-... more words"`) is never cut short here.
+        // Key words: key, api_key and the like, token, secret, password, credential, auth, in
+        // any case, not continuing a longer word on the left ("monkey"); or camelCase
+        // (`openaiKey`, `openAIKey`). A placeholder an earlier rule wrote (`[SECRET]`) is not a
+        // key word: the guard lists, by name, every builtin above this rule whose `[NAME]` would
+        // otherwise read as a key word (it ends in KEY, TOKEN, SECRET or AUTH), so
+        // `password=[SECRET] sk-cube-grid-...` keeps its CSS class. Any other bracketed label
+        // (`[API_KEY]`, `[MASTER_KEY]`, `[KEY]`, and `[TOKEN]`, whose rule runs after this one)
+        // is text the user wrote, so it still counts as a key word. Then an optional
+        // `_DEV`-style or digit suffix (never a hyphen, so CSS custom properties such as `--key-color` stay out), an optional " is", a closing
+        // quote or `]` (`environ["OPENAI_API_KEY"] =`), one `:` `=` `=>` `:=`, and an opening
+        // quote, backtick or `[`. A key inside an HTML class list (`class="auth sk-..."`) is
+        // left alone. `\b(?=sk-)` comes first so the lookbehinds run only where a key starts.
+        Rule(name: "OPENAI_KEY",
+             pattern: #"\b(?=sk-)(?<!class(?:Name)?=["'][^"'\n]{0,60})(?<!\[(?:SECRET|BASIC_AUTH|PRIVATE_KEY|(?:AWS|ANTHROPIC|OPENAI|STRIPE|TAILSCALE|ONEPASSWORD_SECRET|GOOGLE_API|TWILIO)_KEY|(?:SLACK|NPM|PYPI|HF|ONEPASSWORD|VAULT)_TOKEN|(?:GOOGLE_OAUTH|AZURE_CLIENT)_SECRET)\][ \t]{0,10})(?<=(?:(?:^|[^A-Za-z])(?i:(?:api|secret|master|access|private|virtual)?keys?|tokens?|secrets?|passwords?|passwd|credentials?|auth)|[A-Za-z](?:Key|Token|Secret|Password)s?)(?:(?:_[A-Za-z0-9]{1,12}){1,2}|[0-9]{1,3})?(?i:[ \t]{1,3}is)?["'`]?\]?[ \t]{0,10}(?:=>|:=|[:=])?[ \t]{0,10}\[?["'`]?)sk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#,
+             options: []),
+
         // --- Personal data. ---
         // The domain must not be a @2x/@3x/@2.5x scale suffix on an image filename, so "CleanShot
         // 2026-09-12 at 10.22.33@2x.png" is not an address. The exclusion is anchored to image
