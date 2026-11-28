@@ -59,9 +59,22 @@ public struct Redactor {
     public func redact(_ input: String) -> (text: String, report: RedactionReport) {
         var text = input
         var report = RedactionReport()
+        // A placeholder holds no backtick or tilde, so text with no fence run before the first
+        // rule has none after any rule: check once, not once per rule.
+        let mayHaveFences = FenceFreeView.mayHaveFence(input)
+        // The fence-free view of `text`, built when first needed and again only after a rule
+        // changes the text. The outer nil is "not built yet"; the inner nil is "no fence line".
+        var view: FenceFreeView?? = nil
         for c in compiled {
-            let hits = self.hits(of: c, in: text)
+            let hits: [Range<String.Index>]
+            if mayHaveFences {
+                if view == nil { view = .some(FenceFreeView(text)) }
+                hits = self.hitsSeeingPastFences(of: c, in: text, view: view!)
+            } else {
+                hits = self.hits(of: c, in: text)
+            }
             if hits.isEmpty { continue }
+            view = nil
             var result = ""
             var last = text.startIndex
             for r in hits {
@@ -73,6 +86,168 @@ public struct Redactor {
             text = result
         }
         return (text, report)
+    }
+
+    /// Swift: the spans one rule replaces in `text`, plus the spans it replaces in the same text
+    /// with its code-fence lines taken out, merged.
+    ///
+    /// Why: ``Layout/text(_:)`` puts a ```` ``` ```` line between a fenced line and the unfenced
+    /// line after it, and a document may hold fences of its own. A rule whose pattern spans two
+    /// lines (a custom `creds-begin\n[0-9a-f]{20}`) then no longer matched, and its secret
+    /// survived in the text while the per-line redaction, which joins lines without fences,
+    /// caught it. Reading the text both ways and keeping every hit from either is fail closed:
+    /// nothing the plain scan replaces is dropped. A hit from the fence-free reading that spans
+    /// a fence line takes that line with it.
+    ///
+    /// No builtin crosses a newline (see `testNewRulesStayOnOneLine`), and no builtin matches
+    /// inside a fence line, so for the builtins both readings find the same spans and the
+    /// output is unchanged. Text with no fence run never comes here (see `redact`).
+    private func hitsSeeingPastFences(of c: Compiled, in text: String, view: FenceFreeView?) -> [Range<String.Index>] {
+        let plain = hits(of: c, in: text)
+        guard let view else { return plain }
+        let extra = hits(of: c, in: view.text).compactMap { view.originalRange(of: $0, in: text) }
+        return Self.merged(plain, extra)
+    }
+
+    /// Swift: two sorted lists of non-overlapping spans as one, with spans that overlap (or are
+    /// equal) joined into a single span. Spans that only touch stay separate, as the plain scan
+    /// leaves them.
+    static func merged(_ a: [Range<String.Index>], _ b: [Range<String.Index>]) -> [Range<String.Index>] {
+        if b.isEmpty { return a }
+        let all = (a + b).sorted { ($0.lowerBound, $0.upperBound) < ($1.lowerBound, $1.upperBound) }
+        var out: [Range<String.Index>] = []
+        for r in all {
+            if let last = out.last, r.lowerBound < last.upperBound || r == last {
+                out[out.count - 1] = last.lowerBound..<max(last.upperBound, r.upperBound)
+            } else {
+                out.append(r)
+            }
+        }
+        return out
+    }
+
+    /// Swift: a text with its code-fence lines removed, and the way back to the original's
+    /// positions. A fence line is up to three spaces, then three or more backticks (with no
+    /// other backtick after them) or three or more tildes, then anything (a language name); a
+    /// trailing "\r" is allowed. Each removed line takes one adjacent newline with it, so the
+    /// lines on either side become neighbours.
+    struct FenceFreeView {
+        /// The text without its fence lines.
+        let text: String
+        /// Kept stretches of the original, in order: UTF-16 start in the original and length.
+        private let pieces: [(start: Int, length: Int)]
+        /// Where each piece starts in ``text`` (UTF-16).
+        private let viewStarts: [Int]
+
+        /// Nil when `original` has no fence line.
+        init?(_ original: String) {
+            guard Self.mayHaveFence(original) else { return nil }
+            let units = Array(original.utf16)
+            let len = units.count
+            var removed: [NSRange] = []
+            var lineStart = 0
+            while lineStart <= len {
+                var lineEnd = lineStart
+                while lineEnd < len && units[lineEnd] != 0x0A { lineEnd += 1 }
+                if Self.isFence(units[lineStart..<lineEnd]) {
+                    if lineEnd < len {
+                        removed.append(NSRange(location: lineStart, length: lineEnd + 1 - lineStart))
+                    } else if lineStart > 0 {
+                        // The last line: take the newline before it instead. When that newline
+                        // was already taken by a fence line just above, this one goes too.
+                        let start = removed.last.map { NSMaxRange($0) == lineStart ? lineStart : lineStart - 1 } ?? lineStart - 1
+                        removed.append(NSRange(location: start, length: lineEnd - start))
+                    } else {
+                        removed.append(NSRange(location: 0, length: len))
+                    }
+                }
+                if lineEnd == len { break }
+                lineStart = lineEnd + 1
+            }
+            if removed.isEmpty { return nil }
+            var pieces: [(start: Int, length: Int)] = []
+            var kept: [UInt16] = []
+            kept.reserveCapacity(len)
+            var at = 0
+            for r in removed {
+                if r.location > at {
+                    pieces.append((at, r.location - at))
+                    kept += units[at..<r.location]
+                }
+                at = NSMaxRange(r)
+            }
+            if at < len {
+                pieces.append((at, len - at))
+                kept += units[at..<len]
+            }
+            // Whole lines are removed, so no surrogate pair is split and the units decode as is.
+            self.text = String(decoding: kept, as: UTF16.self)
+            self.pieces = pieces
+            var starts: [Int] = []
+            var v = 0
+            for piece in pieces { starts.append(v); v += piece.length }
+            self.viewStarts = starts
+        }
+
+        /// True when `s` holds three backticks or three tildes in a row: a cheap byte scan, so a
+        /// 100,000-character line with no fence costs one pass.
+        static func mayHaveFence(_ s: String) -> Bool {
+            var run = 0
+            var last: UInt8 = 0
+            for b in s.utf8 {
+                if b == UInt8(ascii: "`") || b == UInt8(ascii: "~") {
+                    run = b == last ? run + 1 : 1
+                    if run >= 3 { return true }
+                } else {
+                    run = 0
+                }
+                last = b
+            }
+            return false
+        }
+
+        /// A CommonMark fence opener or closer, as described on the type, given as UTF-16 units.
+        static func isFence(_ line: ArraySlice<UInt16>) -> Bool {
+            let space: UInt16 = 0x20, backtick: UInt16 = 0x60, tilde: UInt16 = 0x7E, cr: UInt16 = 0x0D
+            var s = line
+            if s.last == cr { s = s.dropLast() }
+            let indent = s.prefix(while: { $0 == space }).count
+            guard indent <= 3 else { return false }
+            s = s.dropFirst(indent)
+            guard let mark = s.first, mark == backtick || mark == tilde else { return false }
+            let run = s.prefix(while: { $0 == mark }).count
+            guard run >= 3 else { return false }
+            return mark == tilde || !s.dropFirst(run).contains(backtick)
+        }
+
+        /// The original position of view offset `p`. `asEnd`: `p` is the end of a span, so a
+        /// span that stops right before a removed line does not take it in. A binary search over
+        /// the pieces, so a document with many fences and many hits stays linear-ish.
+        private func originalOffset(_ p: Int, asEnd: Bool) -> Int? {
+            guard let first = pieces.first, let lastPiece = pieces.last else { return nil }
+            let total = viewStarts[viewStarts.count - 1] + lastPiece.length
+            if p == 0 { return first.start }
+            if p == total { return lastPiece.start + lastPiece.length }
+            guard p > 0, p < total else { return nil }
+            // The piece that holds view offset q: the last piece whose view start is <= q.
+            let q = asEnd ? p - 1 : p
+            var lo = 0, hi = viewStarts.count - 1
+            while lo < hi {
+                let mid = (lo + hi + 1) / 2
+                if viewStarts[mid] <= q { lo = mid } else { hi = mid - 1 }
+            }
+            return pieces[lo].start + (q - viewStarts[lo]) + (asEnd ? 1 : 0)
+        }
+
+        /// `r`, a span in ``text``, as a span in `original`. A span that crosses a removed fence
+        /// line covers that line too.
+        func originalRange(of r: Range<String.Index>, in original: String) -> Range<String.Index>? {
+            let ns = NSRange(r, in: text)
+            let empty = ns.length == 0
+            guard let lo = originalOffset(ns.location, asEnd: false),
+                  let hi = empty ? lo : originalOffset(NSMaxRange(ns), asEnd: true) else { return nil }
+            return Range(NSRange(location: lo, length: hi - lo), in: original)
+        }
     }
 
     /// Swift: the spans one rule replaces in `text`, validated, left to right, not overlapping.

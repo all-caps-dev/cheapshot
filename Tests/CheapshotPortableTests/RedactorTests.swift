@@ -211,6 +211,12 @@ final class RedactorTests: XCTestCase {
             "pg://" + String(repeating: "u", count: n),
             String(repeating: "x://" + String(repeating: "u", count: 200), count: n / 204),
             String(repeating: "(x://u:1", count: n / 8),
+            // CS-05 gap 4: the fence-free second reading. Many fence lines, many hits between
+            // them, one huge fence line, and backtick runs that are not fences.
+            String(repeating: "```\n", count: n / 4),
+            String(repeating: "a@b.io\n```\n", count: n / 11),
+            String(repeating: "~", count: n),
+            String(repeating: "```a`\n", count: n / 6),
         ]
         let redactor = Redactor()
         var slowest = (0.0, "")
@@ -241,5 +247,53 @@ final class RedactorTests: XCTestCase {
             if elapsed > slowest.0 { slowest = (elapsed, String(shape.prefix(24))) }
         }
         print("slowest 100k shape: \(slowest.1.debugDescription) \(String(format: "%.3f", slowest.0))s")
+    }
+    // CS-05 gap 4: a two-line custom rule still matches when a code-fence line sits between its
+    // two lines, as `Layout.text` puts one after a fenced line. Fences of every shape, a
+    // surrogate pair before the hit (UTF-16 offsets), and a rule that targets fences itself.
+    func testCustomRuleSeesPastCodeFences() throws {
+        let hex = "b1946ac924" + "92d2347f2a"
+        let json = try JSONSerialization.data(withJSONObject: [
+            ["name": "MYCREDS", "pattern": #"creds-begin\n[0-9a-f]{20}"#],
+            ["name": "CODEBLOCK", "pattern": #"(?s)~~~~.*?~~~~"#],
+        ])
+        let r = Redactor(customRules: try RuleFile.parse(json))
+        func line(_ n: Int, _ text: String, fenced: Bool) -> RenderedLine {
+            RenderedLine(n: n, text: text, bbox: .zero, confidence: 1, fenced: fenced)
+        }
+        let laidOut = r.redact(Layout.text([line(1, "creds-begin", fenced: true), line(2, hex, fenced: false)]))
+        XCTAssertEqual(laidOut.text, "```\n[MYCREDS]")
+        XCTAssertEqual(laidOut.report.counts["MYCREDS"], 1)
+        XCTAssertEqual(r.redact("```swift\n\u{1F511} creds-begin\n```\n\(hex) tail").text, "```swift\n\u{1F511} [MYCREDS] tail")
+        XCTAssertEqual(r.redact("creds-begin\r\n  ~~~\r\n```\n\(hex)").text, "creds-begin\r\n  ~~~\r\n```\n\(hex)",
+                       "a CR before the newline is not part of the rule, so it does not match either way")
+        XCTAssertEqual(r.redact("creds-begin\n  ~~~ text\r\n```\n\(hex)").text, "[MYCREDS]")
+        // Not fences: four spaces of indent, two backticks, a backtick after the run.
+        for notFence in ["    ```", "``", "```a`b"] {
+            XCTAssertEqual(r.redact("creds-begin\n\(notFence)\n\(hex)").text, "creds-begin\n\(notFence)\n\(hex)")
+        }
+        // A rule that matches the fences themselves still does, counted once.
+        let block = r.redact("a\n~~~~\npassword-less text\n~~~~\nb")
+        XCTAssertEqual(block.text, "a\n[CODEBLOCK]\nb")
+        XCTAssertEqual(block.report.counts["CODEBLOCK"], 1)
+    }
+
+    // The fence-free second reading must not change what the builtins do: every golden case
+    // with a fence line before, between and after each of its lines redacts to its expected
+    // output once the fence lines are taken back out.
+    func testBuiltinsRedactTheSameAcrossFences() throws {
+        let root = try XCTUnwrap(Bundle.module.url(forResource: "Golden", withExtension: nil))
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("cases").path)
+            .filter { $0.hasSuffix(".txt") }.sorted()
+        XCTAssertFalse(names.isEmpty)
+        let redactor = Redactor()
+        func chomp(_ s: String) -> String { s.hasSuffix("\n") ? String(s.dropLast()) : s }
+        for name in names {
+            let input = chomp(GoldenTests.assemble(try String(contentsOf: root.appendingPathComponent("cases/\(name)"), encoding: .utf8)))
+            let expected = chomp(try String(contentsOf: root.appendingPathComponent("expected/\(name)"), encoding: .utf8))
+            let fenced = (["```"] + input.components(separatedBy: "\n").flatMap { [$0, "```"] }).joined(separator: "\n")
+            let out = redactor.redact(fenced).text.components(separatedBy: "\n").filter { $0 != "```" }
+            XCTAssertEqual(out.joined(separator: "\n"), expected, "golden case \(name) inside fences")
+        }
     }
 }

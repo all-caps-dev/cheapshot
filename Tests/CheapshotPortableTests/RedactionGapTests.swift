@@ -6,8 +6,8 @@
 import XCTest
 @testable import CheapshotPortable
 
-/// CS-05: one test per redaction gap the v0.6.0 reviews found. The redactor is unchanged here;
-/// each gap's assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
+/// CS-05: one test per redaction gap the v0.6.0 reviews found. Where a gap is still open, its
+/// assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
 /// the suite is green now and the test turns red, on purpose, once the gap is fixed (the
 /// wrapper then reports that no expected failure occurred and the wrap is removed).
 ///
@@ -68,12 +68,14 @@ final class RedactionGapTests: XCTestCase {
         }
     }
 
-    // Gap 4: the text field path. Runner builds `Redactor(customRules: RuleFile.load(...))` and
+    // Gap 4, fixed: the text field path. Runner builds `Redactor(customRules: RuleFile.load(...))` and
     // redacts `Layout.text(rendered)`, which puts a ``` fence line between a fenced line and the
     // unfenced line after it, so a custom rule whose pattern spans those two lines no longer
     // matches and its secret survives every rule (a bare lowercase hex run is invisible to the
     // built-ins). The rule is parsed from rules-file JSON so it is exactly what a user's
-    // --rules file produces. Confirmed red today, 2026-11-27.
+    // --rules file produces. The redactor now also reads the text with its fence lines taken
+    // out and keeps the hits from both readings; RedactorTests.testCustomRuleSeesPastCodeFences
+    // guards it on every platform.
     func testTwoLineCustomRuleAcrossCodeFenceRedacts() throws {
         let secret = Self.assemble("b1946ac924" + Self.m + "92d2347f2a")
         let json = try JSONSerialization.data(withJSONObject: [
@@ -88,11 +90,8 @@ final class RedactionGapTests: XCTestCase {
                                                  line(2, secret, fenced: false)])).text
         XCTAssertFalse(plain.contains(secret), "control: the rule should match unfenced lines: \(plain.debugDescription)")
         let fencedText = Layout.text([line(1, "creds-begin", fenced: true), line(2, secret, fenced: false)])
-        XCTExpectFailure("CS-05 gap 4: a fence line breaks a two-line custom rule", strict: true) {
-            let out = redactor.redact(fencedText).text
-            XCTAssertFalse(out.contains(secret),
-                           "the two-line rule should see past the fence: \(out.debugDescription)")
-        }
+        let out = redactor.redact(fencedText).text
+        XCTAssertFalse(out.contains(secret), "the two-line rule should see past the fence: \(out.debugDescription)")
     }
 
     // Gap 5: OPENAI_KEY's validator vetoes any sk- key of short lowercase words joined by
