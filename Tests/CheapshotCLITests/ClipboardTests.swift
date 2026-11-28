@@ -46,7 +46,13 @@ final class FakeClipboard: ClipboardSource {
     /// Called on every file-URL read after the URLs are taken, so a test can copy something
     /// between the reads (onRead, by contrast, runs before the read and can change its result).
     var onFileRead: (() -> Void)?
-    func readFileURLs() -> [URL] { reads += 1; onRead?(); let urls = fileURLs; onFileRead?(); return urls }
+    /// onRead fires here only when a file is on the clipboard, so an image-only clipboard's
+    /// onRead lands on the image read (the OCR window), not on the empty URL probe before it.
+    func readFileURLs() -> [URL] {
+        reads += 1
+        if !fileURLs.isEmpty { onRead?() }
+        let urls = fileURLs; onFileRead?(); return urls
+    }
     var fileItemCount: Int { fileURLs.count + unresolvableFileItems }
 
     @discardableResult
