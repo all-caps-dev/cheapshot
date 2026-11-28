@@ -103,6 +103,7 @@ final class RedactionGapTests: XCTestCase {
         XCTExpectFailure("CS-05 gap 5: the CSS-class veto also refuses lowercase-word keys", strict: true) {
             let out = Redactor().redact("Your key \(key)").text
             XCTAssertFalse(out.contains(key), "the sk- key should not survive: \(out.debugDescription)")
+            XCTAssertFalse(out.contains("sk-my") || out.contains("litellm"), "no part of the sk- key should survive: \(out.debugDescription)")
         }
     }
 }
