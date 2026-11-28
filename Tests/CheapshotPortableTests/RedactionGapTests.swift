@@ -35,6 +35,36 @@ final class RedactionGapTests: XCTestCase {
         XCTAssertEqual(out, "Cookie: foo=; sid=[SECRET]")
     }
 
+    // Gap 1 side effect, widened by PR #32: now that the chain carries on past an empty first
+    // pair, a later cookie value the rule refuses (here a URL) is consumed as one pair and
+    // swallows a nested `Cookie:` start, so the sid after it is left in the clear. main
+    // redacted it (`sid=[SECRET]`) because the chain never started. Expected failure until the
+    // linear matcher follow-up replaces the chained regex.
+    func testCookieChainPastEmptyPairDoesNotSwallowNestedCookieStart() {
+        let sid = Self.assemble("7f3a9c21d04e" + Self.m + "b85a6f31c2d9")
+        // Control: the nested `Cookie:` start alone redacts the sid.
+        XCTAssertFalse(Redactor().redact("next=https://x/?Cookie:sid=\(sid)").text.contains(sid))
+        XCTExpectFailure("CS-05 gap 1 follow-up: a refused cookie value swallows a nested Cookie: start", strict: true) {
+            let out = Redactor().redact("Cookie: a=; next=https://x/?Cookie:sid=\(sid)").text
+            XCTAssertFalse(out.contains(sid), "the sid value should not survive: \(out.debugDescription)")
+        }
+    }
+
+    // Gap 1 side effect, widened by PR #32: the Cookie rule runs before CARD, and with the
+    // chain now reaching `card=` it takes the value up to the space, leaving
+    // `card=[SECRET] 1111111111`: ten digits of the card number survive. main gave
+    // `card=[CARD]`. Expected failure until the linear matcher follow-up.
+    func testCookieChainPastEmptyPairDoesNotSplitCardNumber() {
+        let card = Self.assemble("411111" + Self.m + " 1111111111")
+        let tail = Self.assemble("11111" + Self.m + "11111")
+        // Control: outside the Cookie chain the whole number is caught by CARD.
+        XCTAssertFalse(Redactor().redact("card=\(card)").text.contains(tail))
+        XCTExpectFailure("CS-05 gap 1 follow-up: the Cookie chain splits a card number before CARD runs", strict: true) {
+            let out = Redactor().redact("Cookie: a=; card=\(card)").text
+            XCTAssertFalse(out.contains(tail), "no part of the card number should survive: \(out.debugDescription)")
+        }
+    }
+
     // Gap 2: a key reached through a `this.` / `self.` / `config.` prefix. The keyword match
     // starts at `apiKey` and reads forward, so the prefix is transparent. This case already
     // passes today, so it stays a plain regression test over all three prefixes, on both
