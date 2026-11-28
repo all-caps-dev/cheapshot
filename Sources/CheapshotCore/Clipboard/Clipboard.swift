@@ -48,9 +48,10 @@ public extension ClipboardSource {
     var holdsFileItems: Bool { fileItemCount > 0 }
 
     /// The file URL when the clipboard holds exactly one, else nil (none, or two or more).
+    /// Counted by file items, so two copied files with one gone is still nil, never the survivor.
     func readFileURL() -> URL? {
         let urls = readFileURLs()
-        return urls.count == 1 ? urls[0] : nil
+        return urls.count == 1 && fileItemCount == 1 ? urls[0] : nil
     }
 }
 

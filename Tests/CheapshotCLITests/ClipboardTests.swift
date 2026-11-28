@@ -24,7 +24,7 @@ final class FakeClipboard: ClipboardSource {
     }
 
     /// The user copied something: content changes and the count moves.
-    func userCopied(text: String) { image = nil; fileURLs = []; self.text = text; changeCount += 1 }
+    func userCopied(text: String) { image = nil; fileURLs = []; unresolvableFileItems = 0; self.text = text; changeCount += 1 }
 
     /// Counts only reads that hand out image bytes, so a test can prove the image was never read.
     private(set) var imageReads = 0
@@ -42,7 +42,7 @@ final class FakeClipboard: ClipboardSource {
     @discardableResult
     func replace(with payload: ClipboardPayload) -> Bool {
         writes.append(payload)
-        image = nil; fileURLs = []; text = nil
+        image = nil; fileURLs = []; unresolvableFileItems = 0; text = nil
         switch payload {
         case .text(let s): text = s
         case .png(let d): image = d
@@ -217,6 +217,7 @@ final class ClipboardTests: XCTestCase {
         let clip = PasteboardClipboard(pb)
         XCTAssertEqual(clip.readFileURLs().count, 1)
         XCTAssertEqual(clip.fileItemCount, 2, "a copied file that is gone still counts")
+        XCTAssertNil(clip.readFileURL(), "the survivor of a two-file copy is never handed out")
     }
 
     func testFakeModelsAnUnresolvableFileItem() {
@@ -225,6 +226,15 @@ final class ClipboardTests: XCTestCase {
         XCTAssertNil(fake.readImage())
         XCTAssertEqual(fake.readFileURLs(), [])
         XCTAssertEqual(fake.fileItemCount, 1)
+    }
+
+    func testFakeReplaceClearsUnresolvableFileItems() {
+        // clearContents() on the real pasteboard drops every file item; the fake must too.
+        let fake = FakeClipboard()
+        fake.unresolvableFileItems = 1
+        fake.replace(with: .png(Data([7])))
+        XCTAssertEqual(fake.fileItemCount, 0)
+        XCTAssertEqual(fake.readImage(), Data([7]))
     }
 
     func testFakeFileURLHidesItsImage() {
