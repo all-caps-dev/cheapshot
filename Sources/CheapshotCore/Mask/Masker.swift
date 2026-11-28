@@ -103,22 +103,14 @@ public enum Masker {
     /// catches more secrets than any one. The confidence floor is applied here, not in Vision,
     /// so the lines under it come back with their boxes and get painted.
     public static func findBoxes(in image: CGImage, redactor: Redactor, minConfidence: Float) throws -> [MaskBox] {
-        try scan(image, redactor: redactor, minConfidence: minConfidence).boxes
-    }
-
-    /// `findBoxes` plus how many lines the three passes saw in all, at any confidence (they run
-    /// at 0). `mask` uses the count to tell a blank read from text that is all under the floor.
-    static func scan(_ image: CGImage, redactor: Redactor, minConfidence: Float) throws -> (boxes: [MaskBox], lines: Int) {
         let layout = try OCR.recognizeLayout(image: image, minConfidence: 0)
         var boxes = flag(layout.map { ($0.text, $0.bbox, $0.confidence) }, redactor: redactor, minConfidence: minConfidence)
-        var seen = layout.count
         for correction in [true, false] {
             let r = try OCR.recognize(image: image, minConfidence: 0, languageCorrection: correction)
             let lines = Layout.sorted(r.lines).map { ($0.text, $0.bbox, $0.confidence) }
             boxes += flag(lines, redactor: redactor, minConfidence: minConfidence)
-            seen += lines.count
         }
-        return (dedupe(boxes), seen)
+        return dedupe(boxes)
     }
 
     /// The pure half of `findBoxes`: which lines to paint, given their text, box and confidence
@@ -207,7 +199,7 @@ public enum Masker {
     public static func mask(_ image: CGImage, redactor: Redactor, minConfidence: Float) throws -> MaskResult {
         // The same checked OCR the read path uses, cold-start retry included (CHE-24).
         let checked = try OCR.recognizeLayoutChecked(image: image, minConfidence: minConfidence)
-        let first = try scan(image, redactor: redactor, minConfidence: minConfidence)
+        let firstBoxes = try findBoxes(in: image, redactor: redactor, minConfidence: minConfidence)
         // A screenshot-like image that read blank at every confidence, after the retry, is a
         // likely OCR failure, not a text-free image: masking on would paint nothing and allow a
         // copy that is the original, so the model would get the raw pixels the mask was meant to
@@ -216,16 +208,18 @@ public enum Masker {
         // Keyed on `screenshotLike` and "anything but .ok" rather than `retried && .empty`, so a
         // future status or a change to when the retry runs still fails closed here.
         // `checked.lines` is filtered at the floor, so faint text alone also reads as empty there;
-        // the confidence-0 passes in `scan` still see it and paint it as low-confidence, so the
-        // gate only throws when they saw no line either.
-        if checked.screenshotLike, checked.status != .ok, first.lines == 0 {
-            throw Failure(message: "OCR found no text in what looks like a screenshot, even after a retry, so nothing was masked or written; if the image really has no text, run in a terminal: cheapshot allow <path>")
+        // the confidence-0 passes in `findBoxes` still see it and paint it as low-confidence. So the
+        // gate throws only when they produced no box either. It keys on boxes, not lines: if the
+        // checked read cold-failed and a warmer pass saw only clean lines above the floor, there is
+        // nothing to paint and the copy would be the original, so that still fails closed.
+        if checked.screenshotLike, checked.status != .ok, firstBoxes.isEmpty {
+            throw Failure(message: "OCR found no text in what looks like a screenshot, even after a retry, so nothing was masked or written; if the image really has no text, a person can approve the original from a terminal")
         }
         // The counts the user sees match a plain `cheapshot --json` run of the same image.
         let shown = checked.lines
         let report = redactor.redact(Layout.text(shown)).report
 
-        var boxes = first.boxes
+        var boxes = firstBoxes
         var masked = try paint(image, boxes: boxes)
         for round in 1...maxRounds {
             let again = try findBoxes(in: masked, redactor: redactor, minConfidence: minConfidence)
