@@ -298,5 +298,11 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(warnings.count, 1)
         XCTAssertTrue(warnings[0].hasPrefix("ignoring \(broken.path): "), warnings[0])
         XCTAssertTrue(warnings[0].hasSuffix("; using built-in rules only"), warnings[0])
+
+        // Bot review on #41: this entry point ignores a v2 file's switches, so it never hands
+        // back a weakened redactor without a mark.
+        let v2 = tmp.appendingPathComponent("v2.json")
+        try #"{"version": 2, "preset": "secrets-only", "disabled": ["SECRET"]}"#.write(to: v2, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Pipeline.redactor(rules: .init(url: v2, named: true)) { warnings.append($0) }.rules.count, Rule.builtin.count)
     }
 }

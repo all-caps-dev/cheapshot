@@ -68,7 +68,7 @@ case "$reason" in *"$line") pass "reason ends with the savings line";; *) fail "
 # Fleet #290 item 3: the model is never told how to approve its own raw access.
 case "$reason" in *"cheapshot allow"*) fail "reason must not name cheapshot allow";; *) pass "reason does not name cheapshot allow";; esac
 grep -qF "$user_line" "$err" && pass "user savings line on stderr" || fail "user savings line on stderr"
-grep -q -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "binary called with --json --stats" || fail "binary called with --json --stats: $(cat "$FAKE_LOG")"
+grep -q -- '--all-rules --json --stats /tmp/shot.png' "$FAKE_LOG" && pass "binary called with --all-rules --json --stats" || fail "binary called with --all-rules --json --stats: $(cat "$FAKE_LOG")"
 [ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')" = PreToolUse ] && pass "hookEventName set" || fail "hookEventName set"
 # Ruling 1: the deny also carries a top-level systemMessage with the savings line (stderr on exit 0 is not shown).
 [ "$(printf '%s' "$out" | jq -r '.systemMessage')" = "$user_line" ] && pass "deny carries systemMessage with the user's allow command" || fail "deny carries systemMessage: $(printf '%s' "$out" | jq -c '.systemMessage')"
@@ -307,17 +307,17 @@ grep -q -- '--pages 3-5 /tmp/report.pdf' "$FAKE_LOG" && pass "pages forwarded as
 fresh
 dec=$(input /tmp/report.pdf | FAKE_PAGES=5 run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecision')
 [ "$dec" = deny ] && pass "5 page pdf is denied" || fail "5 page pdf is denied"
-grep -q -- '--json --no-ledger --pages 1-1 /tmp/report.pdf' "$FAKE_LOG" && pass "page count probed with --pages 1-1" || fail "page count probed: $(cat "$FAKE_LOG")"
+grep -q -- '--all-rules --json --no-ledger --pages 1-1 /tmp/report.pdf' "$FAKE_LOG" && pass "page count probed with --pages 1-1" || fail "page count probed: $(cat "$FAKE_LOG")"
 fresh
 err=$(mktemp "$ROOT/err.XXXXXX")
 out=$(input /tmp/report.pdf | FAKE_PAGES=42 run_hook 2>"$err")
 dec=$(printf '%s' "$out" | jq -r '.hookSpecificOutput // empty')
 [ -z "$dec" ] && pass "42 page pdf passes through" || fail "42 page pdf passes through: $out"
 grep -q 'pages' "$err" && grep -q '42' "$err" && pass "big pdf hint names the page count and pages" || fail "big pdf hint: $(cat "$err")"
-grep -q -- '--json --stats' "$FAKE_LOG" && fail "big pdf never fully run" || pass "big pdf never fully run"
+grep -q -- '--all-rules --json --stats' "$FAKE_LOG" && fail "big pdf never fully run" || pass "big pdf never fully run"
 # Ruling 2: the hint is a systemMessage on stdout and names the Bash escape hatch.
 msg=$(printf '%s' "$out" | jq -r '.systemMessage // empty')
-case "$msg" in *"42"*"--pages 1-5 /tmp/report.pdf"*) pass "big pdf systemMessage names --pages 1-5";; *) fail "big pdf systemMessage: $out";; esac
+case "$msg" in *"42"*"--all-rules --pages 1-5 /tmp/report.pdf"*"unknown option --all-rules"*) pass "big pdf systemMessage names --all-rules --pages 1-5 and the old-binary fallback";; *) fail "big pdf systemMessage: $out";; esac
 
 # 9. binary failure on an image: denied in default mode too (NOV-160), the reason and the fix on
 # stderr and in the systemMessage, nothing recorded as a pass-through
@@ -505,7 +505,7 @@ out=$(input /tmp/report.pdf "" '../../evil id' | PATH="$NOBIN_PATH" sh "$hook" 2
 fresh
 o=$(input "-dash.png" | run_hook 2>/dev/null); denied "dash path"
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello world"*) pass "dash path: the redacted text comes back";; *) fail "dash path text: $o";; esac
-grep -qx -- "--json --stats -- $PWD/-dash.png" "$FAKE_LOG" && pass "dash path: binary called with -- before the path" || fail "dash path argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--all-rules --json --stats -- $PWD/-dash.png" "$FAKE_LOG" && pass "dash path: binary called with -- before the path" || fail "dash path argv: $(cat "$FAKE_LOG")"
 grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "dash path: not a pass-through" || pass "dash path: not recorded as a pass-through"
 # An older binary rejects "--" (exit 2, unknown option): that is a failed run, denied for an image.
 fresh
@@ -539,7 +539,7 @@ o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_n
 # PR #21 second review: OCR reads the copy Read will open (.cwd), not the hook's $PWD copy.
 fresh
 o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"x.png"}}' "$T/sess" | run_hook 2>/dev/null)
-grep -qx -- "--json --stats $T/sess/x.png" "$FAKE_LOG" && pass "relative path: binary reads the .cwd copy" || fail "relative path argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--all-rules --json --stats $T/sess/x.png" "$FAKE_LOG" && pass "relative path: binary reads the .cwd copy" || fail "relative path argv: $(cat "$FAKE_LOG")"
 # The dash path's printed commands and allowlist match use .cwd too.
 fresh
 o=$(printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"-dash.png"}}' "$T" | run_hook 2>/dev/null)
@@ -550,14 +550,14 @@ o=$(input "$T/corrupt.png" | FAKE_EXIT=1 FAKE_STDERR="cheapshot: cannot read $T/
 # A normal path is called exactly as before, with no "--", so older binaries keep working.
 fresh
 o=$(input /tmp/shot.png | run_hook 2>/dev/null)
-grep -qx -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "normal path: argv unchanged, no --" || fail "normal path argv: $(cat "$FAKE_LOG")"
+grep -qx -- '--all-rules --json --stats /tmp/shot.png' "$FAKE_LOG" && pass "normal path: argv unchanged, no --" || fail "normal path argv: $(cat "$FAKE_LOG")"
 # PDFs: the page-count probe and the page-range run both put "--" before a dash path.
 fresh
 o=$(input "-r.pdf" | FAKE_PAGES=3 run_hook 2>/dev/null)
-grep -qx -- "--json --no-ledger --pages 1-1 -- $PWD/-r.pdf" "$FAKE_LOG" && grep -qx -- "--json --stats -- $PWD/-r.pdf" "$FAKE_LOG" && pass "dash PDF: probe and run use --" || fail "dash PDF argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--all-rules --json --no-ledger --pages 1-1 -- $PWD/-r.pdf" "$FAKE_LOG" && grep -qx -- "--all-rules --json --stats -- $PWD/-r.pdf" "$FAKE_LOG" && pass "dash PDF: probe and run use --" || fail "dash PDF argv: $(cat "$FAKE_LOG")"
 fresh
 o=$(input "-r.pdf" 2-3 | run_hook 2>/dev/null)
-grep -qx -- "--json --stats --pages 2-3 -- $PWD/-r.pdf" "$FAKE_LOG" && pass "dash PDF with pages: run uses --" || fail "dash PDF pages argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--all-rules --json --stats --pages 2-3 -- $PWD/-r.pdf" "$FAKE_LOG" && pass "dash PDF with pages: run uses --" || fail "dash PDF pages argv: $(cat "$FAKE_LOG")"
 
 # 11. Ruling 3: the hook runs as an executable (no leading sh) from a plugin root that has a space,
 # invoked the way hooks.json may spell it: "${CLAUDE_PLUGIN_ROOT}"/hooks/cheapshot-read.sh and unquoted.
@@ -629,7 +629,7 @@ fresh
 # A path starting with "-" is denied in strict mode too, and reaches the binary only after "--".
 o=$(input "-dash.png" | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null)
 [ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "strict: dash path is denied" || fail "strict: dash path is denied: $o"
-grep -qx -- "--json --stats -- $PWD/-dash.png" "$FAKE_LOG" && pass "strict: dash path reaches the binary only after --" || fail "strict: dash path argv: $(cat "$FAKE_LOG")"
+grep -qx -- "--all-rules --json --stats -- $PWD/-dash.png" "$FAKE_LOG" && pass "strict: dash path reaches the binary only after --" || fail "strict: dash path argv: $(cat "$FAKE_LOG")"
 fresh
 # A good read is unchanged by strict mode.
 dec=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 run_hook 2>/dev/null | jq -r '.hookSpecificOutput.permissionDecisionReason')
@@ -678,7 +678,7 @@ o=$(input /tmp/x.pdf | FAKE_RAW="$(ocr_result '""' true '')" run_hook 2>/dev/nul
 reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
 case "$reason" in *allow*|*mask*) fail "x.pdf image result: deny reason names allow or mask: $reason";; *) pass "x.pdf image result: deny reason names neither allow nor mask";; esac
 grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "x.pdf image result: a deny is not a pass-through" || pass "x.pdf image result: not recorded as a pass-through"
-grep -qx -- '--json --stats /tmp/x.pdf' "$FAKE_LOG" && pass "x.pdf image result: the fake binary was run on it" || fail "x.pdf image result argv: $(cat "$FAKE_LOG")"
+grep -qx -- '--all-rules --json --stats /tmp/x.pdf' "$FAKE_LOG" && pass "x.pdf image result: the fake binary was run on it" || fail "x.pdf image result argv: $(cat "$FAKE_LOG")"
 fresh
 o=$(input /tmp/x.pdf | CHEAPSHOT_STRICT=1 FAKE_RAW="$(ocr_result '""' true '')" run_hook 2>/dev/null); denied "strict: x.pdf with an image result, unknown status, empty"
 # A x.pdf holding a photo-shaped image result gets the photo rule, not a free PDF pass: with
@@ -845,6 +845,45 @@ case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *mask*|*"brew "*) fail "p
 fresh
 o=$(input /tmp/x.pdf | FAKE_RAW="$(OCR_VER=0.6.0 ocr_result '"empty"' true '')" run_hook 2>/dev/null); denied "x.pdf image result on v0.6.0, blank"
 case "$(printf '%s' "$o" | jq -r '.systemMessage')" in *mask*|*"brew "*) fail "x.pdf on v0.6.0: user message names mask or brew: $o";; *) pass "x.pdf on v0.6.0: no mask, no update line";; esac
+
+# 16. CHE-62 (Ryan, Q5: "A. Agents get all rules"): every read passes --all-rules, so presets and
+# switches in rules.json never thin out what an agent sees. A binary older than 0.7.0 rejects the
+# flag; the hook runs the read once more without it (such a binary cannot switch rules off).
+fresh
+o=$(input /tmp/report.pdf | run_hook 2>/dev/null)
+grep -qx -- '--all-rules --json --no-ledger --pages 1-1 /tmp/report.pdf' "$FAKE_LOG" && grep -qx -- '--all-rules --json --stats /tmp/report.pdf' "$FAKE_LOG" \
+  && pass "all-rules: PDF probe and read pass --all-rules" || fail "all-rules PDF argv: $(cat "$FAKE_LOG")"
+[ "$(grep -c -- '--all-rules' "$FAKE_LOG")" = "$(grep -vc -- '--note-passthrough' "$FAKE_LOG")" ] \
+  && pass "all-rules: no read without the flag" || fail "all-rules: a read without the flag: $(cat "$FAKE_LOG")"
+fresh
+err=$(mktemp "$ROOT/err.XXXXXX")
+o=$(input /tmp/shot.png | FAKE_OLD=1 run_hook 2>"$err"); denied "old binary, image"
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"key [AWS_KEY]"*) pass "old binary, image: redacted text, read again without --all-rules";; *) fail "old binary image reason: $o";; esac
+grep -qx -- '--all-rules --json --stats /tmp/shot.png' "$FAKE_LOG" && grep -qx -- '--json --stats /tmp/shot.png' "$FAKE_LOG" \
+  && pass "old binary: tried with the flag, then without" || fail "old binary argv: $(cat "$FAKE_LOG")"
+fresh
+o=$(input /tmp/report.pdf | FAKE_OLD=1 run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"contact [EMAIL]"*) pass "old binary, PDF: redacted text, not pixels";; *) fail "old binary PDF: $o";; esac
+# #42 bot review: with no temp file for stderr (mktemp fails), the retry still runs, so an old
+# binary's PDF read is still redacted text, not pixels.
+fresh
+o=$(input /tmp/report.pdf | TMPDIR=/nonexistent/cheapshot-test FAKE_OLD=1 run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"contact [EMAIL]"*) pass "old binary, no temp file, PDF: redacted text, not pixels";; *) fail "old binary no temp file PDF: $o";; esac
+grep -qx -- '--json --stats /tmp/report.pdf' "$FAKE_LOG" && pass "old binary, no temp file: retried without --all-rules" || fail "old binary no temp file argv: $(cat "$FAKE_LOG")"
+fresh
+o=$(input /tmp/shot.png | TMPDIR=/nonexistent/cheapshot-test run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')" in *"key [AWS_KEY]"*) pass "new binary, no temp file, image: redacted text";; *) fail "new binary no temp file image: $o";; esac
+fresh
+o=$(input /tmp/shot.png | CHEAPSHOT_STRICT=1 FAKE_OLD=1 run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"key [AWS_KEY]"*) pass "strict, old binary: redacted text";; *) fail "strict old binary: $o";; esac
+# Only that exact line retries: any other exit 2 is a failed run (denied for an image).
+fresh
+o=$(input /tmp/shot.png | FAKE_EXIT=2 FAKE_STDERR='cheapshot: unknown option --all-rules-x' run_hook 2>/dev/null); fail_closed "other unknown option" "cheapshot allow '/tmp/shot.png'"
+[ "$(grep -c . "$FAKE_LOG")" -le 2 ] && ! grep -qx -- '--json --stats /tmp/shot.png' "$FAKE_LOG" && pass "other unknown option: no retry" || fail "other unknown option argv: $(cat "$FAKE_LOG")"
+# A strict rules-file error (rules file v2: unknown preset) is a broken rules file: denied, PDF too.
+fresh
+o=$(input /tmp/report.pdf 1-2 | FAKE_EXIT=2 FAKE_STDERR='cheapshot: rules file: unknown preset "nope"' run_hook 2>/dev/null)
+[ "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = deny ] && pass "v2 rules-file error denies a PDF too" || fail "v2 rules error PDF: $o"
 
 echo "$fails failure(s)"
 [ "$fails" = 0 ]

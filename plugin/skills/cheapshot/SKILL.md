@@ -24,12 +24,12 @@ The user can turn that off for a session with `CHEAPSHOT_PASSTHROUGH=1`.
 ## Commands
 
 ```bash
-cheapshot shot.png                  # redacted text of one image
-cheapshot --json --stats shot.png   # text, lines with boxes, redaction counts; savings on stderr
-cheapshot --newest ~/Desktop 2      # newest two images or PDFs in a folder
-cheapshot --pages 3-5 report.pdf    # a page range; the Claude Code hook asks for one on PDFs over 20 pages
-cheapshot --video screen.mp4        # timestamped transcript of a screen recording
-cheapshot --text notes.txt          # redact text with no OCR ("-" reads stdin)
+cheapshot --all-rules shot.png                  # redacted text of one image
+cheapshot --all-rules --json --stats shot.png   # text, lines with boxes, redaction counts; savings on stderr
+cheapshot --all-rules --newest ~/Desktop 2      # newest two images or PDFs in a folder
+cheapshot --all-rules --pages 3-5 report.pdf    # a page range; the Claude Code hook asks for one on PDFs over 20 pages
+cheapshot --all-rules --video screen.mp4        # timestamped transcript of a screen recording
+cheapshot --all-rules --text notes.txt          # redact text with no OCR ("-" reads stdin)
 cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
@@ -37,8 +37,14 @@ cheapshot mask shot.png             # a copy with redacted and low-confidence li
 cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels (an image arrives as a metadata-free copy)
 ```
 
-The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot report.pdf`
+The Claude Code hook asks for a range on PDFs over 20 pages; from Bash, `cheapshot --all-rules report.pdf`
 reads every page.
+
+Always pass `--all-rules` when you run cheapshot from Bash for yourself: it ignores any preset
+or switch in the user's rules.json, so you get every built-in redaction rule, the same as the
+Read hook and the MCP server. If the binary answers `cheapshot: unknown option --all-rules`, it
+is older than 0.7.0 and cannot switch rules off at all: run the same command without the flag.
+`cheapshot mask` always runs every rule and needs no flag.
 
 Settings the user controls (never set or unset them yourself):
 

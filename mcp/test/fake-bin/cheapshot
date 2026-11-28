@@ -6,6 +6,12 @@
 # FAKE_PARTIAL=1 (one good result plus one {"file","error"} entry, exit 1), FAKE_STDERR (stderr line on failure). A --newest run answers
 # with the PDF result when FAKE_PAGES is set, else the image result.
 [ -n "$FAKE_LOG" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
+# FAKE_OLD=1: a binary older than 0.7.0, which rejects --all-rules the way the real parser does.
+if [ "${FAKE_OLD:-0}" = "1" ]; then
+  case " $* " in *" --all-rules "*)
+    printf '%s\n' "cheapshot: unknown option --all-rules" "try: cheapshot --help" >&2; exit 2 ;;
+  esac
+fi
 exit_code="${FAKE_EXIT:-0}"
 if [ "$exit_code" != "0" ]; then
   echo "${FAKE_STDERR:-cheapshot: fake failure}" >&2

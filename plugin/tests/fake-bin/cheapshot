@@ -3,13 +3,20 @@
 # Never runs OCR. Env: FAKE_PAGES (PDF page count, default 5), FAKE_EXIT (exit code, default 0),
 # FAKE_LOG (append argv here, one line per call), FAKE_RAW (print this on stdout verbatim, nothing if empty,
 # and exit 0, for malformed-output tests), FAKE_EMPTY_TEXT=1 (every result has text ""),
-# FAKE_PARTIAL=1 (one good result plus one {"file","error"} entry, exit 1), FAKE_STDERR (stderr line on failure). A --newest run answers
+# FAKE_PARTIAL=1 (one good result plus one {"file","error"} entry, exit 1), FAKE_STDERR (stderr line on failure),
+# FAKE_OLD=1 (reject --all-rules like a pre-0.7.0 binary). A --newest run answers
 # with the PDF result when FAKE_PAGES is set, else the image result. FAKE_VERSION is the version
 # every output reports (--version and the JSON "version" field), default 0.6.1, the first
 # release whose `cheapshot mask` the hook names. The canned image result still carries no
 # ocr_status (the legacy shape), so the version and the result shape are tested apart.
 [ -n "$FAKE_LOG" ] && printf '%s\n' "$*" >> "$FAKE_LOG"
 v="${FAKE_VERSION:-0.6.1}"
+# FAKE_OLD=1: a binary older than 0.7.0, which rejects --all-rules the way the real parser does.
+if [ "${FAKE_OLD:-0}" = "1" ]; then
+  case " $* " in *" --all-rules "*)
+    printf '%s\n' "cheapshot: unknown option --all-rules" "try: cheapshot --help" >&2; exit 2 ;;
+  esac
+fi
 exit_code="${FAKE_EXIT:-0}"
 if [ "$exit_code" != "0" ]; then
   echo "${FAKE_STDERR:-cheapshot: fake failure}" >&2

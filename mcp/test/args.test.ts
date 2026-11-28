@@ -6,17 +6,17 @@ import { ocrArgs, videoArgs, ledgerArgs, PAGE_CAP, rawAllowed } from "../src/arg
 const OPTED_IN = { CHEAPSHOT_ALLOW_RAW: "1" };
 
 test("ocr: paths with defaults", () => {
-  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] }), ["--json", "/tmp/a.png", "/tmp/b.jpg"]);
+  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] }), ["--json", "--all-rules", "/tmp/a.png", "/tmp/b.jpg"]);
 });
 
 test("ocr: raw, min_confidence, pages", () => {
   assert.deepEqual(ocrArgs({ paths: ["/tmp/r.pdf"], raw: true, min_confidence: 0.5, pages: "3-5" }, OPTED_IN),
-    ["--json", "--raw", "--min-conf", "0.5", "--pages", "3-5", "/tmp/r.pdf"]);
+    ["--json", "--all-rules", "--raw", "--min-conf", "0.5", "--pages", "3-5", "/tmp/r.pdf"]);
 });
 
 test("ocr: newest with dir and count", () => {
   assert.deepEqual(ocrArgs({ newest: { dir: "/Users/me/Desktop", count: 2 } }),
-    ["--json", "--newest", "/Users/me/Desktop", "2"]);
+    ["--json", "--all-rules", "--newest", "/Users/me/Desktop", "2"]);
 });
 
 test("ocr: neither paths nor newest is an error", () => {
@@ -30,9 +30,9 @@ test("ocr: pages must look like N or N-M", () => {
 });
 
 test("video: defaults and every flag", () => {
-  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }), ["--json", "--video", "/tmp/s.mp4"]);
+  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }), ["--json", "--all-rules", "--video", "/tmp/s.mp4"]);
   assert.deepEqual(videoArgs({ path: "/tmp/s.mp4", scene: 0.3, max_frames: 50, dedupe: 0.8, raw: true }, OPTED_IN),
-    ["--json", "--raw", "--scene", "0.3", "--max-frames", "50", "--dedupe", "0.8", "--video", "/tmp/s.mp4"]);
+    ["--json", "--all-rules", "--raw", "--scene", "0.3", "--max-frames", "50", "--dedupe", "0.8", "--video", "/tmp/s.mp4"]);
 });
 
 test("ledger: with and without days", () => {
@@ -64,7 +64,7 @@ test("ocr: a path that starts with a dash is refused", () => {
 // path from parsing as a flag.
 test("ocr: paths are sent without an end-of-options marker", () => {
   const args = ocrArgs({ paths: ["/tmp/a.png", "/tmp/b.jpg"] });
-  assert.deepEqual(args, ["--json", "/tmp/a.png", "/tmp/b.jpg"]);
+  assert.deepEqual(args, ["--json", "--all-rules", "/tmp/a.png", "/tmp/b.jpg"]);
   assert.ok(!args.includes("--"), "older binaries reject --");
   assert.ok(!args.includes("--raw"), "redaction stays on by default");
 });
@@ -80,7 +80,7 @@ test("ocr: newest dir must be an absolute path", () => {
   assert.throws(() => ocrArgs({ newest: { dir: "shots", count: 2 } }), /must be an absolute path/);
   assert.throws(() => ocrArgs({ newest: { dir: "." } }), /must be an absolute path/);
   assert.throws(() => ocrArgs({ newest: { dir: "~" } }), /must be an absolute path/);
-  assert.deepEqual(ocrArgs({ newest: { dir: "/tmp/shots" } }), ["--json", "--newest", "/tmp/shots"]);
+  assert.deepEqual(ocrArgs({ newest: { dir: "/tmp/shots" } }), ["--json", "--all-rules", "--newest", "/tmp/shots"]);
 });
 
 test("video: a path that starts with a dash is refused", () => {
@@ -101,6 +101,16 @@ test("raw: refused unless CHEAPSHOT_ALLOW_RAW=1 is in the server environment", (
 });
 
 test("raw: false or absent never needs the opt-in", () => {
-  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png"], raw: false }, {}), ["--json", "/tmp/a.png"]);
-  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }, {}), ["--json", "--video", "/tmp/s.mp4"]);
+  assert.deepEqual(ocrArgs({ paths: ["/tmp/a.png"], raw: false }, {}), ["--json", "--all-rules", "/tmp/a.png"]);
+  assert.deepEqual(videoArgs({ path: "/tmp/s.mp4" }, {}), ["--json", "--all-rules", "--video", "/tmp/s.mp4"]);
+});
+
+// CHE-62 (Ryan, Q5: "A. Agents get all rules"): every read the model asks for passes --all-rules,
+// raw or not, so rules.json switches never thin out what it sees. The ledger is not a read.
+test("args: every read passes --all-rules", () => {
+  assert.ok(ocrArgs({ paths: ["/tmp/a.png"] }, {}).includes("--all-rules"));
+  assert.ok(ocrArgs({ newest: { dir: "/tmp/shots" } }, {}).includes("--all-rules"));
+  assert.ok(ocrArgs({ paths: ["/tmp/a.png"], raw: true }, { CHEAPSHOT_ALLOW_RAW: "1" }).includes("--all-rules"));
+  assert.ok(videoArgs({ path: "/tmp/s.mp4" }, {}).includes("--all-rules"));
+  assert.ok(!ledgerArgs({}).includes("--all-rules"));
 });

@@ -1,0 +1,5 @@
+user ryan@example.com at 192.168.1.10
+password=[SECRET]
+card [CARD]
+call [PHONE]
+ticket INT-123456 badge E-654321
