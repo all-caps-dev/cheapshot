@@ -695,6 +695,14 @@ o=$(input /tmp/x.pdf 1-1 | FAKE_RAW="$(pdfshape 'hello' 0)" run_hook 2>/dev/null
 case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello"*"may be missing"*) pass "x.pdf, .source.pages 0, with text: flagged";; *) fail "x.pdf, .source.pages 0, with text flag: $o";; esac
 fresh
 o=$(input /tmp/x.pdf 1-1 | CHEAPSHOT_STRICT=1 FAKE_RAW="$(pdfshape '' null)" run_hook 2>/dev/null); denied "strict: x.pdf, .source.pages null, empty"
+# mask refuses a .pdf name, so neither copy offers it there, whatever the result's shape.
+case "$(printf '%s' "$o" | jq -r '.systemMessage // empty')" in *"cheapshot mask"*) fail "x.pdf, empty: user message must not offer mask: $o";; *) pass "x.pdf, empty: user message offers no mask";; esac
+fresh
+o=$(input /tmp/x.pdf 1-1 | FAKE_RAW="$(pdfshape 'hello' 0)" run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask"*) fail "x.pdf, ambiguous, with text: reason must not offer mask: $o";; *"ask the user to approve it."*) pass "x.pdf, ambiguous, with text: PDF ask-the-user line";; *) fail "x.pdf, ambiguous, with text line: $o";; esac
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(ocr_result '"ok"' false 'hello')" run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask"*) fail "x.pdf, image result, with text: reason must not offer mask: $o";; *"ask the user to approve it."*) pass "x.pdf, image result, with text: PDF ask-the-user line";; *) fail "x.pdf, image result, with text line: $o";; esac
 
 echo "$fails failure(s)"
 [ "$fails" = 0 ]

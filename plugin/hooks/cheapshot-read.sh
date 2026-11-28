@@ -373,8 +373,11 @@ if [ -z "$text" ]; then
     *)
       why="no text in $path, and cheapshot did not report a usable OCR status" ;;
   esac
+  # mask refuses PDFs (Runner.swift), so a .pdf name never gets the mask hint, whatever its result.
+  maskhint=" (or cheapshot mask $qpath for a copy with any text it finds blacked out)"
+  [ "$ext" = pdf ] && maskhint=""
   deny "cheapshot: $why, so the pixels were kept out. Tell the user; do not read it another way." \
-       "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath (or cheapshot mask $qpath for a copy with any text it finds blacked out).$extra"
+       "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath$maskhint.$extra"
   exit 0
 fi
 
@@ -395,7 +398,9 @@ tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 # Shell-quoted so a person (or the agent's Bash tool) can paste it: macOS screenshot names
 # carry spaces and U+202F.
 qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
-if [ "$is_pdf" = pdf ]; then
+# The result shape picks the checks above, but mask refuses any .pdf name (Runner.swift checks the
+# extension), so a .pdf with an image-shaped or ambiguous result still gets the ask-the-user line.
+if [ "$is_pdf" = pdf ] || [ "$ext" = pdf ]; then
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
 else
   # NOV-95: for an image, point the agent at the masked copy first. `cheapshot mask` paints every
