@@ -91,6 +91,27 @@ final class GoldenRulesTests: XCTestCase {
         XCTAssertEqual(Redactor(selection: s).redact("mail ryan@example.com").text, "mail [STAFF]")
     }
 
+    /// Bot review on #38: switching a built-in off by name never drops a custom rule that
+    /// shares the name.
+    func testCustomRuleNamedLikeABuiltinSurvivesSecretsOnly() throws {
+        let s = try RuleSelection.resolve(try contents(#"{"preset": "secrets-only", "rules": [{"name": "EMAIL", "pattern": "staff-[0-9]{4}"}]}"#))
+        XCTAssertTrue(s.disabled.contains("EMAIL"))
+        XCTAssertEqual(s.rules.filter { $0.name == "EMAIL" }.map(\.pattern), ["staff-[0-9]{4}"])
+        XCTAssertEqual(Redactor(selection: s).redact("id staff-1234").text, "id [EMAIL]")
+    }
+
+    /// Bot review on #40: BANK_ACCT's MICR cue is the [ROUTING] placeholder, so switching ROUTING
+    /// off also stops that cue. Pinned here, and said in the ROUTING description, so it is known.
+    func testRoutingOffAlsoStopsTheMICRCue() throws {
+        let micr = "021000021 123456789012"
+        XCTAssertEqual(Redactor(selection: .everything).redact(micr).text, "[ROUTING] [BANK_ACCT]")
+        let s = try RuleSelection.resolve(try contents(#"{"disabled": ["ROUTING"]}"#))
+        XCTAssertEqual(Redactor(selection: s).redact(micr).text, micr)
+        // An account word still works with ROUTING off.
+        XCTAssertEqual(Redactor(selection: s).redact("acct 123456789012").text, "acct [BANK_ACCT]")
+        XCTAssertTrue(RuleCatalog.entry(named: "ROUTING")!.description.contains("BANK_ACCT"))
+    }
+
     func testBuiltinOrderIsKept() throws {
         let s = try RuleSelection.resolve(try contents(#"{"preset": "secrets-only"}"#))
         let expected = Rule.builtin.filter { RuleCatalog.entry(named: $0.name)?.group == .credentials }

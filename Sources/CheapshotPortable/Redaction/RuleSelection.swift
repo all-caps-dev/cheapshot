@@ -52,7 +52,9 @@ public struct RuleSelection {
     /// - `presetOverride`: `--preset`. It replaces the file's `preset`; the file's `disabled`
     ///   list still applies. A name that is neither built-in nor one of the file's presets
     ///   throws, for a named file and the default file alike (plan 4.4, last row).
-    /// - `policy`: see ``RuleTogglePolicy``. ``RuleTogglePolicy/allRules`` wins over everything.
+    /// - `policy`: see ``RuleTogglePolicy``. ``RuleTogglePolicy/allRules`` wins over every toggle
+    ///   and preset. It does not hide a typo: an unknown `--preset` still throws under it, on
+    ///   purpose, and the hook and MCP server never pass `--preset`.
     public static func resolve(_ contents: RuleFileContents?, presetOverride: String? = nil,
                                policy: RuleTogglePolicy = .honour) throws -> RuleSelection {
         let custom = contents?.customRules ?? []

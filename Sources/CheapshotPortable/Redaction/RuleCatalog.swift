@@ -41,7 +41,8 @@ public struct RuleCatalogEntry: Equatable, Sendable {
 public struct RulePreset: Equatable, Sendable {
     public let name: String
     public let label: String
-    /// Built-in names this preset switches off. Never holds a custom rule name.
+    /// Built-in names this preset switches off. Only built-ins are ever filtered by these names:
+    /// a custom rule that shares a built-in's name (say, its own EMAIL) keeps running.
     public let disabled: Set<String>
 }
 
@@ -79,7 +80,7 @@ public enum RuleCatalog {
         e("SSN", .personal, "US Social Security number", "US Social Security numbers (123-45-6789)."),
         e("PRODUCT_KEY", .credentials, "Product key", "Windows and Office product keys (five groups of five)."),
         e("IBAN", .financial, "IBAN", "International bank account numbers that pass the IBAN checksum."),
-        e("ROUTING", .financial, "US routing number", "US ABA routing numbers that pass the checksum."),
+        e("ROUTING", .financial, "US routing number", "US ABA routing numbers that pass the checksum. Off also stops BANK_ACCT catching an account number that follows one with no account word."),
         e("CARD", .financial, "Card number", "Payment card numbers that pass the Luhn check."),
         e("BANK_ACCT", .financial, "Bank account number", "Account numbers next to an account word or a routing number."),
         e("PHONE", .personal, "Phone number", "North American and international (+country) phone numbers."),
@@ -102,12 +103,17 @@ public enum RuleCatalog {
     /// Every built-in name, in catalog order.
     public static var names: [String] { entries.map(\.name) }
 
+    /// Lookups take the exact ASCII spelling in any case and nothing else. Full Unicode case
+    /// mapping would turn lookalikes into real names ("\u{17F}ecret" uppercases to SECRET, the
+    /// Kelvin sign lowercases to k), so a line that reads as a typo would switch a rule off.
     public static func entry(named name: String) -> RuleCatalogEntry? {
-        byName[name.uppercased()]
+        guard isASCII(name) else { return nil }
+        return byName[name.uppercased()]
     }
 
     public static func preset(named name: String) -> RulePreset? {
-        presets.first { $0.name == name.lowercased() }
+        guard isASCII(name) else { return nil }
+        return presets.first { $0.name == name.lowercased() }
     }
 
     /// The built-in names in a group.
@@ -119,6 +125,7 @@ public enum RuleCatalog {
     /// `group:<group>` gives every name in the group. Nil means the item names nothing, and the
     /// caller decides whether that is an error (a named file) or a warning (the default file).
     public static func resolve(_ item: String) -> [String]? {
+        guard isASCII(item) else { return nil }
         let lower = item.lowercased()
         if lower.hasPrefix("group:") {
             guard let g = RuleGroup(rawValue: String(lower.dropFirst("group:".count))) else { return nil }
@@ -126,6 +133,9 @@ public enum RuleCatalog {
         }
         return entry(named: item).map { [$0.name] }
     }
+
+    /// True when every scalar is ASCII. Checked before any case folding.
+    static func isASCII(_ s: String) -> Bool { s.unicodeScalars.allSatisfy(\.isASCII) }
 
     private static let byName: [String: RuleCatalogEntry] =
         Dictionary(uniqueKeysWithValues: entries.map { ($0.name, $0) })
