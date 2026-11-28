@@ -242,8 +242,14 @@ final class MaskTests: XCTestCase {
         try Data("n".utf8).write(to: recent)
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
                                               ofItemAtPath: old.path)
+        // The link points at an old file outside the folder: a sweep that followed links would
+        // see an old regular file and remove the link (or worse, the target).
+        let outside = tmp.appendingPathComponent("outside-old.png")
+        try Data("t".utf8).write(to: outside)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
+                                              ofItemAtPath: outside.path)
         let link = dir.appendingPathComponent("link.png")
-        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: old.path)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: outside.path)
         let sub = dir.appendingPathComponent("older-dir")
         try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
@@ -254,6 +260,7 @@ final class MaskTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: recent.path), "a recent file stays")
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path), "an old regular file goes")
         XCTAssertNotNil(try? FileManager.default.destinationOfSymbolicLink(atPath: link.path), "a symlink stays")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path), "a link's target is never touched")
         XCTAssertTrue(FileManager.default.fileExists(atPath: sub.path), "a subdirectory stays")
     }
 
@@ -262,7 +269,8 @@ final class MaskTests: XCTestCase {
     func testMaskRunSweepsTheDefaultFolderOnly() async throws {
         let fx = try makeFixture(lines: ["call " + Self.fakePhone])
         let maskedDir = tmp.appendingPathComponent("cheapshot-masked")
-        try FileManager.default.createDirectory(at: maskedDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: maskedDir, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
         let old = maskedDir.appendingPathComponent("old-masked.png")
         let recent = maskedDir.appendingPathComponent("recent-masked.png")
         try Data("o".utf8).write(to: old)
@@ -286,6 +294,29 @@ final class MaskTests: XCTestCase {
         XCTAssertEqual(explicit.code, 0, explicit.err)
         XCTAssertTrue(FileManager.default.fileExists(atPath: staleBeside.path),
                       "an --out folder is never swept")
+    }
+
+    /// CS-18: a symlink planted at $TMPDIR/cheapshot-masked is refused before any sweep, so
+    /// old files in the folder it points at survive and nothing is written or allowed.
+    func testPlantedSymlinkForTheDefaultFolderIsRefused() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let elsewhere = tmp.appendingPathComponent("someone-elses")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let victim = elsewhere.appendingPathComponent("old-photo.png")
+        try Data("v".utf8).write(to: victim)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
+                                              ofItemAtPath: victim.path)
+        try FileManager.default.createSymbolicLink(atPath: tmp.appendingPathComponent("cheapshot-masked").path,
+                                                   withDestinationPath: elsewhere.path)
+
+        let r = await run(["mask", fx.url.path])
+        XCTAssertEqual(r.code, 1, r.out)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: victim.path), "the link's folder is never swept")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: elsewhere.path), ["old-photo.png"],
+                       "nothing is written through the link")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tmp.appendingPathComponent("cheapshot-allow").path),
+                       "a refused mask allows nothing")
     }
 
     func testUsageErrors() async throws {

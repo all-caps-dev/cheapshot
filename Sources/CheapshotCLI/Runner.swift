@@ -281,7 +281,8 @@ public enum CLI {
         return nil
     }
 
-    /// Deletes regular files in `dir` last changed more than `age` seconds ago.
+    /// Deletes regular files in `dir` last changed more than `age` seconds ago. attributesOfItem
+    /// reads the entry itself (lstat), so symlinks and directories are skipped, never followed.
     static func sweepStale(in dir: URL, olderThan age: TimeInterval) {
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
@@ -290,7 +291,9 @@ public enum CLI {
             let p = dir.appendingPathComponent(name).path
             guard let a = try? fm.attributesOfItem(atPath: p), a[.type] as? FileAttributeType == .typeRegular,
                   let m = a[.modificationDate] as? Date, m < cutoff else { continue }
-            try? fm.removeItem(atPath: p)
+            // unlink, not removeItem: if the entry was swapped for a directory after the check,
+            // unlink fails instead of deleting a tree, and a symlink is removed, never followed.
+            unlink(p)
         }
     }
 
@@ -379,13 +382,19 @@ public enum CLI {
         }
         // CS-18: the default folder's stale copies go before a new one lands. Only that folder
         // is ever swept; an explicit --out directory is the caller's, and is left alone.
+        // ensurePrivateDir first: a symlink planted at $TMPDIR/cheapshot-masked (or a folder
+        // another user owns) is refused, so the sweep can never list and delete files elsewhere.
+        let dir = dest.deletingLastPathComponent()
         if out == nil {
-            sweepStale(in: dest.deletingLastPathComponent(), olderThan: maskSweepAge)
+            if let why = ensurePrivateDir(dir) { return fail(why) }
+            sweepStale(in: dir, olderThan: maskSweepAge)
         }
         let digest: String
         do {
-            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                                    attributes: [.posixPermissions: 0o700])
+            if out != nil {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+            }
             let png = try Masker.pngData(result.image)
             // writePrivateFile: mode 0600, O_EXCL refuses an existing file (the source, or
             // anything already at --out) and O_NOFOLLOW a symlink, so nothing is overwritten.
