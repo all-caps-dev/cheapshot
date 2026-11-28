@@ -68,7 +68,7 @@ jobs:
       # On Windows, Package.swift declares only CheapshotPortable and its tests.
       - name: Build the portable target
         run: swift build --target CheapshotPortable
-      # The script fails unless exactly 61 tests ran and testGoldenCases passed: swift test
+      # The script fails unless exactly 62 tests ran and testGoldenCases passed: swift test
       # exits 0 when its filter matches nothing. Git Bash runs the POSIX sh script.
       - name: Redaction tests (golden cases, redactor, validators, rule files)
         shell: bash
