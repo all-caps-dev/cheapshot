@@ -67,7 +67,8 @@ public enum RuleFile {
     /// | unknown `preset`             | throws                | warns, preset is `everything` |
     /// | unknown name in `disabled` (or in a user preset) | throws | warns, that name is ignored |
     /// | a user preset named like a built-in one | throws     | warns, the user preset is ignored |
-    /// | unknown top-level key        | ignored               | ignored                       |
+    /// | unknown top-level key (a misspelt `rules` would drop every custom rule) | throws | warns, the key is ignored |
+    /// | an object with `version` below 2 | throws            | throws, same                  |
     ///
     /// A version 1 array gives contents with no preset and nothing disabled, so it behaves
     /// exactly as before.
@@ -89,7 +90,11 @@ public enum RuleFile {
         catch { throw LoadError(message: "rules file object is malformed: \(describe(error))") }
 
         let version = obj.version ?? currentVersion
-        guard version >= 1 else { throw LoadError(message: "rules file version \(version) is not valid") }
+        // Version 1 is the plain array and nothing else, so `version` stays a reliable switch for
+        // callers: an object never reads as "version 1, nothing switched off".
+        guard version >= currentVersion else {
+            throw LoadError(message: "rules file object version \(version) is not valid; the object form is version \(currentVersion) (version 1 is the plain array)")
+        }
         guard version <= currentVersion else {
             throw LoadError(message: "rules file version \(version) is newer than this cheapshot understands (\(currentVersion)); upgrade cheapshot")
         }
@@ -111,6 +116,15 @@ public enum RuleFile {
                 }
             }
             return out
+        }
+
+        // An unknown top-level key is never silent: custom rules live under `rules`, so a typo
+        // such as "Rules" or "rule" would otherwise load a file with none of them.
+        if let dict = top as? [String: Any] {
+            for key in dict.keys.sorted() where !knownKeys.contains(key) {
+                let hint = knownKeys.first { $0 == key.lowercased() }.map { " (did you mean \"\($0)\"?)" } ?? ""
+                try soft("unknown top-level key \"\(key)\"\(hint); known keys are \(knownKeys.joined(separator: ", "))")
+            }
         }
 
         var userPresets: [String: Set<String>] = [:]
@@ -145,6 +159,9 @@ public enum RuleFile {
     }
 
     // MARK: - helpers
+
+    /// The object form's keys, in the order the docs list them.
+    static let knownKeys = ["version", "preset", "disabled", "presets", "rules"]
 
     private static func read(_ url: URL) throws -> Data {
         do { return try Data(contentsOf: url) }

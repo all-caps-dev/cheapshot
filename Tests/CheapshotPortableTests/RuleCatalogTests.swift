@@ -45,4 +45,17 @@ final class RuleCatalogTests: XCTestCase {
         XCTAssertNil(RuleCatalog.resolve("NOT_A_RULE"))
         XCTAssertNil(RuleCatalog.resolve(""))
     }
+
+    /// Bot review on #38: Unicode lookalikes must not fold into real names.
+    func testNonASCIILookalikesResolveToNothing() {
+        XCTAssertNil(RuleCatalog.resolve("\u{17F}ecret"))          // long s -> SECRET under uppercased()
+        XCTAssertNil(RuleCatalog.resolve("\u{131}pv4"))            // dotless i -> IPV4
+        XCTAssertNil(RuleCatalog.resolve("group:networ\u{212A}"))  // Kelvin sign -> k
+        XCTAssertNil(RuleCatalog.entry(named: "\u{17F}ecret"))
+        XCTAssertNil(RuleCatalog.preset(named: "\u{17F}ecrets-only"))
+        XCTAssertNil(RuleCatalog.preset(named: "everyt\u{0130}ng"))  // dotted capital I
+        // The plain ASCII spellings still work in any case.
+        XCTAssertEqual(RuleCatalog.resolve("Secret"), ["SECRET"])
+        XCTAssertNotNil(RuleCatalog.preset(named: "SECRETS-ONLY"))
+    }
 }
