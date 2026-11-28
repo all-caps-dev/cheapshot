@@ -6,7 +6,7 @@ final class VersionTests: XCTestCase {
     // Moved from RedactorTests when redaction split into CheapshotPortable: the version lives
     // in CheapshotCore. docs/release.md bumps this number at each release.
     func testVersionConstant() {
-        XCTAssertEqual(cheapshotVersion, "0.6.0")
+        XCTAssertEqual(cheapshotVersion, "0.6.1")
     }
 
     func testUnstampedVersionIsTheBaseVersion() {
