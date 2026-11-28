@@ -211,6 +211,15 @@ final class RedactorTests: XCTestCase {
             "pg://" + String(repeating: "u", count: n),
             String(repeating: "x://" + String(repeating: "u", count: 200), count: n / 204),
             String(repeating: "(x://u:1", count: n / 8),
+            // CS-05 gap 4: fence lines (builtins never take the fence-free second reading, so
+            // these must cost what the same text without fences costs). Many fence lines, many
+            // hits between them, one huge fence line, backtick runs that are not fences, and a
+            // heavy shape inside a fence.
+            String(repeating: "```\n", count: n / 4),
+            String(repeating: "a@b.io\n```\n", count: n / 11),
+            String(repeating: "~", count: n),
+            String(repeating: "```a`\n", count: n / 6),
+            "```\n" + String(repeating: "token: ", count: n / 7) + "\n```",
         ]
         let redactor = Redactor()
         var slowest = (0.0, "")
@@ -241,5 +250,178 @@ final class RedactorTests: XCTestCase {
             if elapsed > slowest.0 { slowest = (elapsed, String(shape.prefix(24))) }
         }
         print("slowest 100k shape: \(slowest.1.debugDescription) \(String(format: "%.3f", slowest.0))s")
+    }
+    // CS-05 gap 4: a two-line custom rule still matches when a code-fence line sits between its
+    // two lines, as `Layout.text` puts one after a fenced line. Fences of every shape, a
+    // surrogate pair before the hit (UTF-16 offsets), and a rule that targets fences itself.
+    func testCustomRuleSeesPastCodeFences() throws {
+        let hex = "b1946ac924" + "92d2347f2a"
+        let json = try JSONSerialization.data(withJSONObject: [
+            ["name": "MYCREDS", "pattern": #"creds-begin\n[0-9a-f]{20}"#],
+            ["name": "CODEBLOCK", "pattern": #"(?s)~~~~.*?~~~~"#],
+            ["name": "FOOPW", "pattern": #"foo\npassword"#],
+            ["name": "AFTER", "pattern": #"(?<=after-marker\n)[0-9a-f]{20}"#],
+        ])
+        let r = Redactor(customRules: try RuleFile.parse(json))
+        func line(_ n: Int, _ text: String, fenced: Bool) -> RenderedLine {
+            RenderedLine(n: n, text: text, bbox: .zero, confidence: 1, fenced: fenced)
+        }
+        let laidOut = r.redact(Layout.text([line(1, "creds-begin", fenced: true), line(2, hex, fenced: false)]))
+        XCTAssertEqual(laidOut.text, "```\n[MYCREDS]")
+        XCTAssertEqual(laidOut.report.counts["MYCREDS"], 1)
+        XCTAssertEqual(r.redact("```swift\n\u{1F511} creds-begin\n```\n\(hex) tail").text, "```swift\n\u{1F511} [MYCREDS] tail")
+        XCTAssertEqual(r.redact("creds-begin\r\n  ~~~\r\n```\n\(hex)").text, "creds-begin\r\n  ~~~\r\n```\n\(hex)",
+                       "a CR before the newline is not part of the rule, so it does not match either way")
+        XCTAssertEqual(r.redact("creds-begin\n  ~~~ text\r\n```\n\(hex)").text, "[MYCREDS]")
+        // Not fences: four spaces of indent, two backticks, a backtick after the run.
+        for notFence in ["    ```", "``", "```a`b"] {
+            XCTAssertEqual(r.redact("creds-begin\n\(notFence)\n\(hex)").text, "creds-begin\n\(notFence)\n\(hex)")
+        }
+        // A rule that matches the fences themselves still does, counted once.
+        let block = r.redact("a\n~~~~\npassword-less text\n~~~~\nb")
+        XCTAssertEqual(block.text, "a\n[CODEBLOCK]\nb")
+        XCTAssertEqual(block.report.counts["CODEBLOCK"], 1)
+        // A hit inside a fenced block, which both readings see, is replaced and counted once.
+        let hexRule = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "HEX", "pattern": "[0-9a-f]{20}"],
+        ])))
+        let inside = hexRule.redact("```\n\(hex)\n```")
+        XCTAssertEqual(inside.text, "```\n[HEX]\n```")
+        XCTAssertEqual(inside.report.counts["HEX"], 1)
+        // The fence-free reading runs after the builtins, so a custom rule that crosses a fence
+        // to eat a builtin's cue (`password`) cannot bring the builtin's value back.
+        let cue = r.redact("foo\n```\npassword: hunter2abc9").text
+        XCTAssertFalse(cue.contains("hunter2abc9"), cue.debugDescription)
+        XCTAssertEqual(cue, "[FOOPW]: [SECRET]")
+        // A rule that only looks across the fence (a lookbehind) is caught too, and the fence
+        // line stays because the hit does not cover it.
+        XCTAssertEqual(r.redact("```\nafter-marker\n```\n\(hex)").text, "```\nafter-marker\n```\n[AFTER]")
+    }
+
+    // The fence-free reading for a custom rule stays linear on fence-heavy input: many fence
+    // lines, each crossed by a hit.
+    func testCustomRuleAcrossManyFencesIsFast() throws {
+        let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "PAIR", "pattern": #"k\nv"#],
+        ])))
+        let n = 100_000
+        let text = String(repeating: "k\n```\nv\n", count: n / 8)
+        let start = Date()
+        let out = r.redact(text)
+        let elapsed = Date().timeIntervalSince(start)
+        #if os(Windows)
+        let limit = 20.0
+        #elseif targetEnvironment(simulator)
+        let limit = 3.0
+        #else
+        let limit = 2.0
+        #endif
+        XCTAssertLessThan(elapsed, limit, "took \(elapsed)s")
+        XCTAssertEqual(out.report.counts["PAIR"], n / 8)
+        XCTAssertFalse(out.text.contains("k\n"))
+    }
+
+    // The fence-free second reading must not change what the builtins do: every golden case
+    // with a fence line before, between and after each of its lines redacts to its expected
+    // output once the fence lines are taken back out.
+    func testBuiltinsRedactTheSameAcrossFences() throws {
+        let root = try XCTUnwrap(Bundle.module.url(forResource: "Golden", withExtension: nil))
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("cases").path)
+            .filter { $0.hasSuffix(".txt") }.sorted()
+        XCTAssertFalse(names.isEmpty)
+        let redactor = Redactor()
+        func chomp(_ s: String) -> String { s.hasSuffix("\n") ? String(s.dropLast()) : s }
+        for name in names {
+            let input = chomp(GoldenTests.assemble(try String(contentsOf: root.appendingPathComponent("cases/\(name)"), encoding: .utf8)))
+            let expected = chomp(try String(contentsOf: root.appendingPathComponent("expected/\(name)"), encoding: .utf8))
+            let fenced = (["```"] + input.components(separatedBy: "\n").flatMap { [$0, "```"] }).joined(separator: "\n")
+            let result = redactor.redact(fenced)
+            let out = result.text.components(separatedBy: "\n").filter { $0 != "```" }
+            XCTAssertEqual(out.joined(separator: "\n"), expected, "golden case \(name) inside fences")
+            XCTAssertEqual(result.report, redactor.redact(input).report, "golden case \(name) counts inside fences")
+        }
+    }
+
+    // CS-05 gap 4, review fix: a custom rule reads the same text across a fence as without one.
+    // Its first-line cue here is also a builtin's (PRIVATE_KEY), and the builtins run after the
+    // custom rules, so a reading that waited for them saw `[PRIVATE_KEY]` and left the key body.
+    // Secret-shaped strings are joined at runtime (GoldenTests.joinMarker), as elsewhere.
+    func testCustomRuleBeatsBuiltinThatTakesItsCueAcrossAFence() throws {
+        let m = GoldenTests.joinMarker
+        let header = GoldenTests.assemble("-----BEGIN RSA PRIVATE" + m + " KEY-----")
+        let body = GoldenTests.assemble("MIIEowIBAAKCAQ" + m + "EAxyz123456")
+        let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "KEYBODY", "pattern": #"-----BEGIN [A-Z ]*PRIVATE KEY-----\n[A-Za-z0-9+/=]{20,}"#],
+        ])))
+        let plain = r.redact(header + "\n" + body)
+        XCTAssertEqual(plain.text, "[KEYBODY]", "control: without a fence the custom rule wins")
+        for fence in ["```", "~~~ text", "```\n```"] {
+            let fenced = r.redact(header + "\n" + fence + "\n" + body)
+            XCTAssertFalse(fenced.text.contains(body), "key body leaked past \(fence.debugDescription): \(fenced.text.debugDescription)")
+            // Same text and same counts as without the fence: the PRIVATE_KEY token the builtin
+            // placed is folded into KEYBODY's, and its count goes with it.
+            XCTAssertEqual(fenced.text, plain.text)
+            XCTAssertEqual(fenced.report, plain.report)
+        }
+        // Through the layout that puts the fence there: a fenced header line, then the body.
+        func line(_ n: Int, _ text: String, fenced: Bool) -> RenderedLine {
+            RenderedLine(n: n, text: text, bbox: .zero, confidence: 1, fenced: fenced)
+        }
+        let laidOut = r.redact(Layout.text([line(1, header, fenced: true), line(2, body, fenced: false)])).text
+        XCTAssertFalse(laidOut.contains(body), laidOut.debugDescription)
+    }
+
+    // CS-05 gap 4, second review fix: a rule whose second part also matches a fence line
+    // (`\S+`, `.+`, `.*`) takes the fence as its next line in the plain pass. The fence-free
+    // reading comes from the same text as the plain hits, before they are replaced, so it still
+    // reaches the body after the fence.
+    func testCustomRuleWhoseNextLineMatchesAFenceStillReachesPastIt() throws {
+        let m = GoldenTests.joinMarker
+        let header = GoldenTests.assemble("-----BEGIN RSA PRIVATE" + m + " KEY-----")
+        let body = GoldenTests.assemble("MIIEowIBAAKCAQ" + m + "EAxyz123456")
+        for pattern in [#"\S+"#, ".+", ".*"] {
+            let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+                ["name": "KEYBODY", "pattern": #"-----BEGIN [A-Z ]*PRIVATE KEY-----\n"# + pattern],
+            ])))
+            let plain = r.redact(header + "\n" + body)
+            XCTAssertEqual(plain.text, "[KEYBODY]", "control for \(pattern): without a fence the rule takes the body")
+            for fence in ["```", "```swift", "~~~"] {
+                let fenced = r.redact(header + "\n" + fence + "\n" + body)
+                XCTAssertFalse(fenced.text.contains(body),
+                               "\(pattern) past \(fence.debugDescription): \(fenced.text.debugDescription)")
+                XCTAssertEqual(fenced.text, plain.text, "\(pattern) past \(fence.debugDescription)")
+                XCTAssertEqual(fenced.report, plain.report, "\(pattern) past \(fence.debugDescription)")
+            }
+        }
+    }
+
+    // CS-05 gap 4, review fix: the same with EMAIL eating the cue of a custom rule, and the
+    // guard for the other direction: the early reading's hits are replaced last, so a custom
+    // rule crossing a fence never takes a builtin's cue (`password`) away before that builtin
+    // has read it.
+    func testCustomRuleBeatsEmailCueAcrossAFenceAndKeepsBuiltinCues() throws {
+        let m = GoldenTests.joinMarker
+        let password = GoldenTests.assemble("Hunter2" + m + "Hunter2!!")
+        let value = GoldenTests.assemble("hunter2" + m + "abc9")
+        let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+            ["name": "CORPPW", "pattern": #"[\w.]+@corp\.com\n\S{12,}"#],
+            ["name": "FOOPW", "pattern": #"foo\npassword"#],
+            ["name": "WIDE", "pattern": #"login\n[\w.]+@corp\.com"#],
+        ])))
+        XCTAssertEqual(r.redact("alice@corp.com\n" + password).text, "[CORPPW]", "control: no fence")
+        let fenced = r.redact("alice@corp.com\n```\n" + password)
+        XCTAssertFalse(fenced.text.contains(password), fenced.text.debugDescription)
+        XCTAssertEqual(fenced.text, "[CORPPW]")
+        XCTAssertEqual(fenced.report.counts, ["CORPPW": 1])
+        // FOOPW guard: the builtin SECRET still reads `password: ...` and replaces the value.
+        let cue = r.redact("foo\n```\npassword: " + value)
+        XCTAssertFalse(cue.text.contains(value), cue.text.debugDescription)
+        XCTAssertEqual(cue.text, "[FOOPW]: [SECRET]")
+        XCTAssertEqual(cue.report.counts, ["FOOPW": 1, "SECRET": 1])
+        // Two early hits that overlap (WIDE and CORPPW share the address) become one token, and
+        // neither the address nor the password is left.
+        let both = r.redact("login\n```\nalice@corp.com\n~~~\n" + password + " tail").text
+        XCTAssertFalse(both.contains(password) || both.contains("alice"), both.debugDescription)
+        XCTAssertEqual(both, "[WIDE] tail")
     }
 }
