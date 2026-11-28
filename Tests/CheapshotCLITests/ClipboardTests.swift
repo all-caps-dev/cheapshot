@@ -4,7 +4,7 @@ import AppKit
 import CheapshotCore
 
 /// A clipboard held in memory, for tests. Text can be put on it to prove the CLI never reads it:
-/// `readImage` and `readFileURL` ignore it, the way `PasteboardClipboard` never asks for a
+/// `readImage` and `readFileURLs` ignore it, the way `PasteboardClipboard` never asks for a
 /// string type. Every read and write is counted, so a test can prove a run left it alone.
 final class FakeClipboard: ClipboardSource {
     var image: Data?
@@ -28,8 +28,17 @@ final class FakeClipboard: ClipboardSource {
     /// Something else wrote the clipboard (content left as is, so a read still sees it).
     func bump() { changeCount += 1 }
 
-    func readImage() -> Data? { reads += 1; onRead?(); return image }
-    func readFileURL() -> URL? { reads += 1; onRead?(); return fileURLs.count == 1 ? fileURLs[0] : nil }
+    /// Counts only reads that hand out image bytes, so a test can prove the image was never read.
+    private(set) var imageReads = 0
+
+    // Same precedence as PasteboardClipboard: any file URL hides the image (Finder's icon).
+    func readImage() -> Data? {
+        reads += 1; onRead?()
+        guard fileURLs.isEmpty, let image else { return nil }
+        imageReads += 1
+        return image
+    }
+    func readFileURLs() -> [URL] { reads += 1; onRead?(); return fileURLs }
 
     @discardableResult
     func replace(with payload: ClipboardPayload) -> Bool {
@@ -144,7 +153,53 @@ final class ClipboardTests: XCTestCase {
         let pb = try privatePasteboard()
         let a = URL(fileURLWithPath: "/tmp/a.png"), b = URL(fileURLWithPath: "/tmp/b.png")
         XCTAssertTrue(pb.writeObjects([a as NSURL, b as NSURL]))
-        XCTAssertNil(PasteboardClipboard(pb).readFileURL())
+        let clip = PasteboardClipboard(pb)
+        XCTAssertNil(clip.readFileURL())
+        XCTAssertEqual(clip.readFileURLs(), [a.standardizedFileURL, b.standardizedFileURL])
+    }
+
+    func testResolvesFinderFileReferenceURL() throws {
+        // Finder writes public.file-url as a file reference URL (file:///.file/id=...), which
+        // carries no path or extension until it is resolved. The file must exist to get one.
+        let pb = try privatePasteboard()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cheapshot-ref-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("doc.pdf")
+        try Data("%PDF-1.4".utf8).write(to: file)
+        // Swift's NSURL-to-URL bridging turns a reference URL back into a path URL, so the
+        // reference is fetched and kept as an NSURL and its string written as the item's bytes.
+        guard let ref = (file as NSURL).perform(#selector(NSURL.fileReferenceURL))?.takeUnretainedValue() as? NSURL,
+              let refString = ref.absoluteString, refString.contains("/.file/id=") else {
+            throw XCTSkip("this volume does not hand out file reference URLs")
+        }
+        let item = NSPasteboardItem()
+        item.setData(Data(refString.utf8), forType: .fileURL)
+        XCTAssertTrue(pb.writeObjects([item]))
+        let got = try XCTUnwrap(PasteboardClipboard(pb).readFileURL())
+        XCTAssertEqual(got.pathExtension, "pdf")
+        XCTAssertEqual(got.resolvingSymlinksInPath().path, file.resolvingSymlinksInPath().path)
+    }
+
+    func testFileURLHidesTheFinderIcon() throws {
+        // A Finder copy puts the file URL and the file's icon (a TIFF) on the clipboard together.
+        let pb = try privatePasteboard()
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("shot.png")
+        let item = NSPasteboardItem()
+        item.setData(url.dataRepresentation, forType: .fileURL)
+        item.setData(Data([0x4D, 0x4D, 0x00, 0x2A]), forType: .tiff)
+        XCTAssertTrue(pb.writeObjects([item]))
+        let clip = PasteboardClipboard(pb)
+        XCTAssertNil(clip.readImage(), "the icon must never be read when a file was copied")
+        XCTAssertEqual(clip.readFileURL(), url.standardizedFileURL)
+    }
+
+    func testFakeFileURLHidesItsImage() {
+        let fake = FakeClipboard(image: Data([1]), fileURLs: [URL(fileURLWithPath: "/tmp/a.png"), URL(fileURLWithPath: "/tmp/b.png")])
+        XCTAssertNil(fake.readImage())
+        XCTAssertEqual(fake.imageReads, 0)
+        XCTAssertNil(fake.readFileURL())
+        XCTAssertEqual(fake.readFileURLs().count, 2)
     }
 
     func testWebURLIsNotAFileURL() throws {

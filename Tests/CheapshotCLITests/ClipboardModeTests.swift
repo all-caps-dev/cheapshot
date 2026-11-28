@@ -155,6 +155,22 @@ final class ClipboardModeTests: XCTestCase {
         XCTAssertTrue((c["text"] as? String ?? "").contains("deploy key below"))
     }
 
+    func testTwoCopiedFilesExit1AndNeverReadTheIcon() async throws {
+        let a = tmp.appendingPathComponent("first-secret.png"), b = tmp.appendingPathComponent("second-secret.png")
+        try png(lines: secretLines).write(to: a)
+        try png(lines: secretLines).write(to: b)
+        let icon = try png(lines: secretLines)   // would read as text if the icon were OCRed
+        let clip = FakeClipboard(image: icon, fileURLs: [a, b])
+        let r = await run(["--clipboard", "--json"], clipboard: clip)
+        XCTAssertEqual(r.code, 1, r.err)
+        XCTAssertTrue(r.err.contains("more than one file"), r.err)
+        XCTAssertEqual(clip.imageReads, 0, "the Finder icon must never be read")
+        XCTAssertFalse(r.out.contains("first-secret") || r.err.contains("first-secret"))
+        XCTAssertFalse(r.out.contains("deploy key below"))
+        XCTAssertTrue(clip.writes.isEmpty)
+        XCTAssertTrue(try ledgerEntries().isEmpty)
+    }
+
     func testBlankCopiedPDFExits1() async throws {
         let url = tmp.appendingPathComponent("blank.pdf")
         var box = CGRect(x: 0, y: 0, width: 300, height: 300)
