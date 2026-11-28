@@ -17,10 +17,10 @@ final class MaskTests: XCTestCase {
     }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: tmp) }
 
-    func run(_ args: [String]) async -> (code: Int32, out: String, err: String) {
+    func run(_ args: [String], tmpdir: String? = nil) async -> (code: Int32, out: String, err: String) {
         final class Box { var out = "", err = "" }
         let box = Box()
-        let env = ["CHEAPSHOT_HOME": tmp.path, "TMPDIR": tmp.path]   // ledger and allow file stay in tmp
+        let env = ["CHEAPSHOT_HOME": tmp.path, "TMPDIR": tmpdir ?? tmp.path]   // ledger and allow file stay in tmp
         let io = CLIIO(out: { box.out += $0 }, err: { box.err += $0 }, readStdin: { "" },
                        environment: env, home: tmp.path, isInteractive: false)
         let code = await CLI.run(arguments: args, io: io)
@@ -334,7 +334,7 @@ final class MaskTests: XCTestCase {
         let r = await run(["mask", fx.url.path])
         XCTAssertEqual(r.code, 1, r.out)
         XCTAssertTrue(r.err.contains("has mode 755"), r.err)
-        XCTAssertTrue(r.err.contains("chmod 700 \(maskedDir.path)"), r.err)
+        XCTAssertTrue(r.err.contains("chmod 700 '\(maskedDir.path)'"), r.err)
         XCTAssertTrue(FileManager.default.fileExists(atPath: old.path), "a refused folder is not swept")
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: maskedDir.path), ["old-masked.png"],
                        "nothing is written into a refused folder")
@@ -347,6 +347,16 @@ final class MaskTests: XCTestCase {
         chmod(maskedDir.path, 0o700)
         let fixed = await run(["mask", fx.url.path])
         XCTAssertEqual(fixed.code, 0, fixed.err)
+    }
+
+    /// CS-18: a $TMPDIR that does not exist yet is created, as before ensurePrivateDir, and the
+    /// default folder inside it still ends up 0700.
+    func testMissingTmpdirIsCreated() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let missing = tmp.appendingPathComponent("not-yet/deeper")
+        let r = await run(["mask", fx.url.path], tmpdir: missing.path)
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertEqual(mode(missing.appendingPathComponent("cheapshot-masked").path), 0o700)
     }
 
     func testUsageErrors() async throws {

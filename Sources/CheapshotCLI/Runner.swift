@@ -268,7 +268,9 @@ public enum CLI {
         guard st.st_uid == getuid() else { return "\(dir.path) belongs to another user" }
         // A looser folder this user owns is refused, not repaired, but the message gives the fix.
         guard (st.st_mode & 0o777) == 0o700 else {
-            return "\(dir.path) has mode \(String(st.st_mode & 0o777, radix: 8)), not 700; to fix it, run: chmod 700 \(dir.path)"
+            // Single-quoted for the shell, so a TMPDIR with spaces still pastes as one argument.
+            let quoted = "'" + dir.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+            return "\(dir.path) has mode \(String(st.st_mode & 0o777, radix: 8)), not 700; to fix it, run: chmod 700 \(quoted)"
         }
         return nil
     }
@@ -389,6 +391,9 @@ public enum CLI {
         // another user owns) is refused, so the sweep can never list and delete files elsewhere.
         let dir = dest.deletingLastPathComponent()
         if out == nil {
+            // ensurePrivateDir makes only the last folder; a missing $TMPDIR is created first, as
+            // the old createDirectory(withIntermediateDirectories:) call did.
+            try? FileManager.default.createDirectory(at: dir.deletingLastPathComponent(), withIntermediateDirectories: true)
             if let why = ensurePrivateDir(dir) { return fail(why) }
             sweepStale(in: dir, olderThan: maskSweepAge)
         }
