@@ -97,6 +97,14 @@ public enum RuleCatalog {
                    disabled: Set(entries.filter { $0.group != .credentials }.map(\.name))),
     ]
 
+    /// Built-in rules that lean on another built-in having run first. When `needs` is off and
+    /// `rule` is on, `rule` still runs but catches less, so listings and weakened-run marks show it
+    /// as partial with `lost` as the reason (Ryan, rules v2 Q: "A. Show 'partial (no MICR cue)'").
+    public static let dependencies: [(rule: String, needs: String, lost: String)] = [
+        // BANK_ACCT's MICR cue is the [ROUTING] placeholder (Rule.swift, BANK_ACCT).
+        (rule: "BANK_ACCT", needs: "ROUTING", lost: "no MICR cue"),
+    ]
+
     /// The default preset's name.
     public static let defaultPreset = "everything"
 

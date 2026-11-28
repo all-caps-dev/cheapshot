@@ -76,7 +76,8 @@ public enum CLI {
         guard opts.redact else { return (nil, nil) }
         let selection = try ruleSelection(opts, io)
         guard selection.isWeakened else { return (Redactor(selection: selection), nil) }
-        let mark = RulesMark(preset: selection.preset, disabled: selection.disabled)
+        let mark = RulesMark(preset: selection.preset, disabled: selection.disabled,
+                             partial: selection.partialByName)
         io.err(mark.notice)
         return (Redactor(selection: selection), mark)
     }
@@ -111,24 +112,30 @@ public enum CLI {
         do { selection = try ruleSelection(opts, io) }
         catch { io.err("cheapshot: \(error)\n"); return 2 }
         let off = Set(selection.disabled)
+        // A rule that is on but leans on one that is off (BANK_ACCT without ROUTING) is partial.
+        let partial = selection.partialByName
         if json {
             let rules: [[String: Any]] = RuleCatalog.entries.map {
-                ["name": $0.name, "group": $0.group.rawValue, "label": $0.label,
-                 "description": $0.description, "on": !off.contains($0.name)]
+                var row: [String: Any] = ["name": $0.name, "group": $0.group.rawValue, "label": $0.label,
+                                          "description": $0.description, "on": !off.contains($0.name)]
+                if let lost = partial[$0.name] { row["partial"] = lost }
+                return row
             }
             let object: [String: Any] = [
                 "version": cheapshotVersion, "preset": selection.preset,
                 "presets": RuleCatalog.presets.map(\.name),
-                "disabled": selection.disabled, "rules": rules,
+                "disabled": selection.disabled, "partial": partial, "rules": rules,
                 "custom": selection.customRules.map(\.name),
             ]
             return emit(object, io) ? 0 : 1
         }
         let width = RuleCatalog.names.map(\.count).max() ?? 0
-        var text = "preset: \(selection.preset)  (\(RuleCatalog.names.count - off.count) of \(RuleCatalog.names.count) built-in rules on)\n"
+        let partNote = partial.isEmpty ? "" : ", \(partial.count) partial"
+        var text = "preset: \(selection.preset)  (\(RuleCatalog.names.count - off.count) of \(RuleCatalog.names.count) built-in rules on\(partNote))\n"
         for e in RuleCatalog.entries {
             let pad = String(repeating: " ", count: width - e.name.count)
-            text += "\(off.contains(e.name) ? "off" : "on ")  \(e.name)\(pad)  \(e.group.rawValue.padding(toLength: 11, withPad: " ", startingAt: 0))  \(e.label)\n"
+            let note = partial[e.name].map { "  partial (\($0))" } ?? ""
+            text += "\(off.contains(e.name) ? "off" : "on ")  \(e.name)\(pad)  \(e.group.rawValue.padding(toLength: 11, withPad: " ", startingAt: 0))  \(e.label)\(note)\n"
         }
         if !selection.customRules.isEmpty {
             text += "custom rules (run first): " + selection.customRules.map(\.name).joined(separator: ", ") + "\n"

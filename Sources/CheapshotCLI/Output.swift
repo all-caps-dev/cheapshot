@@ -45,7 +45,7 @@ public enum Output {
           --preset <name>   use this preset instead of the file's: everything (default),
                             secrets-only (keys, tokens and passwords only), or one the file defines
           --all-rules       ignore every preset and switch in the rules file; all built-in rules run
-          --list-rules      list the built-in rules, on or off under the current file and --preset
+          --list-rules      list the built-in rules, on, off or partial under the file and --preset
                             (with --json: as JSON). When any built-in rule is off, a run says so on
                             stderr, in a "rules" key in --json and as rules_off in the ledger
           --pages <N|N-M>   PDF page range, default all

@@ -320,14 +320,24 @@ public struct RulesMark: Equatable {
     public let preset: String
     /// Built-in names, in catalog order.
     public let disabled: [String]
-    public init(preset: String, disabled: [String]) { self.preset = preset; self.disabled = disabled }
+    /// Built-in names still on but catching less, each with the reason ("no MICR cue").
+    public let partial: [String: String]
+    public init(preset: String, disabled: [String], partial: [String: String] = [:]) {
+        self.preset = preset; self.disabled = disabled; self.partial = partial
+    }
 
-    /// The --json `rules` value.
-    var json: [String: Any] { ["preset": preset, "disabled": disabled] }
+    /// The --json `rules` value. `partial` appears only when a rule is partial.
+    var json: [String: Any] {
+        var j: [String: Any] = ["preset": preset, "disabled": disabled]
+        if !partial.isEmpty { j["partial"] = partial }
+        return j
+    }
 
     /// The stderr line.
     var notice: String {
         let n = disabled.count
-        return "cheapshot: \(n) built-in rule\(n == 1 ? " is" : "s are") off (preset \(preset))\n"
+        var line = "cheapshot: \(n) built-in rule\(n == 1 ? " is" : "s are") off (preset \(preset))"
+        for name in partial.keys.sorted() { line += "; \(name) is partial (\(partial[name]!))" }
+        return line + "\n"
     }
 }

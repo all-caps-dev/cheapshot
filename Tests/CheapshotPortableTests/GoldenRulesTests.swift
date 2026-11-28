@@ -110,6 +110,11 @@ final class GoldenRulesTests: XCTestCase {
         // An account word still works with ROUTING off.
         XCTAssertEqual(Redactor(selection: s).redact("acct 123456789012").text, "acct [BANK_ACCT]")
         XCTAssertTrue(RuleCatalog.entry(named: "ROUTING")!.description.contains("BANK_ACCT"))
+        // ...and the selection reports BANK_ACCT as partial, not fully on (#41).
+        XCTAssertEqual(s.partial.map(\.name), ["BANK_ACCT"])
+        XCTAssertEqual(s.partial.map(\.lost), ["no MICR cue"])
+        XCTAssertTrue(try RuleSelection.resolve(try contents(#"{"disabled": ["ROUTING", "BANK_ACCT"]}"#)).partial.isEmpty)
+        XCTAssertTrue(RuleSelection.everything.partial.isEmpty)
     }
 
     func testBuiltinOrderIsKept() throws {

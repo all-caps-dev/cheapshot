@@ -31,6 +31,21 @@ public struct RuleSelection {
     /// True when any built-in rule is off. A weakened run must say so (stderr, JSON, ledger).
     public var isWeakened: Bool { !disabled.isEmpty }
 
+    /// Built-in rules that are on but catch less because a rule they lean on is off, with the
+    /// reason, in catalog order (``RuleCatalog/dependencies``). Empty when nothing is off.
+    public var partial: [(name: String, lost: String)] {
+        let off = Set(disabled)
+        return RuleCatalog.dependencies
+            .filter { off.contains($0.needs) && !off.contains($0.rule) }
+            .map { (name: $0.rule, lost: $0.lost) }
+    }
+
+    /// ``partial`` keyed by rule name. Two dependencies on one rule join their reasons
+    /// ("no MICR cue, no X") instead of trapping on a duplicate key.
+    public var partialByName: [String: String] {
+        Dictionary(partial.map { ($0.name, $0.lost) }, uniquingKeysWith: { "\($0), \($1)" })
+    }
+
     /// The rules to run: custom rules first, then the built-ins that are on, in their order.
     public var rules: [Rule] {
         let off = Set(disabled)
