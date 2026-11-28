@@ -134,11 +134,35 @@ final class RuleFileV2Tests: XCTestCase {
         XCTAssertEqual(w.count, 1)
     }
 
-    func testUnknownTopLevelKeysAreIgnored() throws {
+    // Bot review on #39/#40: an unknown key throws for a named file and warns for the default
+    // file, so a misspelt "rules" never drops custom rules silently.
+    func testUnknownTopLevelKeysThrowWhenStrictAndWarnOtherwise() throws {
+        let json = #"{"version": 2, "colour": "blue", "disabled": ["SSN"]}"#
+        XCTAssertThrowsError(try parse(json, strict: true))
+        let (c, w) = try parse(json, strict: false)
+        XCTAssertEqual(c.disabled, ["SSN"])
+        XCTAssertEqual(w.count, 1)
+        XCTAssertTrue(w[0].contains("\"colour\""), w[0])
+    }
+
+    func testMisspeltRulesKeyIsNeverSilent() throws {
+        for key in ["Rules", "rule"] {
+            let json = #"{"version": 2, "\#(key)": [{"name": "ACME", "pattern": "acme-[0-9]{6}"}]}"#
+            XCTAssertThrowsError(try parse(json, strict: true), key)
+            let (c, w) = try parse(json, strict: false)
+            XCTAssertEqual(c.customRules.count, 0)
+            XCTAssertEqual(w.count, 1, key)
+        }
+        // A case slip names the key it meant.
+        let (_, w) = try parse(#"{"Rules": []}"#, strict: false)
+        XCTAssertTrue(w[0].contains("did you mean \"rules\""), w[0])
+    }
+
+    // Bot review on #39: version 1 means the array, so an object saying version 1 (or 0) is an error.
+    func testObjectWithVersionBelowTwoThrows() {
         for strict in [true, false] {
-            let (c, w) = try parse(#"{"version": 2, "colour": "blue", "future": {"x": 1}, "disabled": ["SSN"]}"#, strict: strict)
-            XCTAssertEqual(c.disabled, ["SSN"])
-            XCTAssertEqual(w, [])
+            XCTAssertThrowsError(try parse(#"{"version": 1, "disabled": ["group:credentials"]}"#, strict: strict))
+            XCTAssertThrowsError(try parse(#"{"version": 0}"#, strict: strict))
         }
     }
 
