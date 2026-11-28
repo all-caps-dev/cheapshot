@@ -26,7 +26,9 @@ final class FakeClipboard: ClipboardSource {
     }
 
     /// The user copied something: content changes and the count moves.
-    func userCopied(text: String) { image = nil; fileURLs = []; self.text = text; changeCount += 1 }
+    func userCopied(text: String) { image = nil; fileURLs = []; unresolvableFileItems = 0; self.text = text; changeCount += 1 }
+    /// The user copied one file in Finder: its URL replaces everything and the count moves.
+    func userCopiedFile(_ url: URL) { image = nil; text = nil; unresolvableFileItems = 0; fileURLs = [url]; changeCount += 1 }
 
     /// Something else wrote the clipboard (content left as is, so a read still sees it).
     func bump() { changeCount += 1 }
@@ -41,7 +43,10 @@ final class FakeClipboard: ClipboardSource {
         imageReads += 1
         return image
     }
-    func readFileURLs() -> [URL] { reads += 1; onRead?(); return fileURLs }
+    /// Called on every file-URL read after the URLs are taken, so a test can copy something
+    /// between the reads (onRead, by contrast, runs before the read and can change its result).
+    var onFileRead: (() -> Void)?
+    func readFileURLs() -> [URL] { reads += 1; onRead?(); let urls = fileURLs; onFileRead?(); return urls }
     var fileItemCount: Int { fileURLs.count + unresolvableFileItems }
 
     @discardableResult
@@ -223,6 +228,7 @@ final class ClipboardTests: XCTestCase {
         let clip = PasteboardClipboard(pb)
         XCTAssertEqual(clip.readFileURLs().count, 1)
         XCTAssertEqual(clip.fileItemCount, 2, "a copied file that is gone still counts")
+        XCTAssertNil(clip.readFileURL(), "the survivor of a two-file copy is never handed out")
     }
 
     func testFakeModelsAnUnresolvableFileItem() {
@@ -231,6 +237,15 @@ final class ClipboardTests: XCTestCase {
         XCTAssertNil(fake.readImage())
         XCTAssertEqual(fake.readFileURLs(), [])
         XCTAssertEqual(fake.fileItemCount, 1)
+    }
+
+    func testFakeReplaceClearsUnresolvableFileItems() {
+        // clearContents() on the real pasteboard drops every file item; the fake must too.
+        let fake = FakeClipboard()
+        fake.unresolvableFileItems = 1
+        fake.replace(with: .png(Data([7])))
+        XCTAssertEqual(fake.fileItemCount, 0)
+        XCTAssertEqual(fake.readImage(), Data([7]))
     }
 
     func testFakeFileURLHidesItsImage() {

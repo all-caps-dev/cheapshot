@@ -33,7 +33,7 @@ cheapshot --text notes.txt          # redact text with no OCR ("-" reads stdin)
 cheapshot --raw shot.png            # skip redaction
 cheapshot --ledger                  # cumulative savings across every run
 cheapshot --ledger --by-mode        # split that total into video / image / pdf before quoting it
-cheapshot mask shot.png             # a copy with redacted and low-confidence lines painted black, allowed for one Read
+cheapshot mask shot.png             # a copy with redacted and low-confidence lines painted black, allowed for one Read (0.6.1 or later)
 cheapshot allow /abs/path/shot.png  # the user, in a terminal: let the next Read see the pixels (an image arrives as a metadata-free copy)
 ```
 
@@ -53,8 +53,12 @@ Settings the user controls (never set or unset them yourself):
 
 1. When the user points at a screenshot, PDF, or recording, work from cheapshot's text. Read
    the image itself only when the question is about layout, colour, or something visual.
-2. If the hook denied a Read of an image and you need the layout, run `cheapshot mask <path>`
-   from Bash and Read the path it prints after `masked: `. The copy has an opaque black box over
+2. If the hook denied a Read of an image, you need the layout, and the hook's reason told you to
+   run `cheapshot mask`, run `cheapshot mask <path>` from Bash and Read the path it prints after
+   `masked: `. The hook names mask only on cheapshot 0.6.1 or later: an older `mask` can read a
+   screenshot blank, paint nothing and allow the unmasked original. When the reason says to ask
+   the user instead, or `cheapshot --version` is below 0.6.1 or unclear, do not run mask; ask the
+   user, who can update cheapshot (`brew upgrade all-caps-dev/tap/cheapshot`) first. The copy has an opaque black box over
    every line a redaction rule changed and every line under the confidence floor; only that copy
    is allowed, once, for five minutes. Text Vision did not read at all (or read only part of)
    is not masked, so treat the copy as layout, not as proof nothing sensitive is on screen.
@@ -127,6 +131,8 @@ That skips Claude Code's permission prompt and your Read rules for that one Read
 default on purpose (chosen 2026-11-24): the copy is masked or stripped pixels in a private
 `$TMPDIR` folder, and an extra prompt per Read buys little. An agent can make a mask entry
 itself with `cheapshot mask`, so a masked copy is the one Read that needs no person at all.
+On a binary older than 0.6.1 that `mask` can be the unmasked image, which is why the hook and
+rule 2 name it only on 0.6.1 or later.
 
 To change it, edit `hooks/cheapshot-read.sh`, the `jq` reply under `if [ -n "$fresh" ]`:
 

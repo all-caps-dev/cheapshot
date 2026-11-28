@@ -605,11 +605,19 @@ public enum CLI {
         // here outright (one input per run), so the run never falls back to the icon.
         // Count file items, not resolved URLs: a copied file deleted since still counts, so
         // two copied files with one gone are refused, and one gone file is reported as gone.
+        // These are separate pasteboard reads. A copy made between them could pair one
+        // clipboard's URLs with another's item count (a false "gone", or a two-file copy let
+        // through), so the change count brackets them and a change means try again.
+        let countBefore = clip.changeCount
         let fileURLs = clip.readFileURLs()
-        if clip.fileItemCount > 1 {
+        let fileItems = clip.fileItemCount
+        guard clip.changeCount == countBefore else {
+            return fail("the clipboard changed while it was being read; try again")
+        }
+        if fileItems > 1 || fileURLs.count > 1 {
             return fail("more than one file is copied to the clipboard; copy one file and try again")
         }
-        if fileURLs.isEmpty && clip.fileItemCount == 1 {
+        if fileURLs.isEmpty && fileItems == 1 {
             // A file was copied but its reference no longer resolves; the icon stays unread.
             return fail("the file copied to the clipboard can no longer be found (deleted or on an unmounted volume)")
         }
