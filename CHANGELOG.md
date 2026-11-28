@@ -6,7 +6,7 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ### Security
 
-- Plugin 0.1.3: the Claude Code hook names `cheapshot mask` only on a binary of 0.6.1 or later. It reads the `version` field of the `--json` run it already makes; below 0.6.1, or when the version is missing, not a string or not a plain `X.Y.Z` (build metadata such as a `make build` stamp is ignored; a pre-release counts only above 0.6.1), it fails closed. The user is told to `brew upgrade all-caps-dev/tap/cheapshot` before asking for a masked copy and is still offered `cheapshot allow`; the model gets the ask-the-user line in place of the mask line. This closes the gap in the first 0.6.1 Security bullet for plugin users still on a v0.6.0 binary. cheapshot-mcp unchanged.
+- Plugin 0.1.3: the Claude Code hook names `cheapshot mask` only on a binary of 0.6.1 or later. It reads the `version` field of the `--json` run it already makes; below 0.6.1, or when the version is missing, not a string or not a plain `X.Y.Z` (build metadata such as a `make build` stamp is ignored; a pre-release counts only above 0.6.1), it fails closed. The user is told to `brew upgrade all-caps-dev/tap/cheapshot` before asking for a masked copy and is still offered `cheapshot allow`; the model gets the ask-the-user line in place of the mask line, and the plugin skill's rule 2 now tells the model to run mask only when the hook named it. This closes the gap in the first 0.6.1 Security bullet for plugin users still on a v0.6.0 binary. cheapshot-mcp unchanged.
 
 ## 0.6.1 (unreleased)
 
