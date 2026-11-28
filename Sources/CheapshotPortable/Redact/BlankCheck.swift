@@ -9,6 +9,9 @@ public enum BlankCheck {
     public static let tolerance: UInt8 = 2
 
     /// True only when every pixel is within `tolerance` of the first pixel on all four channels.
+    /// `tolerance` may only tighten: anything above `BlankCheck.tolerance` is clamped down to it.
+    /// Measured from the first pixel, so two pixels on opposite sides of it may differ by up to
+    /// twice the tolerance (4 at the default) and the image still counts as blank.
     /// False for empty input, zero sizes, or when `rgba.count != width * height * 4`
     /// (computed with multipliedReportingOverflow). Returns at the first pixel that differs.
     public static func isBlank(rgba: [UInt8], width: Int, height: Int,
@@ -20,8 +23,9 @@ public enum BlankCheck {
         let (bytes, overflow2) = pixels.multipliedReportingOverflow(by: 4)
         guard !overflow2, bytes == rgba.count else { return false }
 
-        // Compare in Int so the subtraction cannot wrap around the way UInt8 math would.
-        let limit = Int(tolerance)
+        // Clamp, so no caller can loosen blank. Compare in Int so the subtraction cannot wrap
+        // around the way UInt8 math would.
+        let limit = Int(min(tolerance, BlankCheck.tolerance))
         return rgba.withUnsafeBufferPointer { buf -> Bool in
             let r = Int(buf[0]), g = Int(buf[1]), b = Int(buf[2]), a = Int(buf[3])
             var i = 4

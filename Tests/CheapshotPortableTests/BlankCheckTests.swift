@@ -65,9 +65,16 @@ final class BlankCheckTests: XCTestCase {
         setPixel(&under, width: w, x: 5, y: 7, (128, 128, 128, 197))         // alpha 3 below
         XCTAssertFalse(BlankCheck.isBlank(rgba: under, width: w, height: h), "alpha counts too")
 
-        // The tolerance argument is honoured: at 0, the noise is no longer blank.
+        // The tolerance argument may only tighten: at 0, the noise is no longer blank.
         XCTAssertFalse(BlankCheck.isBlank(rgba: buf, width: w, height: h, tolerance: 0))
         XCTAssertEqual(BlankCheck.tolerance, 2)
+
+        // It can never loosen: 255 is clamped to BlankCheck.tolerance, so 3 over is still not blank,
+        // and neither is black on white.
+        XCTAssertFalse(BlankCheck.isBlank(rgba: over, width: w, height: h, tolerance: 255), "clamped to 2")
+        var dark = canvas(w, h, (255, 255, 255, 255))
+        setPixel(&dark, width: w, x: 10, y: 10, (0, 0, 0, 255))
+        XCTAssertFalse(BlankCheck.isBlank(rgba: dark, width: w, height: h, tolerance: 255), "clamped to 2")
     }
 
     /// Sizes that do not describe the buffer are not blank, and huge sizes return false instead of trapping.
@@ -83,5 +90,11 @@ final class BlankCheckTests: XCTestCase {
         XCTAssertFalse(BlankCheck.isBlank(rgba: buf, width: Int.max, height: Int.max), "overflow")
         XCTAssertFalse(BlankCheck.isBlank(rgba: buf, width: Int.max, height: 1), "overflow on the times 4")
         XCTAssertFalse(BlankCheck.isBlank(rgba: buf, width: Int.max / 4 + 1, height: 1), "overflow on the times 4")
+        // A size whose product wraps to exactly the buffer's length under wrapping math (&*):
+        // ((1 << 62) + 10) * 10 * 4 wraps to 400, and a uniform 400-byte buffer must still be false.
+        let wrapped = canvas(10, 10, (255, 255, 255, 255))
+        XCTAssertEqual(wrapped.count, 400)
+        XCTAssertEqual(((1 << 62) + 10) &* 10 &* 4, 400, "the case really wraps to 400")
+        XCTAssertFalse(BlankCheck.isBlank(rgba: wrapped, width: (1 << 62) + 10, height: 10), "wrapping product")
     }
 }

@@ -74,14 +74,23 @@ public enum RedactOutcome: Equatable, Sendable {
         f.screenshotLike && f.checkedLineCount == 0 && f.boxCount == 0
     }
 
-    /// Row 6's exception to row 1: the image is uniform and this caller allows blank screenshots.
+    /// Row 6's exception to row 1: the image is uniform, no OCR pass saw a single line anywhere, and
+    /// this caller allows blank screenshots. Blank never overrides lines that some pass did see.
     private static func blankAllowed(_ f: RedactFacts, policy: RedactPolicy) -> Bool {
-        f.blank && policy.blankScreenshot == .write
+        f.blank && f.anyPassLineCount == 0 && policy.blankScreenshot == .write
+    }
+
+    /// A count below zero cannot come from a real read. Masker's gate fails closed on anything that is
+    /// not a confirmed read, so this does too: such facts are refused as unread, never written.
+    private static func hasNegativeCount(_ f: RedactFacts) -> Bool {
+        f.checkedLineCount < 0 || f.anyPassLineCount < 0 || f.boxCount < 0
     }
 
     /// A refusal that is already certain before anything is encoded (unread, or no_text under
     /// .refuse). nil otherwise. Rows 1 and 2 of the table; it can only ever refuse.
     public static func preflight(_ f: RedactFacts, policy: RedactPolicy) -> RefusedReason? {
+        // Malformed facts first: with a negative count, every row below could be fooled.
+        if hasNegativeCount(f) { return .unread }
         // Row 1.
         if unreadShape(f) && !blankAllowed(f, policy: policy) { return .unread }
         // Row 2: a photo where no pass saw text and nothing was painted, and Q1 says refuse.
@@ -101,7 +110,8 @@ public enum RedactOutcome: Equatable, Sendable {
         if !f.roundsSettled { return .refused(.unstableMask) }
         if !f.verifyClean { return .refused(.verifyFailed) }
         if !f.metadataClean { return .refused(.metadataCheckFailed) }
-        // Row 6: only reachable when preflight let row 1's shape through, which needs blank and .write.
+        // Row 6: only reachable when preflight let row 1's shape through, which needs blank, zero lines
+        // from every pass, and .write.
         if unreadShape(f) && blankAllowed(f, policy: policy) { return .written(.blank) }
         // Row 7.
         if f.boxCount > 0 { return .written(.masked) }
