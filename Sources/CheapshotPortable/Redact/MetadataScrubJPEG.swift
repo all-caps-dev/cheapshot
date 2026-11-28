@@ -6,9 +6,11 @@
 // walk understands a short list of markers and throws on everything else; nothing is kept by
 // default.
 //
-// Accepted grammar: SOI, then segments, then exactly one SOFn, then one or more SOS each followed
-// by entropy-coded data, then EOI, then end of data. Tables (DQT, DHT, DRI) may also sit between
-// scans, as in progressive files.
+// Accepted grammar: SOI, then segments, then exactly one SOF0 (baseline) or SOF2 (progressive),
+// the only two frame types ImageIO writes, then one or more SOS each followed by entropy-coded
+// data, then EOI, then end of data. Tables (DQT, DHT, DRI) may also sit between scans, as in
+// progressive files. Kept tables are parsed table by table, so their payload holds tables only.
+// A JFIF APP0 is kept only straight after SOI, and an ICC APP2 only before the frame header.
 import Foundation
 
 public enum MetadataScrubJPEG {
@@ -153,14 +155,20 @@ public enum MetadataScrubJPEG {
             let payload = b[(m + 3)..<end]   // after the length field
 
             switch marker {
-            case 0xE0:   // APP0: kept only as plain JFIF with no thumbnail
-                pieces.append(Piece(range: at..<end, marker: marker, dropped: app0Verdict(payload)))
-            case 0xE2:   // APP2: kept only as an ICC profile
-                let isICC = payload.starts(with: iccIdentifier)
-                pieces.append(Piece(range: at..<end, marker: marker, dropped: isICC ? nil : .segment))
+            case 0xE0:   // APP0: kept only as plain JFIF with no thumbnail, straight after SOI
+                var verdict = app0Verdict(payload)
+                if verdict == nil && at != 2 { verdict = .segment }   // a later or second JFIF
+                pieces.append(Piece(range: at..<end, marker: marker, dropped: verdict))
+            case 0xE2:   // APP2: kept only as an ICC profile chunk, before the frame header
+                let keep = isICCChunk(payload) && frames == 0
+                pieces.append(Piece(range: at..<end, marker: marker, dropped: keep ? nil : .segment))
             case 0xE1, 0xE3...0xEF, 0xFE:   // APP1 (Exif, XMP), APP3 to APP15, COM: always dropped
                 pieces.append(Piece(range: at..<end, marker: marker, dropped: .segment))
-            case 0xDB, 0xC4:   // DQT, DHT: tables, kept
+            case 0xDB:   // DQT: quantization tables, kept once every byte is accounted for
+                guard isValidDQT(payload) else { throw ScrubError.malformed(offset: at) }
+                pieces.append(Piece(range: at..<end, marker: marker, dropped: nil))
+            case 0xC4:   // DHT: Huffman tables, the same
+                guard isValidDHT(payload) else { throw ScrubError.malformed(offset: at) }
                 pieces.append(Piece(range: at..<end, marker: marker, dropped: nil))
             case 0xDD:   // DRI: restart interval, always a 2-byte payload
                 guard length == 4 else { throw ScrubError.malformed(offset: at) }
@@ -175,7 +183,7 @@ public enum MetadataScrubJPEG {
                 pieces.append(Piece(range: at..<scanEnd, marker: marker, dropped: nil))
                 i = scanEnd
                 continue
-            default:   // what is left of isKnownSegment: the frame headers SOFn
+            default:   // what is left of isKnownSegment: the frame headers SOF0 and SOF2
                 frames += 1
                 guard frames == 1 else { throw ScrubError.malformed(offset: at) }   // two frames
                 // Nf components, at least 1; the header is 8 + 3 * Nf bytes long.
@@ -211,14 +219,60 @@ public enum MetadataScrubJPEG {
     // MARK: - Allowlists
 
     /// Markers whose segment the walk knows how to read. Everything else, including TEM, DAC,
-    /// JPG, DNL, DHP, EXP, JPGn and reserved codes, is `unsupportedMarker`.
+    /// JPG, DNL, DHP, EXP, JPGn, reserved codes and every frame type other than SOF0 and SOF2
+    /// (ImageIO writes only those two), is `unsupportedMarker`.
     static func isKnownSegment(_ m: UInt8) -> Bool {
         switch m {
         case 0xE0...0xEF, 0xFE: return true          // APPn, COM (read so they can be judged)
         case 0xDB, 0xC4, 0xDD, 0xDA: return true     // DQT, DHT, DRI, SOS
-        case 0xC0...0xCF: return !(m == 0xC4 || m == 0xC8 || m == 0xCC)   // SOFn, minus DHT, JPG, DAC
+        case 0xC0, 0xC2: return true                 // SOF0 baseline, SOF2 progressive
         default: return false
         }
+    }
+
+    /// DQT payload: one or more tables, each a byte Pq<<4 | Tq (Pq 0 or 1, Tq 0 to 3) then 64
+    /// one-byte values (Pq 0) or 64 two-byte values (Pq 1). The tables must use up the payload
+    /// exactly, so nothing else can ride along inside the segment.
+    static func isValidDQT(_ p: ArraySlice<UInt8>) -> Bool {
+        guard !p.isEmpty else { return false }
+        var k = p.startIndex
+        while k < p.endIndex {
+            let pq = p[k] >> 4, tq = p[k] & 0x0F
+            guard pq <= 1, tq <= 3 else { return false }
+            let size = pq == 0 ? 64 : 128
+            k += 1
+            guard p.endIndex - k >= size else { return false }   // table cut short
+            k += size
+        }
+        return true   // the loop only ends with k exactly at the end
+    }
+
+    /// DHT payload: one or more tables, each a byte Tc<<4 | Th (Tc 0 or 1, Th 0 to 3), 16 code
+    /// counts, then exactly as many symbols as the counts add up to (at most 256, one per byte
+    /// value). The tables must use up the payload exactly.
+    static func isValidDHT(_ p: ArraySlice<UInt8>) -> Bool {
+        guard !p.isEmpty else { return false }
+        var k = p.startIndex
+        while k < p.endIndex {
+            let tc = p[k] >> 4, th = p[k] & 0x0F
+            guard tc <= 1, th <= 3 else { return false }
+            k += 1
+            guard p.endIndex - k >= 16 else { return false }     // counts cut short
+            let symbols = p[k..<(k + 16)].reduce(0) { $0 + Int($1) }
+            k += 16
+            guard symbols <= 256, p.endIndex - k >= symbols else { return false }
+            k += symbols
+        }
+        return true
+    }
+
+    /// An ICC APP2 chunk: "ICC_PROFILE\0", then a sequence number and a chunk count, with
+    /// 1 <= sequence <= count. Just the identifier, or a bad pair, is not one.
+    static func isICCChunk(_ p: ArraySlice<UInt8>) -> Bool {
+        guard p.starts(with: iccIdentifier), p.count >= iccIdentifier.count + 2 else { return false }
+        let sequence = p[p.startIndex + iccIdentifier.count]
+        let count = p[p.startIndex + iccIdentifier.count + 1]
+        return sequence >= 1 && sequence <= count
     }
 
     static let jfifIdentifier: [UInt8] = Array("JFIF".utf8) + [0]

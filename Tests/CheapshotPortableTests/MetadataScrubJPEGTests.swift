@@ -48,6 +48,12 @@ private enum J {
     /// One Huffman table: 16 counts (one code of length 1) and its one symbol.
     static let dht = seg(0xC4, [0x00, 1] + [UInt8](repeating: 0, count: 15) + [0x00])
     static let dht2 = seg(0xC4, [0x10, 1] + [UInt8](repeating: 0, count: 15) + [0x01])
+    /// Two tables in one segment each: DQT 8-bit tables 0 and 1; DHT DC 1 and AC 1.
+    static let dqtTwo = seg(0xDB, [0x00] + [UInt8](repeating: 1, count: 64) + [0x01] + [UInt8](repeating: 2, count: 64))
+    /// One 16-bit table (Pq 1): 128 bytes.
+    static let dqt16 = seg(0xDB, [0x12] + [UInt8](repeating: 0, count: 128))
+    static let dhtTwo = seg(0xC4, [0x01, 0, 2] + [UInt8](repeating: 0, count: 14) + [0x03, 0x04]
+                                 + [0x11, 1] + [UInt8](repeating: 0, count: 15) + [0x05])
     /// A frame header with one component: precision 8, 16 x 16, Nf 1, length 8 + 3 * Nf = 11.
     static func sof(_ marker: UInt8 = 0xC0) -> [UInt8] { seg(marker, [8, 0, 16, 0, 16, 1, 1, 0x11, 0]) }
     /// A scan header with one component: Ns 1, length 6 + 2 * Ns = 8.
@@ -133,7 +139,7 @@ final class MetadataScrubJPEGTests: XCTestCase {
             ("no EOI in segment space", head + J.dqt, .missingEOI),
             ("no SOF before SOS", head + J.dqt + J.dht + J.sos + J.scan + J.eoi, .missingFrame),
             ("no SOF at all", head + J.dqt + J.eoi, .missingFrame),
-            ("two SOF", head + J.dqt + J.sof() + J.sof(0xC1) + J.dht + J.sos + J.scan + J.eoi,
+            ("two SOF", head + J.dqt + J.sof() + J.sof(0xC2) + J.dht + J.sos + J.scan + J.eoi,
              .malformed(offset: at + J.dqt.count + J.sof().count)),
             ("frame but no scan", head + J.dqt + J.sof() + J.eoi, .malformed(offset: at + J.dqt.count + J.sof().count)),
             ("SOF length disagrees with Nf", head + J.seg(0xC0, [8, 0, 16, 0, 16, 2, 1, 0x11, 0]) + J.sos + J.scan + J.eoi,
@@ -278,8 +284,10 @@ final class MetadataScrubJPEGTests: XCTestCase {
     // keep (or to drop).
     func testUnknownMarkersThrowNeverKeep() {
         let head = J.soi + J.jfif()
-        // TEM, reserved, JPG, DAC, DNL, DHP, EXP, JPGn.
-        let unknown: [UInt8] = [0x01, 0x02, 0x4F, 0xBF, 0xC8, 0xCC, 0xDC, 0xDE, 0xDF, 0xF0, 0xF7, 0xFD]
+        // TEM, reserved, JPG, DAC, DNL, DHP, EXP, JPGn, and every frame type ImageIO never writes
+        // (only baseline C0 and progressive C2 are on the list).
+        let unknown: [UInt8] = [0x01, 0x02, 0x4F, 0xBF, 0xC8, 0xCC, 0xDC, 0xDE, 0xDF, 0xF0, 0xF7, 0xFD,
+                                0xC1, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF]
         for m in unknown {
             let bytes = head + J.seg(m, [0, 0]) + J.body
             assertThrows(bytes, .unsupportedMarker(m, offset: head.count), "marker \(m)")
@@ -292,8 +300,11 @@ final class MetadataScrubJPEGTests: XCTestCase {
         assertThrows(between, .unsupportedMarker(0xDC, offset: firstScan.count), "DNL between scans")
     }
 
-    // Rule 16: what strip returns passes check, for every fixture strip accepts; and strip
-    // really runs check on its own output and throws when it fails.
+    // Rule 16, in two parts. First, for every fixture strip accepts, its output passes check.
+    // Second, the internal overload strip(_:verifiedBy:) runs the checker it is handed on its own
+    // output and throws when that checker objects. The second part proves the overload calls its
+    // checker; it does not prove the public strip(_:) passes `check` as that checker (that is the
+    // one-line forward in the source, and the first part covers its result).
     func testStripOutputAlwaysPassesCheck() {
         let fixtures: [[UInt8]] = [
             J.jpeg(), J.jpeg([]), J.jpeg([J.jfif(), J.exif, J.xmp]), J.jpeg([J.jfif(), J.app13, J.com]),
@@ -301,19 +312,115 @@ final class MetadataScrubJPEGTests: XCTestCase {
             J.jpeg([J.jfif(), J.icc, J.mpf, J.flashpix, J.iccNoNUL]),
             J.soi + J.jfif() + [0xFF] + J.exif + [0xFF, 0xFF] + J.body,
             J.soi + J.jfif() + J.dqt + J.dri + J.sof(0xC2) + J.dht + J.sos + J.scan + J.com + J.sos + J.scan2 + J.eoi,
-        ] + [UInt8]([0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF]).map {
-            J.soi + J.dqt + J.sof($0) + J.dht + J.sos + J.scan + J.eoi   // every SOFn on the list
+            J.soi + J.exif + J.jfif() + J.jfif() + J.body,                                   // late JFIF
+            J.soi + J.jfif() + J.dqt + J.sof() + J.icc + J.dht + J.sos + J.scan + J.eoi,     // late ICC
+            J.soi + J.jfif() + J.dqtTwo + J.dqt16 + J.sof() + J.dhtTwo + J.sos + J.scan + J.eoi,
+        ] + [UInt8]([0xC0, 0xC2]).map {
+            J.soi + J.dqt + J.sof($0) + J.dht + J.sos + J.scan + J.eoi   // both SOFn on the list
         }
         for (n, bytes) in fixtures.enumerated() {
             guard let out = stripped(bytes) else { continue }
             XCTAssertEqual(S.check(Data(out)), [], "fixture \(n)")
         }
 
-        // The self-check is wired in: hand strip a checker that always objects and it must throw.
+        // Part two: the overload calls the checker it is handed. One that always objects makes it throw.
         let objector: (Data) -> [S.Violation] = { _ in [S.Violation(kind: .segment, marker: 0xE1, offset: 7)] }
         XCTAssertThrowsError(try S.strip(Data(J.jpeg()), verifiedBy: objector)) { error in
             XCTAssertEqual(error as? S.ScrubError, .malformed(offset: 7))
         }
+    }
+
+    // Review fix: a kept table segment is parsed table by table, so its payload cannot carry
+    // anything but tables. DQT: Pq 0 or 1, Tq 0 to 3, 64 or 128 bytes each. DHT: Tc 0 or 1,
+    // Th 0 to 3, 16 counts, then exactly that many symbols (at most 256). Both must use up the
+    // length exactly.
+    func testTablePayloadsAreValidated() {
+        let head = J.soi + J.jfif()
+        let at = head.count
+        let q64 = [UInt8](repeating: 1, count: 64)
+        let counts1 = [UInt8]([1]) + [UInt8](repeating: 0, count: 15)   // one symbol
+        let bad: [(String, [UInt8])] = [
+            ("DQT empty", J.seg(0xDB, [])),
+            ("DQT Pq 2", J.seg(0xDB, [0x20] + q64)),
+            ("DQT Tq 4", J.seg(0xDB, [0x04] + q64)),
+            ("DQT table cut short", J.seg(0xDB, [0x00] + q64.dropLast())),
+            ("DQT 16-bit table given 64 bytes", J.seg(0xDB, [0x10] + q64)),
+            ("DQT text after the table", J.seg(0xDB, [0x00] + q64 + J.ascii("secret"))),
+            ("DHT empty", J.seg(0xC4, [])),
+            ("DHT Tc 2", J.seg(0xC4, [0x20] + counts1 + [0])),
+            ("DHT Th 4", J.seg(0xC4, [0x04] + counts1 + [0])),
+            ("DHT counts cut short", J.seg(0xC4, [0x00, 1, 0, 0])),
+            ("DHT symbols missing", J.seg(0xC4, [0x00, 3] + [UInt8](repeating: 0, count: 15) + [0])),
+            ("DHT text after the symbols", J.seg(0xC4, [0x00] + counts1 + [0] + J.ascii("secret"))),
+            ("DHT more than 256 symbols", J.seg(0xC4, [0x00, 255, 45] + [UInt8](repeating: 0, count: 14)
+                                                     + [UInt8](repeating: 7, count: 300))),
+        ]
+        for (label, segment) in bad {
+            let bytes = head + segment + J.body
+            assertThrows(bytes, .malformed(offset: at), label)
+            XCTAssertTrue(S.check(Data(bytes)).contains { $0.kind == .structure && $0.offset == at }, label)
+        }
+        // Valid shapes still pass, kept byte for byte: two tables per segment, a 16-bit DQT.
+        let good = J.soi + J.jfif() + J.dqtTwo + J.dqt16 + J.sof() + J.dhtTwo + J.sos + J.scan + J.eoi
+        XCTAssertEqual(stripped(good), good)
+        XCTAssertEqual(found(good), [])
+    }
+
+    // Review fix: position and count rules. The one JFIF APP0 kept is the one straight after SOI;
+    // any later or second APP0 goes. An ICC APP2 is kept only before the frame header, and only
+    // with its sequence number and count (1 <= sequence <= count).
+    func testJFIFOnlyRightAfterSOIAndICCOnlyBeforeFrame() {
+        // JFIF after another segment: dropped, flagged as a plain segment.
+        let late = J.soi + J.exif + J.jfif() + J.body
+        XCTAssertEqual(stripped(late), J.soi + J.body)
+        XCTAssertEqual(found(late), ["segment e1 @2", "segment e0 @\(2 + J.exif.count)"])
+
+        // A second JFIF: the first stays, the second goes.
+        let twice = J.soi + J.jfif() + J.jfif() + J.body
+        XCTAssertEqual(stripped(twice), J.jpeg([J.jfif()]))
+        XCTAssertEqual(found(twice), ["segment e0 @\(2 + J.jfif().count)"])
+
+        // Behind a fill byte it is no longer straight after SOI.
+        let filled = J.soi + [0xFF] + J.jfif() + J.body
+        XCTAssertEqual(stripped(filled), J.soi + J.body)
+        XCTAssertEqual(found(filled), ["segment e0 @3"])
+
+        // ICC after the frame header: dropped.
+        let iccLateAt = 2 + J.jfif().count + J.dqt.count + J.sof().count
+        let iccLate = J.soi + J.jfif() + J.dqt + J.sof() + J.icc + J.dht + J.sos + J.scan + J.eoi
+        XCTAssertEqual(stripped(iccLate), J.soi + J.jfif() + J.dqt + J.sof() + J.dht + J.sos + J.scan + J.eoi)
+        XCTAssertEqual(found(iccLate), ["segment e2 @\(iccLateAt)"])
+
+        // ICC segments missing or misusing the sequence and count bytes: dropped.
+        let id = J.ascii("ICC_PROFILE") + [0]
+        for (label, app2) in [("identifier only", J.seg(0xE2, id)),
+                              ("sequence but no count", J.seg(0xE2, id + [1])),
+                              ("sequence 0", J.seg(0xE2, id + [0, 1, 0x42])),
+                              ("sequence past count", J.seg(0xE2, id + [2, 1, 0x42]))] {
+            let bytes = J.jpeg([J.jfif(), app2])
+            XCTAssertEqual(stripped(bytes), J.jpeg([J.jfif()]), label)
+            XCTAssertEqual(found(bytes), ["segment e2 @\(2 + J.jfif().count)"], label)
+        }
+        // The second of two ICC chunks is fine.
+        let chunks = J.jpeg([J.jfif(), J.seg(0xE2, id + [1, 2, 0x42]), J.seg(0xE2, id + [2, 2, 0x43])])
+        XCTAssertEqual(stripped(chunks), chunks)
+    }
+
+    // Review fix: three header guards that no other test pinned. Each case passes every other
+    // check, so only its own guard can catch it.
+    func testScanBeforeFrameAndComponentCountBoundsThrow() {
+        // SOS before the frame, with a frame after the scan: the order is wrong even though a
+        // frame and a scan are both present by EOI.
+        assertThrows(J.soi + J.sos + J.scan + J.sof() + J.eoi, .missingFrame, "SOS before SOF0")
+        // SOS with Ns 0 (length 6 = 6 + 2 * 0, so the length agrees).
+        assertThrows(J.soi + J.sof() + J.seg(0xDA, [0, 0, 63, 0]) + J.scan + J.eoi,
+                     .malformed(offset: 2 + J.sof().count), "SOS Ns 0")
+        // SOS with Ns 5 (length 16 = 6 + 2 * 5).
+        assertThrows(J.soi + J.sof() + J.seg(0xDA, [5] + [UInt8](repeating: 0x11, count: 10) + [0, 63, 0]) + J.scan + J.eoi,
+                     .malformed(offset: 2 + J.sof().count), "SOS Ns 5")
+        // SOF with Nf 0 (length 8 = 8 + 3 * 0).
+        assertThrows(J.soi + J.seg(0xC0, [8, 0, 16, 0, 16, 0]) + J.sos + J.scan + J.eoi,
+                     .malformed(offset: 2), "SOF Nf 0")
     }
 
     // Rule 10: check never says [] for something it could not parse.
