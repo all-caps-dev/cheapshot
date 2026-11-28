@@ -221,11 +221,19 @@ final class RedactorTests: XCTestCase {
         // Liveness: a regex that gives up on a shape is fast and redacts nothing after it, so
         // every shape is followed by a password line that must still be redacted.
         let marker = "Zq9kQ2" + "mW7p"
+        // The iOS Simulator on CI runners is several times slower than macOS (PR #22: 1.36 s and
+        // 2.25 s for two shapes against a 1.0 s limit), so it gets 3.0 s. A runaway regex takes
+        // seconds to minutes, so 3.0 s still catches one; macOS and devices keep 1.0 s.
+        #if targetEnvironment(simulator)
+        let limit = 3.0
+        #else
+        let limit = 1.0
+        #endif
         for shape in shapes {
             let start = Date()
             let out = redactor.redact(shape + "\npassword=" + marker).text
             let elapsed = Date().timeIntervalSince(start)
-            XCTAssertLessThan(elapsed, 1.0, "\(shape.prefix(16))... took \(elapsed)s")
+            XCTAssertLessThan(elapsed, limit, "\(shape.prefix(16))... took \(elapsed)s (limit \(limit)s)")
             XCTAssertTrue(out.hasSuffix("\npassword=[SECRET]"), "\(shape.prefix(16))... stopped redacting")
             if elapsed > slowest.0 { slowest = (elapsed, String(shape.prefix(24))) }
         }
