@@ -4,6 +4,14 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ## Unreleased
 
+### Rules file v2: presets and switches
+
+- The rules file (`--rules`, `$CHEAPSHOT_RULES`, or `rules.json` next to the ledger) may now be a version 2 object as well as the old array: `{"version": 2, "preset": ..., "disabled": [...], "presets": {...}, "rules": [...]}` (NOV-156, CHE-58 to CHE-61). It can switch built-in rules off by name or by group (`group:credentials`, `group:personal`, `group:financial`, `group:network`), pick a preset, and define its own presets; a custom rule takes `"enabled": false`. The old array reads exactly as before, and with no file every built-in rule runs, as before. Built-in presets: `everything` (the default) and `secrets-only` (only keys, tokens and passwords). Older binaries do not read the object form: a 0.6.0 binary warns and drops the whole default file, custom rules included.
+- New flags: `--preset <name>` replaces the file's preset for one run; `--all-rules` ignores every preset and switch, so all built-in rules run (custom rules still apply); `--list-rules [--json]` lists the built-in rules with their group and whether each is on under the current file and preset.
+- A run with any built-in rule off says so three ways: one stderr line (`cheapshot: 8 built-in rules are off (preset secrets-only)`), a `"rules": {"preset", "disabled"}` key in `--json` (reads and `mask`), and `rules_off` on the ledger line. A run with every built-in on prints none of them, so its output is unchanged.
+- Problems always fail toward more redaction. A named file with an unknown preset, an unknown rule name, a version above 2 or a malformed object exits 2. The default file warns instead: one that cannot be read keeps every built-in rule, an unknown preset means `everything`, and an unknown rule name is ignored. An unknown `--preset` exits 2 either way.
+- Not wired yet: whether the Claude Code hook and the MCP server pass `--all-rules` waits on an open decision (plan Q5); today they honour the default file like any other run.
+
 ### Mask
 
 - `cheapshot mask` writes its copy with mode 0600, in the default folder and at `--out` alike (CS-18). An `--out` file used to get the umask default, usually 0644, so a script or another account that read it from there will now get a permission error. Each run without `--out` deletes copies in the default folder older than 1 hour. Mask now refuses to run when `$TMPDIR/cheapshot-masked/` is a symlink, not a folder, owned by another user, or not mode 0700; the error gives the `chmod` that fixes it.

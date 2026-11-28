@@ -20,6 +20,7 @@ public enum Output {
           cheapshot --video <file.mp4>
           cheapshot --text <file|->        redact text instead of an image (- is stdin)
           cheapshot --ledger [--json] [--migrate] [--days <n>] [--by-mode]
+          cheapshot --list-rules [--json] [--rules <file>] [--preset <name>]
           cheapshot allow <path>           let the next Claude Code Read of <path> see the pixels (5 minutes;
                                            needs a foreground terminal; a speed bump, not a sandbox).
                                            An image is shown as a copy: pixels re-encoded as an
@@ -36,9 +37,17 @@ public enum Output {
           --json            emit JSON
           --stats           print token savings to stderr
           --min-conf <f>    confidence floor, default 0.3
-          --rules <file>    extra redaction rules, JSON [{name, pattern, caseInsensitive}]. Without
-                            it: $CHEAPSHOT_RULES, else rules.json next to the ledger if present
-                            (a broken default file is skipped with a warning)
+          --rules <file>    rules file: a JSON array of extra rules [{name, pattern, caseInsensitive}],
+                            or (0.7.0 and later) a version 2 object that can also switch built-in
+                            rules off: {version, preset, disabled, presets, rules}. Without it:
+                            $CHEAPSHOT_RULES, else rules.json next to the ledger if present
+                            (a broken default file is skipped with a warning, all rules on)
+          --preset <name>   use this preset instead of the file's: everything (default),
+                            secrets-only (keys, tokens and passwords only), or one the file defines
+          --all-rules       ignore every preset and switch in the rules file; all built-in rules run
+          --list-rules      list the built-in rules, on or off under the current file and --preset
+                            (with --json: as JSON). When any built-in rule is off, a run says so on
+                            stderr, in a "rules" key in --json and as rules_off in the ledger
           --pages <N|N-M>   PDF page range, default all
           --force-ocr       OCR every PDF page, even one whose text layer checks out
           --scene <f>       video scene-change threshold, default 0.25

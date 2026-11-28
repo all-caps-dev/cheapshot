@@ -38,13 +38,34 @@ public enum Pipeline {
     /// calls `warn` and keeps the built-in rules, because failing every run would let the Read
     /// hook pass raw pixels through (a typo, or the app writing the file at that moment).
     public static func redactor(rules: RulesSource?, warn: (String) -> Void) throws -> Redactor {
-        guard let rules = rules else { return Redactor() }
-        do {
-            return Redactor(customRules: try RuleFile.load(rules.url))
-        } catch where !rules.named {
-            warn("ignoring \(rules.url.path): \(error); using built-in rules only")
-            return Redactor()
+        Redactor(selection: try ruleSelection(rules: rules, warn: warn))
+    }
+
+    /// The rules a run uses (rules file v2, NOV-156): the file's custom rules first, then the
+    /// built-ins its preset and `disabled` list leave on, after `presetOverride` (--preset) and
+    /// `policy` (``RuleTogglePolicy``) are applied.
+    ///
+    /// Failure direction is always toward more redaction. A named file is read strictly: a
+    /// missing or broken file, a version above 2, an unknown preset or rule name all throw. The
+    /// default file is read leniently: one that cannot be read or parsed calls `warn` and runs
+    /// every built-in rule; an unknown preset or rule name inside it warns and is ignored. An
+    /// unknown `presetOverride` throws either way.
+    public static func ruleSelection(rules: RulesSource?, presetOverride: String? = nil,
+                                     policy: RuleTogglePolicy = .honour,
+                                     warn: (String) -> Void) throws -> RuleSelection {
+        var contents: RuleFileContents? = nil
+        if let rules = rules {
+            if rules.named {
+                contents = try RuleFile.loadContents(rules.url, strict: true, warn: warn)
+            } else {
+                do {
+                    contents = try RuleFile.loadContents(rules.url, strict: false) { warn("\(rules.url.path): \($0)") }
+                } catch {
+                    warn("ignoring \(rules.url.path): \(error); using built-in rules only")
+                }
+            }
         }
+        return try RuleSelection.resolve(contents, presetOverride: presetOverride, policy: policy)
     }
 
     // MARK: - redaction

@@ -17,6 +17,9 @@ public struct LedgerEntry: Codable, Equatable {
     /// Set only on a "passthrough" line: why the Read hook let pixels reach the model. One of
     /// ``LedgerEntry/passthroughReasons``. Never a path, so the ledger stays free of file names.
     public var passthroughReason: String?
+    /// How many built-in rules were switched off for this run by a rules file or --preset (rules
+    /// file v2, NOV-156). Absent (nil) when every built-in ran, so default lines are unchanged.
+    public var rulesOff: Int?
 
     /// The reasons the hook may record. "allow" is a one-shot `cheapshot allow`, "passthrough_env"
     /// is CHEAPSHOT_PASSTHROUGH=1, "error" is any hook or binary failure, "over_cap" a PDF over the
@@ -28,14 +31,15 @@ public struct LedgerEntry: Codable, Equatable {
         case imageTokens = "image_tokens"
         case textTokens = "text_tokens"
         case passthroughReason = "passthrough_reason"
+        case rulesOff = "rules_off"
     }
 
     public init(ts: String = LedgerEntry.now(), mode: String, inputs: Int, imageTokens: Int, textTokens: Int, redactions: Int,
-                raw: Bool? = nil, passthroughReason: String? = nil) {
+                raw: Bool? = nil, passthroughReason: String? = nil, rulesOff: Int? = nil) {
         self.ts = ts; self.mode = mode; self.inputs = inputs
         self.imageTokens = imageTokens; self.textTokens = textTokens
         self.saved = max(0, imageTokens - textTokens); self.redactions = redactions
-        self.raw = raw; self.passthroughReason = passthroughReason
+        self.raw = raw; self.passthroughReason = passthroughReason; self.rulesOff = rulesOff
     }
 
     /// A zero-token line that records one hook pass-through. Kept out of the savings totals.
