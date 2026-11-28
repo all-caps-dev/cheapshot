@@ -13,9 +13,9 @@ import Foundation
 // understand. Foundation only, so it builds on Windows; that is why CRC-32 is written out here
 // instead of coming from zlib.
 //
-// An allowlisted name is not enough: every kept chunk has its exact length and checked values,
-// appears at most once, and sits where the PNG spec puts it, so no kept chunk can carry extra
-// bytes. Known limit: IDAT holds a zlib stream, and bytes after the end of that stream inside an
+// What is kept: IHDR (every field checked), sRGB (one byte, checked), IEND (empty), and the
+// picture itself: IDAT, plus PLTE for a palette image. Each kept chunk appears where and as often
+// as the PNG spec allows. No kept chunk outside the picture data has a free byte. Known limit: IDAT holds a zlib stream, and bytes after the end of that stream inside an
 // IDAT cannot be found without inflating it, which this parser does not do. The encoder writes
 // those IDATs itself from a redrawn canvas, and Verify decodes the result.
 public enum MetadataScrubPNG {
@@ -54,25 +54,26 @@ public enum MetadataScrubPNG {
         }
     }
 
-    /// The only chunks an output may hold: the four critical chunks, plus fixed-length colour and
-    /// size chunks whose every byte is checked. Everything else is removed or refused.
+    /// The only chunks an output may hold: the four critical chunks (PLTE for palette images only)
+    /// and sRGB. That is ImageIO's own PNG output (IHDR sRGB eXIf IDAT IEND, measured on macOS
+    /// 27.2) minus eXIf. Everything else is removed or refused.
     ///
-    /// Left out on purpose (CHE-53 review, a change from plan 3.6):
+    /// Left out on purpose (CHE-53 reviews, a narrowing of plan 3.6):
+    /// - gAMA, cHRM, pHYs, sBIT: their value bytes are free (any gamma, any chromaticity, any
+    ///   density), and next to sRGB they change nothing. Dropped like any other ancillary chunk.
     /// - iCCP: a free-text name plus compressed data this parser cannot inflate. The encoder draws
     ///   into sRGB, so ImageIO writes sRGB, not iCCP (measured on macOS 27.2: IHDR sRGB eXIf IDAT
     ///   IEND). Refused, see `refused`.
     /// - iDOT: Apple's decode hint. It holds byte offsets into the file, which go stale once
     ///   chunks are dropped, and it can make Apple's decoder show a different picture from every
     ///   other decoder. Dropped like any other ancillary chunk.
-    public static let allowed: Set<String> = [
-        "IHDR", "PLTE", "IDAT", "IEND", "sRGB", "pHYs", "gAMA", "cHRM", "sBIT",
-    ]
+    public static let allowed: Set<String> = ["IHDR", "PLTE", "IDAT", "IEND", "sRGB"]
 
     /// Ancillary chunks that are never kept and never dropped: `strip` throws on them. iCCP cannot
-    /// be checked (see `allowed`). tRNS (transparency) and the APNG chunks acTL, fcTL, fdAT
-    /// (animation frames) change the picture when removed, so dropping them would quietly write a
-    /// different image.
-    static let refused: Set<String> = ["iCCP", "tRNS", "acTL", "fcTL", "fdAT"]
+    /// be checked (see `allowed`). tRNS (transparency), the APNG chunks acTL, fcTL, fdAT
+    /// (animation frames) and the colour-space chunks cICP, mDCV, cLLI change the picture or how
+    /// it renders when removed, so dropping them would quietly write a different image.
+    static let refused: Set<String> = ["iCCP", "tRNS", "acTL", "fcTL", "fdAT", "cICP", "mDCV", "cLLI"]
 
     static let signature: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
 
@@ -171,10 +172,10 @@ public enum MetadataScrubPNG {
     /// - every length is bounds-checked before it is used (never trusted to skip ahead);
     /// - every type is four ASCII letters; every CRC is verified, kept chunks or not;
     /// - IHDR comes first, has length 13 and legal field values, and appears once;
-    /// - PLTE only for colour types 2, 3, 6 (required for 3), once, before IDAT, 1 to 256 entries
-    ///   (at most 2^bit depth for a palette image);
-    /// - each allowlisted ancillary chunk at most once, before the first IDAT, with its exact
-    ///   length and checked values (`ancillaryProblem`);
+    /// - PLTE only for a palette image (colour type 3), where it is required, once, before IDAT,
+    ///   1 to 2^bit depth entries (at most 256);
+    /// - each allowlisted ancillary chunk (sRGB) at most once, before the first IDAT, with its
+    ///   exact length and checked values (`ancillaryProblem`);
     /// - IDAT chunks consecutive, at least one before IEND;
     /// - the walk stops at IEND, which must be empty and must end exactly at the end of the data.
     static func walk(_ bytes: [UInt8]) throws -> [Chunk] {
@@ -244,11 +245,14 @@ public enum MetadataScrubPNG {
                 idat = .ended
             }
 
-            // PLTE: only where the colour type allows it, once, before IDAT, sized in whole entries.
+            // PLTE: palette images only, once, sized in whole entries. On RGB and RGBA images PLTE
+            // is only a suggestion, so its bytes would be free; refused there. "Before IDAT"
+            // follows from the rest: a palette image's IDAT needs a PLTE first (above), and a
+            // second PLTE is refused.
             if type == "PLTE" {
                 let entries = length / 3
-                let maxEntries = h.colourType == 3 ? min(256, 1 << h.bitDepth) : 256
-                guard [2, 3, 6].contains(h.colourType), idat == .notYet, !seen.contains("PLTE"),
+                let maxEntries = min(256, 1 << h.bitDepth)
+                guard h.colourType == 3, !seen.contains("PLTE"),
                       length % 3 == 0, entries >= 1, entries <= maxEntries else {
                     throw WalkFailure.structure("PLTE is misplaced, repeated or the wrong size", chunk: "PLTE", offset: i)
                 }
@@ -263,7 +267,7 @@ public enum MetadataScrubPNG {
                 guard !seen.contains(type) else {
                     throw WalkFailure.structure("a second \(type)", chunk: type, offset: i)
                 }
-                if let why = ancillaryProblem(type, bytes[i + 8..<dataEnd], header: h) {
+                if let why = ancillaryProblem(type, bytes[i + 8..<dataEnd]) {
                     throw WalkFailure.structure(why, chunk: type, offset: i)
                 }
                 seen.insert(type)
@@ -331,32 +335,16 @@ public enum MetadataScrubPNG {
     }
 
     /// nil when an allowlisted ancillary chunk's data is exactly what the spec allows, else why
-    /// not. Fixed lengths everywhere, so no chunk can carry extra bytes.
-    static func ancillaryProblem(_ type: String, _ d: ArraySlice<UInt8>, header h: Header) -> String? {
+    /// not. sRGB is the only allowlisted ancillary chunk.
+    static func ancillaryProblem(_ type: String, _ d: ArraySlice<UInt8>) -> String? {
         let b = Array(d)                           // re-index from 0
         switch type {
         case "sRGB":
             // One byte: the rendering intent, 0 to 3.
             return b.count == 1 && b[0] <= 3 ? nil : "sRGB must be 1 byte, intent 0 to 3"
-        case "gAMA":
-            return b.count == 4 ? nil : "gAMA must be 4 bytes"
-        case "cHRM":
-            return b.count == 32 ? nil : "cHRM must be 32 bytes"
-        case "pHYs":
-            // X and Y pixels per unit (4 bytes each), then the unit: 0 unknown, 1 metre.
-            return b.count == 9 && b[8] <= 1 ? nil : "pHYs must be 9 bytes, unit 0 or 1"
-        case "sBIT":
-            // One significant-bits value per channel: grey 1, RGB 3, palette 3, grey + alpha 2,
-            // RGBA 4. Each is 1 to the sample depth (8 for palette images).
-            let channels: [UInt8: Int] = [0: 1, 2: 3, 3: 3, 4: 2, 6: 4]
-            let maxBits = h.colourType == 3 ? 8 : h.bitDepth
-            guard b.count == channels[h.colourType], b.allSatisfy({ $0 >= 1 && $0 <= maxBits }) else {
-                return "sBIT length or values do not match the colour type"
-            }
-            return nil
         default:
             // An allowlisted ancillary chunk with no rule above: refuse rather than keep unchecked.
-            return "\(type) has no length rule"
+            return "\(type) has no rule"
         }
     }
 
