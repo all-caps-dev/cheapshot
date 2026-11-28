@@ -55,6 +55,93 @@ as JSON `[{name, pattern, caseInsensitive}]`.
 `--json` emits JSON instead of plain text. `--stats` prints the token savings
 to stderr, so it composes with either output form.
 
+### JSON output
+
+The payload is one object: `version`, `results[]`, and the run totals
+`image_tokens` and `text_tokens`. Each `results[]` entry is one input:
+
+| Field | Meaning |
+|---|---|
+| `file` | The input path. |
+| `text` | The full text after redaction. Lines are joined by newlines, and a block read as code is wrapped in triple-backtick fence lines. |
+| `image_tokens` | The estimated token cost of the image. |
+| `text_tokens` | The estimated token cost of the text instead. |
+| `redactions` | Map of redaction rule name to hit count. `{}` means nothing was redacted. |
+| `lines[]` | Images only. One object per recognized line: `n` (1-based), `text`, `bbox`, `confidence`. |
+| `error` | On a failed input, an error message. A failed entry carries only `file` and `error`. |
+
+`bbox` is `[minX, minY, maxX, maxY]` in image pixels, top left origin.
+`confidence` runs 0 to 1; lines under `--min-conf` (default `0.3`) are dropped,
+from `lines[]` and from `text` alike.
+
+Image results can also carry three more fields:
+
+- `ocr_status`: `ok` when the pass found text, `empty` otherwise.
+- `retried`: true when a second OCR pass ran (the cold start retry).
+- `screenshot_like`: the image heuristic that gated that retry.
+
+Check for the fields, not the version number. Some dev builds report
+`0.6.0` without them, and `make build` reports `0.6.0+<sha>.<date>`. An image
+result with empty `text` and no `ocr_status` comes from a binary that cannot
+say whether OCR failed: treat it like `empty` with `retried` true. The Claude
+Code hook does the same.
+
+`empty` with `retried` true is a screenshot-like image that still read blank.
+Treat it as a likely OCR failure, not as a photo with no text in it.
+
+`ok` with `retried` true happens too. The retry also runs when a slow cold
+pass (over 3 seconds) returns fewer than 85% of the lines a fast probe
+counted. The text is the better of the two passes, but some lines may still
+be missing.
+
+```json
+{
+  "version": "0.6.0",
+  "results": [{
+    "file": "shot.png",
+    "text": "build ok\nkey [AWS_KEY]",
+    "image_tokens": 1018,
+    "text_tokens": 6,
+    "redactions": { "AWS_KEY": 1 },
+    "lines": [
+      { "n": 1, "text": "build ok", "bbox": [22, 30, 350, 54], "confidence": 1 },
+      { "n": 2, "text": "key [AWS_KEY]", "bbox": [22, 90, 482, 116], "confidence": 0.5 }
+    ],
+    "ocr_status": "ok",
+    "retried": false,
+    "screenshot_like": true
+  }],
+  "image_tokens": 1018,
+  "text_tokens": 6
+}
+```
+
+PDF results carry `source` and `pages[]` in place of `lines[]` and the three
+OCR status fields. `source` is an object: `path`, `sha256` and `pages` (the
+document's page count). Each `pages[]` entry has `n`, `lane` (`text` or
+`scan`), `width` and `height` (the page rendered at 2x, in pixels) and its own
+`lines[]`. On a text lane page, `bbox` is in PDF points and `confidence` is
+always `1`. On a scan lane page, `bbox` is in pixels of the 2x render. See
+[PDF](/cheapshot/pdf/).
+
+:::tip
+Layout question, no pixels? Compare `lines[].bbox`: find the line you care
+about, then the lines whose boxes sit next to it or under it. Arrows and shapes
+are not text, so this is inference from word positions, not sight. Say so when
+you answer.
+:::
+
+A `redactions` count above 0 means the image held a secret: use the `text`,
+and never send that image's pixels to a model. The pixels carry the secret
+the redaction hid.
+
+The converse is not true. `redactions: {}` does not make the pixels safe.
+Lines under `--min-conf` are dropped before redaction, so they are never
+checked, and neither is text that OCR did not see. `cheapshot mask` paints lines
+under the floor as well as redacted ones, but it finds them with the same OCR,
+so it cannot cover text OCR missed, and on an image that read blank it paints
+nothing. Have a person look at the masked copy before it is shared.
+
 ## Recognition
 
 `--min-conf <f>` sets the confidence floor for a recognized line; the default

@@ -624,5 +624,94 @@ o=$(input /tmp/shot.png | FAKE_EXIT=2 run_hook 2>/dev/null); denied "other exit 
 o=$(input /tmp/report.pdf 1-2 | FAKE_EXIT=2 run_hook 2>/dev/null)
 [ -z "$(printf '%s' "$o" | jq -r '.hookSpecificOutput // empty')" ] && pass "other exit 2 on a PDF still fails open in default mode" || fail "other exit 2 PDF: $o"
 
+# 15. CS-03: the result shape, not the file name, decides PDF. A PDF result carries
+# .source.pages; an image result does not. A x.pdf holding an image gets the NOV-160 checks;
+# a .png holding a PDF result is handled as a PDF.
+pdfshape() {
+  # $1 text (JSON-escaped), $2 page count for .source.pages. A PDF result: source.pages, no
+  # ocr_status, like the real binary writes.
+  printf '{"version":"0.6.0","results":[{"file":"/tmp/doc","text":"%s","redactions":{},"image_tokens":2200,"text_tokens":%s,"source":{"path":"/tmp/doc","sha256":"ab12","pages":%s},"pages":[]}],"image_tokens":2200,"text_tokens":%s}' \
+    "$1" "${#1}" "$2" "${#1}"
+}
+# 15a. a file named .pdf whose result is an image result: ocr_status "" (unknown) and
+# retried true, no text. The NOV-160 empty-image deny applies; never the pixel path.
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(ocr_result '""' true '')" run_hook 2>/dev/null); denied "x.pdf with an image result, unknown status, empty"
+reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+case "$reason" in *allow*|*mask*) fail "x.pdf image result: deny reason names allow or mask: $reason";; *) pass "x.pdf image result: deny reason names neither allow nor mask";; esac
+grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "x.pdf image result: a deny is not a pass-through" || pass "x.pdf image result: not recorded as a pass-through"
+grep -qx -- '--json --stats /tmp/x.pdf' "$FAKE_LOG" && pass "x.pdf image result: the fake binary was run on it" || fail "x.pdf image result argv: $(cat "$FAKE_LOG")"
+fresh
+o=$(input /tmp/x.pdf | CHEAPSHOT_STRICT=1 FAKE_RAW="$(ocr_result '""' true '')" run_hook 2>/dev/null); denied "strict: x.pdf with an image result, unknown status, empty"
+# A x.pdf holding a photo-shaped image result gets the photo rule, not a free PDF pass: with
+# screenshot_like true it is denied.
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(ocr_result '"empty"' false '' true)" run_hook 2>/dev/null); denied "x.pdf with an image result, empty, screenshot_like"
+# 15b. a real PDF result (has .source.pages) that read empty keeps the PDF pass-through, in
+# default mode and in strict mode.
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
+[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "empty PDF result passes through" || fail "empty PDF result: $o $(cat "$FAKE_LOG")"
+fresh
+o=$(input /tmp/x.pdf | CHEAPSHOT_STRICT=1 FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null)
+[ -z "$o" ] && grep -qx -- '--note-passthrough no_text' "$FAKE_LOG" && pass "strict: empty PDF result still passes through" || fail "strict empty PDF result: $o $(cat "$FAKE_LOG")"
+# 15c. a .PNG whose result carries .source.pages does not get the PDF leniency: the PDF handling
+# needs the .pdf name too (the real binary routes on extension, so an image result never has
+# .source.pages). It is ambiguous (ocr=unknown): empty is denied in default and strict mode with
+# the generic message and no upgrade advice, and is never a pass-through; with text it gets the
+# image handling, mask line and the missing-lines flag.
+fresh
+o=$(input /tmp/shot.PNG | FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null); denied ".PNG with a PDF result and no text"
+all=$(printf '%s' "$o" | jq -r '[.systemMessage, .hookSpecificOutput.permissionDecisionReason] | map(. // "") | join(" ")')
+case "$all" in *"usable OCR status"*) pass ".PNG with a PDF result, empty: generic no-status message";; *) fail ".PNG with a PDF result, empty message: $all";; esac
+case "$all" in *"brew upgrade"*) fail ".PNG with a PDF result, empty: must not say upgrade: $all";; *) pass ".PNG with a PDF result, empty: no upgrade advice";; esac
+grep -q -- '--note-passthrough' "$FAKE_LOG" && fail ".PNG with a PDF result, empty: not a pass-through" || pass ".PNG with a PDF result, empty: not recorded as a pass-through"
+fresh
+o=$(input /tmp/shot.PNG | CHEAPSHOT_STRICT=1 FAKE_RAW="$(pdfshape '' 3)" run_hook 2>/dev/null); denied "strict: .PNG with a PDF result and no text"
+fresh
+o=$(input /tmp/shot.PNG | FAKE_RAW="$(pdfshape 'hello' 3)" run_hook 2>/dev/null); denied ".PNG with a PDF result and text"
+reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+case "$reason" in *"cheapshot mask '/tmp/shot.PNG'"*) pass ".PNG with a PDF result: image mask line";; *) fail ".PNG with a PDF result line: $reason";; esac
+all=$(printf '%s' "$o" | jq -r '[.systemMessage, .hookSpecificOutput.permissionDecisionReason] | map(. // "") | join(" ")')
+case "$all" in *"some lines may be missing"*) pass ".PNG with a PDF result and text: missing-lines flag";; *) fail ".PNG with a PDF result and text, no flag: $all";; esac
+# Without .source.pages the same .PNG is an image: the old image handling, mask line and all.
+fresh
+o=$(input /tmp/shot.PNG | FAKE_RAW="$(ocr_result '"ok"' false 'hello')" run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask '/tmp/shot.PNG'"*) pass ".PNG with an image result keeps the image line";; *) fail ".PNG with an image result line: $o";; esac
+# 15d. an ambiguous or malformed result never gets the PDF leniency: each of these read empty
+# and is denied, for a .pdf and a .png alike, and is never recorded as a pass-through.
+for name in /tmp/x.pdf /tmp/shot.png; do
+  for pg in 0 null '"3"' false -1 1.5; do
+    fresh
+    o=$(input "$name" 1-1 | FAKE_RAW="$(pdfshape '' "$pg")" run_hook 2>/dev/null); denied "$name, .source.pages $pg, empty"
+    grep -q -- '--note-passthrough' "$FAKE_LOG" && fail "$name, .source.pages $pg: not a pass-through" || pass "$name, .source.pages $pg: not recorded as a pass-through"
+  done
+  # .source.pages next to a photo-shaped OCR status: both shapes at once.
+  fresh
+  o=$(input "$name" 1-1 | FAKE_RAW='{"version":"0.6.0","results":[{"file":"/tmp/doc","text":"","image_tokens":2200,"text_tokens":0,"source":{"path":"/tmp/doc","sha256":"ab12","pages":3},"ocr_status":"empty","retried":false,"screenshot_like":false}],"image_tokens":2200,"text_tokens":0}' run_hook 2>/dev/null); denied "$name, .source.pages plus ocr_status, empty"
+  reason=$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty')
+  case "$reason" in *allow*|*mask*) fail "$name, both shapes: deny reason names allow or mask: $reason";; *) pass "$name, both shapes: deny reason names neither allow nor mask";; esac
+  # A PDF result next to a non-object result.
+  fresh
+  o=$(input "$name" 1-1 | FAKE_RAW="{\"results\":[$(pdfshape '' 3 | jq -c '.results[0]'),1],\"image_tokens\":2200,\"text_tokens\":0}" run_hook 2>/dev/null); denied "$name, a PDF result plus a non-object result"
+  # A PDF result next to a photo result.
+  fresh
+  o=$(input "$name" 1-1 | FAKE_RAW="{\"results\":[$(pdfshape '' 3 | jq -c '.results[0]'),$photo],\"image_tokens\":3218,\"text_tokens\":0}" run_hook 2>/dev/null); denied "$name, a PDF result plus a photo result"
+done
+# With text, an ambiguous result is still denied with the text, and flagged.
+fresh
+o=$(input /tmp/x.pdf 1-1 | FAKE_RAW="$(pdfshape 'hello' 0)" run_hook 2>/dev/null); denied "x.pdf, .source.pages 0, with text"
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in "hello"*"may be missing"*) pass "x.pdf, .source.pages 0, with text: flagged";; *) fail "x.pdf, .source.pages 0, with text flag: $o";; esac
+fresh
+o=$(input /tmp/x.pdf 1-1 | CHEAPSHOT_STRICT=1 FAKE_RAW="$(pdfshape '' null)" run_hook 2>/dev/null); denied "strict: x.pdf, .source.pages null, empty"
+# mask refuses a .pdf name, so neither copy offers it there, whatever the result's shape.
+case "$(printf '%s' "$o" | jq -r '.systemMessage // empty')" in *"cheapshot mask"*) fail "x.pdf, empty: user message must not offer mask: $o";; *) pass "x.pdf, empty: user message offers no mask";; esac
+fresh
+o=$(input /tmp/x.pdf 1-1 | FAKE_RAW="$(pdfshape 'hello' 0)" run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask"*) fail "x.pdf, ambiguous, with text: reason must not offer mask: $o";; *"ask the user to approve it."*) pass "x.pdf, ambiguous, with text: PDF ask-the-user line";; *) fail "x.pdf, ambiguous, with text line: $o";; esac
+fresh
+o=$(input /tmp/x.pdf | FAKE_RAW="$(ocr_result '"ok"' false 'hello')" run_hook 2>/dev/null)
+case "$(printf '%s' "$o" | jq -r '.hookSpecificOutput.permissionDecisionReason')" in *"cheapshot mask"*) fail "x.pdf, image result, with text: reason must not offer mask: $o";; *"ask the user to approve it."*) pass "x.pdf, image result, with text: PDF ask-the-user line";; *) fail "x.pdf, image result, with text line: $o";; esac
+
 echo "$fails failure(s)"
 [ "$fails" = 0 ]

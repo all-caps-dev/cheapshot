@@ -16,7 +16,10 @@
 # reach the model unless a person chose that (CHEAPSHOT_PASSTHROUGH=1 for the session, or
 # `cheapshot allow <path>` from a terminal) or the image has no text to redact (Fleet #290 item
 # 4). "No text" passes only when the binary says so for a photo (ocr_status
-# "empty", retried false, text "", screenshot_like false or absent) or for a PDF. A screenshot
+# "empty", retried false, text "", screenshot_like false or absent) or for a PDF result (a
+# whole-number .source.pages of 1 or more and no OCR status fields, on a .pdf name: both the
+# result shape and the file name must agree; an ambiguous result is denied like an unknown
+# status; CS-03). A screenshot
 # still blank after the cold-start retry, an unknown or malformed status, and any empty image
 # from a binary that does not report ocr_status (added in v0.6.0; it cannot tell a photo from a
 # failed read) are denied in every mode (NOV-160). Known limit: the binary only retries an image
@@ -309,9 +312,37 @@ text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2
 #   unknown        a status this hook does not know, fields of the wrong type, only one of the two
 #                  fields, or an "empty" result that does not look like a photo
 # Empty output (non-object results, an empty array, a jq error) counts as unknown below.
-# PDF results carry neither field and keep the old handling.
+# Whether this was a PDF needs both the result shape and the .pdf name (CS-03). One word per
+# distinct result kind:
+#   pdf   .source.pages is a whole number of 1 or more, and neither ocr_status nor retried is
+#         there (the real binary writes exactly this for a PDF)
+#   img   no .source.pages key at all
+#   bad   anything else: a non-object result, .source.pages null, 0, negative, fractional or not
+#         a number, or .source.pages next to ocr_status or retried
+# Only "pdf" on every result, for a .pdf name, gets the PDF handling. "img" gets the NOV-160
+# checks. A mix, any "bad", an empty array or a jq error is ambiguous: handled as an image whose
+# OCR status is unknown, so an empty one is denied in every mode and one with text is flagged. A
+# x.pdf holding an image result therefore gets the NOV-160 checks. A non-pdf name with a
+# PDF-shaped result never gets the PDF leniency: the binary picks its PDF path by extension
+# (Runner.swift), so a real image result never has .source.pages. That mismatch comes from an odd
+# or wrapped binary, not an old one, so it is ambiguous too: ocr=unknown, denied when empty with
+# the generic message (no upgrade advice), and flagged when it has text.
+kind=$(printf '%s' "$out" | jq -r '
+  [.results[] |
+    if type != "object" then "bad"
+    elif ((.source | type) == "object" and (.source | has("pages"))) | not then "img"
+    elif (.source.pages | type) == "number" and .source.pages >= 1 and .source.pages == (.source.pages | floor)
+         and ((has("ocr_status") or has("retried")) | not) then "pdf"
+    else "bad" end
+  ] | unique | join(" ")' 2>/dev/null)
+is_pdf=img
+[ "$kind" = pdf ] && [ "$ext" = pdf ] && is_pdf=pdf
 ocr=""
-if [ "$ext" != pdf ]; then
+if { [ "$kind" != img ] && [ "$kind" != pdf ]; } || { [ "$kind" = pdf ] && [ "$is_pdf" = img ]; }; then
+  # Ambiguous, malformed, or a PDF-shaped result on a non-pdf name: never the PDF leniency,
+  # never the photo pass.
+  ocr="unknown"
+elif [ "$is_pdf" = img ]; then
   ocr=$(printf '%s' "$out" | jq -r '
     [.results[] |
       if (has("ocr_status") or has("retried")) | not then "legacy"
@@ -327,7 +358,7 @@ if [ -z "$text" ]; then
   # Nothing recognised. For a PDF, or an image the binary says read empty without a retry (a
   # photo), there are no tokens to save and the pixels are the content: not a failure, so strict
   # mode lets it through too (documented), but it is still a pass-through and is recorded.
-  if [ "$ext" = pdf ] || [ "$ocr" = blank ]; then
+  if [ "$is_pdf" = pdf ] || [ "$ocr" = blank ]; then
     note no_text
     echo "cheapshot: no text in $path, reading it as pixels." >&2
     exit 0
@@ -347,8 +378,11 @@ if [ -z "$text" ]; then
     *)
       why="no text in $path, and cheapshot did not report a usable OCR status" ;;
   esac
+  # mask refuses PDFs (Runner.swift), so a .pdf name never gets the mask hint, whatever its result.
+  maskhint=" (or cheapshot mask $qpath for a copy with any text it finds blacked out)"
+  [ "$ext" = pdf ] && maskhint=""
   deny "cheapshot: $why, so the pixels were kept out. Tell the user; do not read it another way." \
-       "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath (or cheapshot mask $qpath for a copy with any text it finds blacked out).$extra"
+       "cheapshot: $why, so the Read was denied. Look at the image first. To show the agent the pixels, run in a terminal: cheapshot allow $qpath$maskhint.$extra"
   exit 0
 fi
 
@@ -356,7 +390,7 @@ fi
 # the model as usual, flagged so neither side mistakes it for the whole image. A legacy binary
 # with text is left exactly as before.
 flag=""
-if [ "$ext" != pdf ]; then
+if [ "$is_pdf" = img ]; then
   case " $ocr " in
     *" retried "*|*" blank_retried "*|*" unknown "*|"  ")
       flag="OCR on this image was retried or reported no clear status, so some lines may be missing." ;;
@@ -369,7 +403,9 @@ tt=$(printf '%s' "$out" | jq -r '.text_tokens // 0')
 # Shell-quoted so a person (or the agent's Bash tool) can paste it: macOS screenshot names
 # carry spaces and U+202F.
 qpath=$(jq -rn --arg p "$cpath" '$p | @sh')
-if [ "$ext" = pdf ]; then
+# The result shape picks the checks above, but mask refuses any .pdf name (Runner.swift checks the
+# extension), so a .pdf with an image-shaped or ambiguous result still gets the ask-the-user line.
+if [ "$is_pdf" = pdf ] || [ "$ext" = pdf ]; then
   model_line="cheapshot: $it image tokens -> $tt text tokens. If you need the pixels for layout, ask the user to approve it."
 else
   # NOV-95: for an image, point the agent at the masked copy first. `cheapshot mask` paints every

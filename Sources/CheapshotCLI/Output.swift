@@ -27,7 +27,9 @@ public enum Output {
                                            (no GPS, camera or date); a PDF as the file itself
           cheapshot mask [--out <f.png>] <image>  write a copy with every redacted or low-confidence
                                            line painted black, allow only that copy (5 minutes),
-                                           print its path. Default copy: $TMPDIR/cheapshot-masked/
+                                           print its path. The copy, default or --out, is mode 0600.
+                                           Default folder: $TMPDIR/cheapshot-masked/; each run without
+                                           --out deletes copies there older than 1 hour
 
         OPTIONS
           --raw             do not redact (redaction is ON by default)
