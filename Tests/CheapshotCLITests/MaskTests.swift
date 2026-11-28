@@ -319,6 +319,36 @@ final class MaskTests: XCTestCase {
                        "a refused mask allows nothing")
     }
 
+    /// CS-18: an existing default folder with a looser mode is refused, and the error names the
+    /// folder and the exact command that fixes it. Nothing is swept, written or allowed.
+    func testLooseDefaultFolderIsRefusedWithFix() async throws {
+        let fx = try makeFixture(lines: ["call " + Self.fakePhone])
+        let maskedDir = tmp.appendingPathComponent("cheapshot-masked")
+        try FileManager.default.createDirectory(at: maskedDir, withIntermediateDirectories: true)
+        chmod(maskedDir.path, 0o755)
+        let old = maskedDir.appendingPathComponent("old-masked.png")
+        try Data("o".utf8).write(to: old)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * 3600)],
+                                              ofItemAtPath: old.path)
+
+        let r = await run(["mask", fx.url.path])
+        XCTAssertEqual(r.code, 1, r.out)
+        XCTAssertTrue(r.err.contains("has mode 755"), r.err)
+        XCTAssertTrue(r.err.contains("chmod 700 \(maskedDir.path)"), r.err)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: old.path), "a refused folder is not swept")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: maskedDir.path), ["old-masked.png"],
+                       "nothing is written into a refused folder")
+
+        let j = await run(["mask", "--json", fx.url.path])
+        XCTAssertEqual(j.code, 1, j.out)
+        XCTAssertTrue(j.out.contains("chmod 700"), "the --json error object carries the fix too: \(j.out)")
+
+        // After the fix the same run works.
+        chmod(maskedDir.path, 0o700)
+        let fixed = await run(["mask", fx.url.path])
+        XCTAssertEqual(fixed.code, 0, fixed.err)
+    }
+
     func testUsageErrors() async throws {
         for args in [["mask"], ["mask", "--raw", "a.png"], ["mask", "a.png", "b.png"],
                      ["mask", "--out", "x.jpg", "a.png"], ["mask", "--min-conf", "2", "a.png"],

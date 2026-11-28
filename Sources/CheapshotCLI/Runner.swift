@@ -266,7 +266,10 @@ public enum CLI {
         }
         guard (st.st_mode & S_IFMT) == S_IFDIR else { return "\(dir.path) is not a plain directory (a symlink or a file)" }
         guard st.st_uid == getuid() else { return "\(dir.path) belongs to another user" }
-        guard (st.st_mode & 0o777) == 0o700 else { return "\(dir.path) has mode \(String(st.st_mode & 0o777, radix: 8)), not 700" }
+        // A looser folder this user owns is refused, not repaired, but the message gives the fix.
+        guard (st.st_mode & 0o777) == 0o700 else {
+            return "\(dir.path) has mode \(String(st.st_mode & 0o777, radix: 8)), not 700; to fix it, run: chmod 700 \(dir.path)"
+        }
         return nil
     }
 
