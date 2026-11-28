@@ -324,8 +324,9 @@ text=$(printf '%s' "$out" | jq -r '[.results[] | .text // empty] | join("\n")' 2
 # OCR status is unknown, so an empty one is denied in every mode and one with text is flagged. A
 # x.pdf holding an image result therefore gets the NOV-160 checks. A non-pdf name with a
 # PDF-shaped result never gets the PDF leniency: the binary picks its PDF path by extension
-# (Runner.swift), so a real image result never has .source.pages; it falls to the image checks
-# as "legacy" (no OCR status fields) and is denied when empty.
+# (Runner.swift), so a real image result never has .source.pages. That mismatch comes from an odd
+# or wrapped binary, not an old one, so it is ambiguous too: ocr=unknown, denied when empty with
+# the generic message (no upgrade advice), and flagged when it has text.
 kind=$(printf '%s' "$out" | jq -r '
   [.results[] |
     if type != "object" then "bad"
@@ -337,8 +338,9 @@ kind=$(printf '%s' "$out" | jq -r '
 is_pdf=img
 [ "$kind" = pdf ] && [ "$ext" = pdf ] && is_pdf=pdf
 ocr=""
-if [ "$kind" != img ] && [ "$kind" != pdf ]; then
-  # Ambiguous or malformed: never the PDF leniency, never the photo pass.
+if { [ "$kind" != img ] && [ "$kind" != pdf ]; } || { [ "$kind" = pdf ] && [ "$is_pdf" = img ]; }; then
+  # Ambiguous, malformed, or a PDF-shaped result on a non-pdf name: never the PDF leniency,
+  # never the photo pass.
   ocr="unknown"
 elif [ "$is_pdf" = img ]; then
   ocr=$(printf '%s' "$out" | jq -r '
