@@ -71,20 +71,26 @@ public struct Redactor {
         var track: FenceTrack? = compiled.contains(where: \.readsPastFences) && FenceFreeView.mayHaveFence(input)
             ? FenceTrack() : nil
         for (index, c) in compiled.enumerated() {
-            Self.replace(hits(of: c, in: text), with: c.rule.name, in: &text, report: &report, track: &track)
-            // Right after its own plain pass, a custom rule also reads the text with its fence
+            let plainHits = hits(of: c, in: text)
+            // Alongside its own plain pass, a custom rule also reads the text with its fence
             // lines taken out: the same text it reads when there is no fence, before a later
             // rule (a builtin) replaces its cue (`-----BEGIN ... PRIVATE KEY-----`, an email).
-            // Its hits are only recorded here and replaced at the end, so no later rule loses
-            // its own cue to them (`foo\npassword` would hide `password: ...` from SECRET).
+            // It reads the same text the plain hits come from, before they are replaced: a rule
+            // whose second part also matches a fence line (`...KEY-----\n\S+`) takes the fence
+            // as its next line in the plain pass, and a reading after that replace would never
+            // see the line after the fence. Its hits are only recorded here and replaced at the
+            // end, so no later rule loses its own cue to them (`foo\npassword` would hide
+            // `password: ...` from SECRET). A recorded hit that overlaps a plain hit grows to
+            // cover that token in ``FenceTrack/shift(_:length:name:)`` and takes it in at the end.
             if c.readsPastFences, track != nil, let view = FenceFreeView(text) {
-                let plainNow = Set(hits(of: c, in: text))
+                let plainNow = Set(plainHits)
                 for r in hits(of: c, in: view.text).compactMap({ view.originalRange(of: $0, in: text) })
                 where !plainNow.contains(r) {
                     let ns = NSRange(r, in: text)
                     track?.pending.append(.init(start: ns.location, end: NSMaxRange(ns), name: c.rule.name, order: index))
                 }
             }
+            Self.replace(plainHits, with: c.rule.name, in: &text, report: &report, track: &track)
         }
         // Second reading, for rules that may span lines: the text with its code-fence lines
         // taken out. ``Layout/text(_:)`` puts a ```` ``` ```` line between a fenced line and the

@@ -371,6 +371,30 @@ final class RedactorTests: XCTestCase {
         XCTAssertFalse(laidOut.contains(body), laidOut.debugDescription)
     }
 
+    // CS-05 gap 4, second review fix: a rule whose second part also matches a fence line
+    // (`\S+`, `.+`, `.*`) takes the fence as its next line in the plain pass. The fence-free
+    // reading comes from the same text as the plain hits, before they are replaced, so it still
+    // reaches the body after the fence.
+    func testCustomRuleWhoseNextLineMatchesAFenceStillReachesPastIt() throws {
+        let m = GoldenTests.joinMarker
+        let header = GoldenTests.assemble("-----BEGIN RSA PRIVATE" + m + " KEY-----")
+        let body = GoldenTests.assemble("MIIEowIBAAKCAQ" + m + "EAxyz123456")
+        for pattern in [#"\S+"#, ".+", ".*"] {
+            let r = Redactor(customRules: try RuleFile.parse(try JSONSerialization.data(withJSONObject: [
+                ["name": "KEYBODY", "pattern": #"-----BEGIN [A-Z ]*PRIVATE KEY-----\n"# + pattern],
+            ])))
+            let plain = r.redact(header + "\n" + body)
+            XCTAssertEqual(plain.text, "[KEYBODY]", "control for \(pattern): without a fence the rule takes the body")
+            for fence in ["```", "```swift", "~~~"] {
+                let fenced = r.redact(header + "\n" + fence + "\n" + body)
+                XCTAssertFalse(fenced.text.contains(body),
+                               "\(pattern) past \(fence.debugDescription): \(fenced.text.debugDescription)")
+                XCTAssertEqual(fenced.text, plain.text, "\(pattern) past \(fence.debugDescription)")
+                XCTAssertEqual(fenced.report, plain.report, "\(pattern) past \(fence.debugDescription)")
+            }
+        }
+    }
+
     // CS-05 gap 4, review fix: the same with EMAIL eating the cue of a custom rule, and the
     // guard for the other direction: the early reading's hits are replaced last, so a custom
     // rule crossing a fence never takes a builtin's cue (`password`) away before that builtin
