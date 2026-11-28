@@ -97,8 +97,9 @@ final class RedactionGapTests: XCTestCase {
 
     // Gap 5, fixed: OPENAI_KEY's validator vetoes any sk- key of short lowercase words joined
     // by hyphens, the shape it uses to spare CSS classes, so a real key of that shape survived.
-    // A second OPENAI_KEY rule now takes the same shape with no veto right after a key word
-    // ("key", "api_key:", "token"); a bare CSS class is still spared. Golden case 64 covers it
+    // A second OPENAI_KEY rule, after the SECRET rules, now takes the same shape with no veto
+    // right after a key word ("key", "token", camelCase `openaiKey`); a bare CSS class, or one
+    // in a class list, is still spared. With a separator SECRET takes it first. Golden case 64 covers it
     // on every platform.
     func testSkKeyOfShortLowercaseWordsIsRedacted() {
         let key = Self.assemble("sk-my-super-secret" + Self.m + "-litellm-key")

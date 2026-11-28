@@ -2,10 +2,16 @@ Your key sk-my-super-secret⟦⟧-litellm-key
 LITELLM_MASTER_KEY=sk-team-alpha-prod⟦⟧-proxy-one
 api_key = "sk-my-super-secret⟦⟧-litellm-key"
 x-api-key: sk-dev-local-proxy⟦⟧-only-key
-OPENAI_API_KEY: 'sk-live-team-shared⟦⟧-proxy-key'
+password: "sk-my-super-secret⟦⟧-phrase and more words 9"
 token sk-my-super-secret⟦⟧-litellm-key.
+Your API key is: sk-team-alpha-prod⟦⟧-proxy-one
+api_key: `sk-dev-local-proxy⟦⟧-only-key`
+os.environ["OPENAI_API_KEY"] = "sk-team-alpha-prod⟦⟧-proxy-one"
+const openaiKey = "sk-my-super-secret⟦⟧-litellm-key"
+"keys": ["sk-dev-local-proxy⟦⟧-only-key"]
 .sk-cube-grid-container-wrapper { animation: sk-cube-grid-scale-delay 1.3s; }
 <div class="sk-folding-cube-wrapper-item"></div>
+<div class="auth sk-three-bounce-spinner-wrap"></div>
 @keyframes sk-cube-grid-scale-delay-anim { }
 monkey sk-cube-grid-container-wrapper
 --key-color: sk-chase-dot-before-color

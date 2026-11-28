@@ -1,11 +1,17 @@
 Your key [OPENAI_KEY]
-LITELLM_MASTER_KEY=[OPENAI_KEY]
-api_key = "[OPENAI_KEY]"
-x-api-key: [OPENAI_KEY]
-OPENAI_API_KEY: '[OPENAI_KEY]'
+LITELLM_MASTER_KEY=[SECRET]
+api_key = "[SECRET]"
+x-api-key: [SECRET]
+password: "[SECRET]"
 token [OPENAI_KEY].
+Your API key is: [OPENAI_KEY]
+api_key: `[OPENAI_KEY]`
+os.environ["OPENAI_API_KEY"] = "[OPENAI_KEY]"
+const openaiKey = "[OPENAI_KEY]"
+"keys": ["[OPENAI_KEY]"]
 .sk-cube-grid-container-wrapper { animation: sk-cube-grid-scale-delay 1.3s; }
 <div class="sk-folding-cube-wrapper-item"></div>
+<div class="auth sk-three-bounce-spinner-wrap"></div>
 @keyframes sk-cube-grid-scale-delay-anim { }
 monkey sk-cube-grid-container-wrapper
 --key-color: sk-chase-dot-before-color

@@ -119,17 +119,6 @@ public struct Rule: Sendable {
         // `sk-live-phwfvcajkbjyn3mgwsiu`, is still a key.
         Rule(name: "OPENAI_KEY",  pattern: #"\bsk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#, options: [],
              validator: { !Validators.looksLikeHyphenatedWords($0) }),
-        // The same key shape right after a key word ("key", "api_key:", "LITELLM_MASTER_KEY=",
-        // "token", "secret", "password", "credential", "auth"), with no CSS-class veto (CS-05
-        // gap 5). A proxy key the user names can be short lowercase words joined by hyphens
-        // (`sk-my-super-secret-litellm-key`), the exact shape the veto above spares; after a key
-        // word it is a key, so it goes. The word must not continue a longer word on its left
-        // ("monkey"), and only quotes, spaces, tabs and one `:`, `=`, `=>` or `:=` may sit
-        // between it and the key. An HTML or CSS class (`class="sk-cube-grid"`) has no key word.
-        Rule(name: "OPENAI_KEY",
-             // `\b(?=sk-)` first, so the context lookbehind runs only where a key starts.
-             pattern: #"\b(?=sk-)(?<=(?:^|[^A-Za-z])(?i:(?:api|secret|master|access|private|virtual)?keys?|tokens?|secrets?|passwords?|passwd|credentials?|auth)["']?[ \t]{0,10}(?:=>|:=|[:=])?[ \t]{0,10}["']?)sk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#,
-             options: []),
         // Stripe secret and restricted keys, live and test, plus webhook signing secrets.
         // Publishable keys (pk_) are public by design and are left alone.
         Rule(name: "STRIPE_KEY",  pattern: #"\b(?:sk|rk)_(?:live|test|prod)_[A-Za-z0-9]{20,}\b"#, options: []),
@@ -226,6 +215,22 @@ public struct Rule: Sendable {
         Rule(name: "SECRET",
              pattern: #"\bSet-Cookie["']?[ \t]*:[ \t]*["']?[^\s=;,"]{1,256}="# + cookieValue,
              validator: { Validators.secretValue($0) }, replacesCaptureGroup: true),
+
+        // OPENAI_KEY's shape right after a key word, with no CSS-class veto (CS-05 gap 5). A
+        // proxy key the user names can be short lowercase words joined by hyphens
+        // (`sk-my-super-secret-litellm-key`), the exact shape the first OPENAI_KEY rule spares
+        // as a CSS class; after a key word it is a key. It sits after the SECRET rules so a
+        // value they take whole (`password: "sk-... more words"`) is never cut short here.
+        // Key words: key, api_key and the like, token, secret, password, credential, auth, in
+        // any case, not continuing a longer word on the left ("monkey"); or camelCase
+        // (`openaiKey`). Then an optional `_DEV`-style or digit suffix (never a hyphen, so CSS
+        // custom properties such as `--key-color` stay out), an optional " is", a closing
+        // quote or `]` (`environ["OPENAI_API_KEY"] =`), one `:` `=` `=>` `:=`, and an opening
+        // quote, backtick or `[`. A key inside an HTML class list (`class="auth sk-..."`) is
+        // left alone. `\b(?=sk-)` comes first so the lookbehinds run only where a key starts.
+        Rule(name: "OPENAI_KEY",
+             pattern: #"\b(?=sk-)(?<!class(?:Name)?=["'][^"'\n]{0,60})(?<=(?:(?:^|[^A-Za-z])(?i:(?:api|secret|master|access|private|virtual)?keys?|tokens?|secrets?|passwords?|passwd|credentials?|auth)|[a-z](?:Key|Token|Secret|Password)s?)(?:(?:_[A-Za-z0-9]{1,12}){1,2}|[0-9]{1,3})?(?i:[ \t]{1,3}is)?["'`]?\]?[ \t]{0,10}(?:=>|:=|[:=])?[ \t]{0,10}\[?["'`]?)sk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#,
+             options: []),
 
         // --- Personal data. ---
         // The domain must not be a @2x/@3x/@2.5x scale suffix on an image filename, so "CleanShot
