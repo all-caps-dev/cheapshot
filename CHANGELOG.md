@@ -6,7 +6,7 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ### Redaction
 
-- An empty Cookie pair no longer stops the Cookie rule (CS-05 gap 1). In `Cookie: foo=; sid=<value>` the first pair had no value, so nothing on the line matched and every later value was left in the clear. An empty or `""` value is now read and kept, and the chain goes on to the next pair. The line is now read exactly as one with a non-empty first pair (`foo=bar;`) already was, including that rule's known limits.
+- An empty Cookie pair no longer stops the Cookie rule (CS-05 gap 1). In `Cookie: foo=; sid=<value>` the first pair had no value, so nothing on the line matched and every later value was left in the clear. An empty or `""` value is now read and kept, and the chain goes on to the next pair. The line is now read exactly as one with a non-empty first pair (`foo=bar;`) already was, including that rule's known limits. Known side effect, tracked as strict expected failures in `RedactionGapTests`: past an empty first pair, a cookie value the rule refuses (such as a URL) can swallow a nested `Cookie:` start and leave the value after it in the clear, and a cookie value can split a card number before CARD runs, leaving its last ten digits.
 
 ## 0.6.1 (unreleased)
 
