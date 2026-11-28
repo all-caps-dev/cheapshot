@@ -77,7 +77,7 @@ public enum CLI {
         let selection = try ruleSelection(opts, io)
         guard selection.isWeakened else { return (Redactor(selection: selection), nil) }
         let mark = RulesMark(preset: selection.preset, disabled: selection.disabled,
-                             partial: Dictionary(uniqueKeysWithValues: selection.partial.map { ($0.name, $0.lost) }))
+                             partial: selection.partialByName)
         io.err(mark.notice)
         return (Redactor(selection: selection), mark)
     }
@@ -107,7 +107,7 @@ public enum CLI {
         catch { io.err("cheapshot: \(error)\n"); return 2 }
         let off = Set(selection.disabled)
         // A rule that is on but leans on one that is off (BANK_ACCT without ROUTING) is partial.
-        let partial = Dictionary(uniqueKeysWithValues: selection.partial.map { ($0.name, $0.lost) })
+        let partial = selection.partialByName
         if json {
             let rules: [[String: Any]] = RuleCatalog.entries.map {
                 var row: [String: Any] = ["name": $0.name, "group": $0.group.rawValue, "label": $0.label,

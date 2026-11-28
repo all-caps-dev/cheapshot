@@ -40,6 +40,12 @@ public struct RuleSelection {
             .map { (name: $0.rule, lost: $0.lost) }
     }
 
+    /// ``partial`` keyed by rule name. Two dependencies on one rule join their reasons
+    /// ("no MICR cue, no X") instead of trapping on a duplicate key.
+    public var partialByName: [String: String] {
+        Dictionary(partial.map { ($0.name, $0.lost) }, uniquingKeysWith: { "\($0), \($1)" })
+    }
+
     /// The rules to run: custom rules first, then the built-ins that are on, in their order.
     public var rules: [Rule] {
         let off = Set(disabled)
