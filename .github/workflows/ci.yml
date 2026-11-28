@@ -73,6 +73,12 @@ jobs:
       - name: Redaction tests (golden cases, redactor, validators, rule files)
         shell: bash
         run: scripts/check-redaction-tests.sh
+      # The redact engine's portable decisions (CHE-56, CHE-57; later the JPEG and PNG scrubbers and
+      # output naming). Not gating until it has passed once on Windows; then drop continue-on-error.
+      - name: Redact engine portable tests, not gating yet
+        continue-on-error: true
+        shell: bash
+        run: scripts/check-redact-portable-tests.sh
       # Layout, token and ledger tests: expected to surface Windows path and file differences
       # (the ledger location and the WinSDK append path), so they report without failing the job.
       - name: Other portable tests (layout, tokens, ledger), not gating
