@@ -6,8 +6,8 @@
 import XCTest
 @testable import CheapshotPortable
 
-/// CS-05: one test per redaction gap the v0.6.0 reviews found. Where a gap is still open, its
-/// assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
+/// CS-05: tests for the redaction gaps the v0.6.0 reviews found. Where a gap is still open, its
+/// assertion is wrapped in `XCTExpectFailure(strict: true)`, so
 /// the suite is green now and the test turns red, on purpose, once the gap is fixed (the
 /// wrapper then reports that no expected failure occurred and the wrap is removed).
 ///
@@ -54,7 +54,7 @@ final class RedactionGapTests: XCTestCase {
         }
     }
 
-    // Gap 3, closed as intended behaviour (Ryan, 2026-11-28: "A. Keep period inside"): the
+    // Gap 3, closed as intended behaviour (product decision, 2026-11-28): the
     // unquoted value class in the SECRET assignment contains ".", so `TOKEN=Kk...5.` redacts as
     // `TOKEN=[SECRET]` and the sentence loses its period. That stays: a password can end in ".",
     // and handing the character back would show it. A miss is worse than lost punctuation.
@@ -65,17 +65,19 @@ final class RedactionGapTests: XCTestCase {
         XCTAssertEqual(Redactor().redact("password: \(value). Next").text, "password: [SECRET] Next")
     }
 
-    // Gap 3b, CHE-20's own wording, still open: a value named in prose with no `=` or `:`
-    // ("the token is abc123xyz.") is not redacted, with or without the period. SECRET needs a
-    // separator after the keyword, and the TOKEN catch-all needs 20 or more characters with
-    // both cases. The period plays no part. Behaviour is unchanged until Ryan picks a fix.
-    // Confirmed red 2026-11-28.
+    // Gap 3b, CHE-20's own wording, still open: a value named in prose with no separator after
+    // the keyword ("the token is abc...", no `=`, `:` or lone tab) is not redacted, with or
+    // without the period. SECRET needs a separator after the keyword, and the TOKEN catch-all
+    // needs 20 or more characters with both cases. The period plays no part: each form has its
+    // own strict wrapper, so a fix for one form alone turns that one red. Behaviour is unchanged
+    // until a fix is picked. Confirmed red 2026-11-28.
     func testTokenNamedInProseWithoutSeparatorIsRedacted() {
         let value = Self.assemble("abc123" + Self.m + "xyz")
-        // Control: the same value after a separator is caught, period and all.
+        // Control: the same value after a separator is caught, with and without the period.
         XCTAssertEqual(Redactor().redact("token: \(value).").text, "token: [SECRET]")
-        XCTExpectFailure("CS-05 gap 3b: a token named in prose with no separator is kept", strict: true) {
-            for s in ["the token is \(value).", "the token is \(value)"] {
+        XCTAssertEqual(Redactor().redact("token: \(value)").text, "token: [SECRET]")
+        for s in ["the token is \(value).", "the token is \(value)"] {
+            XCTExpectFailure("CS-05 gap 3b: a token named in prose with no separator is kept", strict: true) {
                 let out = Redactor().redact(s).text
                 XCTAssertFalse(out.contains(value), "the value should not survive: \(out.debugDescription)")
             }
