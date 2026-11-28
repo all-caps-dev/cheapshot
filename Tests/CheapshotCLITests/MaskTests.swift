@@ -416,3 +416,148 @@ final class MaskTests: XCTestCase {
         XCTAssertEqual(r, CGRect(x: 0, y: 0, width: 59, height: 49))   // pad 8 = 40 * 0.2, clipped at 0
     }
 }
+
+// MARK: - CHE-24: a blank OCR read on a screenshot-like image fails closed
+//
+// Self-contained on purpose (helpers included) so it merges cleanly beside other MaskTests work.
+extension MaskTests {
+    /// A plain white canvas, no text anywhere: the blank-image fixture. The size picks the branch
+    /// under test: 200 x 200 or more with one flat colour is screenshot-like (`OCR.isScreenshotLike`),
+    /// anything under 200 px on a side is not.
+    func makeBlankFixture(width: Int, height: Int, name: String) throws -> URL {
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let img = try XCTUnwrap(ctx.makeImage())
+        let url = tmp.appendingPathComponent(name)
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return url
+    }
+
+    var allowURL: URL { tmp.appendingPathComponent("cheapshot-allow") }
+
+    /// Files mask's default output folder holds ($TMPDIR/cheapshot-masked), empty if it does not exist.
+    func defaultMaskFolderContents() -> [String] {
+        (try? FileManager.default.contentsOfDirectory(atPath: tmp.appendingPathComponent("cheapshot-masked").path)) ?? []
+    }
+
+    /// The sentence both failure tests expect on stderr; kept loose enough to survive rewording
+    /// of the tail but specific enough that an unrelated failure does not pass. It says the read
+    /// could not be confirmed, not that there was no text, because the gate also refuses when the
+    /// warm passes saw clean text but produced no box (MaskGateTests).
+    static let blankMessage = "could not confirm a complete read of what looks like a screenshot"
+
+    /// Default output path, plain text: no copy in the scratch folder, no allow file at all,
+    /// non-zero exit, the reason on stderr and nothing on stdout. On the old code this image was
+    /// masked with zero boxes, so the "masked" copy was the original and it was allowed for Read.
+    func testBlankScreenshotLikeImageFailsClosed() async throws {
+        let blank = try makeBlankFixture(width: 480, height: 360, name: "blank-shot.png")
+        XCTAssertTrue(OCR.isScreenshotLike(try Masker.loadPixels(path: blank.path)),
+                      "the fixture must be screenshot-like or this test proves nothing")
+        let r = await run(["mask", blank.path])
+        XCTAssertEqual(r.code, 1, "blank screenshot-like input must fail closed: \(r.out)")
+        XCTAssertTrue(r.err.hasPrefix("cheapshot: "), r.err)
+        XCTAssertTrue(r.err.contains(Self.blankMessage), r.err)
+        XCTAssertTrue(r.err.contains("a person can approve the original from a terminal"), "the refusal names the way out: \(r.err)")
+        XCTAssertFalse(r.err.contains("found no text"), "the refusal must not claim there was no text: \(r.err)")
+        XCTAssertFalse(r.err.contains("cheapshot allow"), "the refusal keeps the allow command out of what the model reads: \(r.err)")
+        XCTAssertEqual(r.out, "", "nothing may claim a masked copy")
+        XCTAssertEqual(defaultMaskFolderContents(), [], "no copy may be written")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: allowURL.path), "no allow entry may be written")
+    }
+
+    /// --json with an explicit --out: the same error object the other mask failures emit
+    /// (version, file, error and nothing else), no file at --out, no allow entry.
+    func testBlankScreenshotLikeImageFailsClosedWithJSON() async throws {
+        let blank = try makeBlankFixture(width: 480, height: 360, name: "blank-json.png")
+        let out = tmp.appendingPathComponent("blank-masked.png")
+        let r = await run(["mask", "--json", "--out", out.path, blank.path])
+        XCTAssertEqual(r.code, 1, r.out)
+        XCTAssertTrue(r.err.contains(Self.blankMessage), r.err)
+        let j = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(r.out.utf8)) as? [String: Any], r.out)
+        XCTAssertEqual(j["file"] as? String, blank.path)
+        XCTAssertTrue((j["error"] as? String)?.contains(Self.blankMessage) == true, "\(j)")
+        XCTAssertNil(j["masked"], "no masked path may be reported: \(j)")
+
+        // Same shape as another mask failure (a missing file goes through the same fail()).
+        let missing = await run(["mask", "--json", tmp.appendingPathComponent("nope.png").path])
+        let m = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(missing.out.utf8)) as? [String: Any])
+        XCTAssertEqual(Set(j.keys), Set(m.keys), "blank-read error must match the other mask errors")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: out.path), "no copy may be written")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: allowURL.path), "no allow entry may be written")
+    }
+
+    /// A blank image below the screenshot heuristic's size floor keeps today's behaviour: masked
+    /// like a photo with no text, exit 0, copy written and allowed. Only screenshot-like blanks are gated.
+    func testBlankSmallImageKeepsTheOldPath() async throws {
+        let blank = try makeBlankFixture(width: 100, height: 100, name: "blank-small.png")
+        XCTAssertFalse(OCR.isScreenshotLike(try Masker.loadPixels(path: blank.path)))
+        let out = tmp.appendingPathComponent("small-masked.png")
+        let r = await run(["mask", "--out", out.path, blank.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: out.path))
+        let allow = (try? String(contentsOf: allowURL, encoding: .utf8)) ?? ""
+        XCTAssertTrue(allow.contains(out.path), allow)
+    }
+}
+
+// MARK: - CHE-24 review: faint text under the floor is masked, not refused
+extension MaskTests {
+    /// A 900 x 300 white canvas with `lines` drawn in light grey: Vision reads the words, but
+    /// every line comes back under a high confidence floor. White dominates, so it stays screenshot-like.
+    func makeFaintFixture(lines: [String], grey: CGFloat, name: String) throws -> URL {
+        let w = 900, h = 300
+        let ctx = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        let font = CTFontCreateWithName("Helvetica" as CFString, 22, nil)
+        for (i, s) in lines.enumerated() {
+            let attr = NSAttributedString(string: s, attributes: [kCTFontAttributeName as NSAttributedString.Key: font,
+                                                                  kCTForegroundColorAttributeName as NSAttributedString.Key:
+                                                                    CGColor(red: grey, green: grey, blue: grey, alpha: 1)])
+            ctx.textPosition = CGPoint(x: 30, y: CGFloat(h) - CGFloat(60 + i * 50))
+            CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
+        }
+        let img = try XCTUnwrap(ctx.makeImage())
+        let url = tmp.appendingPathComponent(name)
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        return url
+    }
+
+    /// Faint text only, every line under --min-conf 0.99: the checked read keeps no line, but
+    /// Vision did see text, so this is not a blank read. Before the fix mask refused it with
+    /// the blank-read message; it must write a masked copy with each faint line painted as
+    /// low-confidence, and allow that copy.
+    func testFaintTextUnderAHighFloorIsMaskedNotRefused() async throws {
+        let lines = ["qzx7 Kp0w vrrt", "Jh8l mmq3 Zx"]          // nonsense, so Vision is unsure of it
+        let url = try makeFaintFixture(lines: lines, grey: 0.95, name: "faint-shot.png")
+        let img = try Masker.loadPixels(path: url.path)
+        // The preconditions that make this the regression case, or the test proves nothing.
+        XCTAssertTrue(OCR.isScreenshotLike(img))
+        XCTAssertFalse(try OCR.recognizeLayout(image: img, minConfidence: 0).isEmpty, "Vision must see the faint text")
+        XCTAssertTrue(try OCR.recognizeLayoutChecked(image: img, minConfidence: 0.99).lines.isEmpty,
+                      "every line must sit under the 0.99 floor")
+
+        let out = tmp.appendingPathComponent("faint-masked.png")
+        let r = await run(["mask", "--json", "--min-conf", "0.99", "--out", out.path, url.path])
+        XCTAssertEqual(r.code, 0, r.err)
+        XCTAssertFalse(r.err.contains(Self.blankMessage), r.err)
+        let j = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(r.out.utf8)) as? [String: Any], r.out)
+        XCTAssertGreaterThanOrEqual(j["box_count"] as? Int ?? 0, 1, "the faint lines must be painted: \(j)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: out.path), "the masked copy must be written")
+        // The copy differs from the source: the faint lines are under black boxes.
+        let a = try pixels(url), b = try pixels(out)
+        XCTAssertGreaterThan(changed(a, b, in: CGRect(x: 0, y: 0, width: a.w, height: a.h)), 0)
+        let allow = (try? String(contentsOf: allowURL, encoding: .utf8)) ?? ""
+        XCTAssertTrue(allow.contains(out.path), allow)
+    }
+}
