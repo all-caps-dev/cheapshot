@@ -6,8 +6,8 @@
 import XCTest
 @testable import CheapshotPortable
 
-/// CS-05: one test per redaction gap the v0.6.0 reviews found. The redactor is unchanged here;
-/// each gap's assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
+/// CS-05: one test per redaction gap the v0.6.0 reviews found. Where a gap is still open, its
+/// assertion is wrapped in `XCTExpectFailure(strict: true)` where it fails today, so
 /// the suite is green now and the test turns red, on purpose, once the gap is fixed (the
 /// wrapper then reports that no expected failure occurred and the wrap is removed).
 ///
@@ -95,21 +95,23 @@ final class RedactionGapTests: XCTestCase {
         }
     }
 
-    // Gap 5: OPENAI_KEY's validator vetoes any sk- key of short lowercase words joined by
-    // hyphens, the shape it uses to spare CSS classes, so a real key of that shape survives
-    // (no other builtin reads it: the catch-all needs an uppercase letter). Confirmed red
-    // today, 2026-11-27.
+    // Gap 5, fixed: OPENAI_KEY's validator vetoes any sk- key of short lowercase words joined
+    // by hyphens, the shape it uses to spare CSS classes, so a real key of that shape survived.
+    // A second OPENAI_KEY rule now takes the same shape with no veto right after a key word
+    // ("key", "api_key:", "token"); a bare CSS class is still spared. Golden case 64 covers it
+    // on every platform.
     func testSkKeyOfShortLowercaseWordsIsRedacted() {
         let key = Self.assemble("sk-my-super-secret" + Self.m + "-litellm-key")
         // Control: a key of about the same length that is not lowercase words is caught by
-        // OPENAI_KEY, so the expected failure below is the word veto, not the rule itself.
+        // OPENAI_KEY with no key word at all.
         let mixed = Self.assemble("sk-Ab3dEf6Hh9" + Self.m + "Kk2Ll5Oo8Pp1Qq")
-        XCTAssertEqual(Redactor().redact("Your key \(mixed)").text, "Your key [OPENAI_KEY]")
-        XCTExpectFailure("CS-05 gap 5: the CSS-class veto also refuses lowercase-word keys", strict: true) {
-            let out = Redactor().redact("Your key \(key)").text
-            XCTAssertFalse(out.contains(key), "the sk- key should not survive: \(out.debugDescription)")
-            XCTAssertFalse(out.contains("sk-my") || out.contains("litellm"), "no part of the sk- key should survive: \(out.debugDescription)")
-        }
+        XCTAssertEqual(Redactor().redact("Here \(mixed)").text, "Here [OPENAI_KEY]")
+        let out = Redactor().redact("Your key \(key)").text
+        XCTAssertFalse(out.contains(key), "the sk- key should not survive: \(out.debugDescription)")
+        XCTAssertFalse(out.contains("sk-my") || out.contains("litellm"), "no part of the sk- key should survive: \(out.debugDescription)")
+        XCTAssertEqual(out, "Your key [OPENAI_KEY]")
+        // Still spared with no key word: a CSS class of the same shape.
+        XCTAssertEqual(Redactor().redact(".sk-cube-grid-container-wrapper { }").text, ".sk-cube-grid-container-wrapper { }")
     }
 }
 #endif

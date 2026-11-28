@@ -1,6 +1,6 @@
 #!/bin/sh
 # CheapshotCore on iOS (native app plan, step 1): build Core and its tests for the iOS Simulator
-# and for a device, then run the Core tests (the 62 golden redaction cases among them) on an
+# and for a device, then run the Core tests (the 63 golden redaction cases among them) on an
 # iPhone Simulator. Since the Windows split the golden cases sit in CheapshotPortableTests,
 # which the scheme runs too. NSRegularExpression comes from the OS, so redaction on iOS is
 # measured here, not assumed.

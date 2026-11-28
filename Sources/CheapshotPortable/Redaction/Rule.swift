@@ -119,6 +119,17 @@ public struct Rule: Sendable {
         // `sk-live-phwfvcajkbjyn3mgwsiu`, is still a key.
         Rule(name: "OPENAI_KEY",  pattern: #"\bsk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#, options: [],
              validator: { !Validators.looksLikeHyphenatedWords($0) }),
+        // The same key shape right after a key word ("key", "api_key:", "LITELLM_MASTER_KEY=",
+        // "token", "secret", "password", "credential", "auth"), with no CSS-class veto (CS-05
+        // gap 5). A proxy key the user names can be short lowercase words joined by hyphens
+        // (`sk-my-super-secret-litellm-key`), the exact shape the veto above spares; after a key
+        // word it is a key, so it goes. The word must not continue a longer word on its left
+        // ("monkey"), and only quotes, spaces, tabs and one `:`, `=`, `=>` or `:=` may sit
+        // between it and the key. An HTML or CSS class (`class="sk-cube-grid"`) has no key word.
+        Rule(name: "OPENAI_KEY",
+             // `\b(?=sk-)` first, so the context lookbehind runs only where a key starts.
+             pattern: #"\b(?=sk-)(?<=(?:^|[^A-Za-z])(?i:(?:api|secret|master|access|private|virtual)?keys?|tokens?|secrets?|passwords?|passwd|credentials?|auth)["']?[ \t]{0,10}(?:=>|:=|[:=])?[ \t]{0,10}["']?)sk-(?:proj-|svcacct-|admin-|live-)?[A-Za-z0-9_\-]{20,}\b"#,
+             options: []),
         // Stripe secret and restricted keys, live and test, plus webhook signing secrets.
         // Publishable keys (pk_) are public by design and are left alone.
         Rule(name: "STRIPE_KEY",  pattern: #"\b(?:sk|rk)_(?:live|test|prod)_[A-Za-z0-9]{20,}\b"#, options: []),

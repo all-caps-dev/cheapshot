@@ -4,6 +4,10 @@ Notable changes to the cheapshot binary, the Claude Code plugin and cheapshot-mc
 
 ## Unreleased
 
+### Redaction
+
+- An `sk-` key made of short lowercase words (`sk-my-super-secret-litellm-key`, a LiteLLM-style proxy key) is redacted as OPENAI_KEY when a key word comes right before it: `key`, `api_key:`, `LITELLM_MASTER_KEY=`, `token`, `secret`, `password`, `credential` or `auth` (CS-05 gap 5). The CSS-class veto kept every key of that shape before. A bare CSS class such as `.sk-cube-grid-container-wrapper` is still left alone.
+
 ### Mask
 
 - `cheapshot mask` writes its copy with mode 0600, in the default folder and at `--out` alike (CS-18). An `--out` file used to get the umask default, usually 0644, so a script or another account that read it from there will now get a permission error. Each run without `--out` deletes copies in the default folder older than 1 hour. Mask now refuses to run when `$TMPDIR/cheapshot-masked/` is a symlink, not a folder, owned by another user, or not mode 0700; the error gives the `chmod` that fixes it.

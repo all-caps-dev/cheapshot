@@ -173,6 +173,10 @@ final class RedactorTests: XCTestCase {
             String(repeating: "curl -u a:b ", count: n / 12),
             String(repeating: "Authorization: ", count: n / 15),
             "Cookie: " + String(repeating: "a=b; ", count: n / 5),
+            // CS-05 gap 5: the key-context OPENAI_KEY rule's lookbehind.
+            String(repeating: "key sk-", count: n / 7),
+            String(repeating: "api_key: 'sk-a ", count: n / 15),
+            "token " + "sk-" + String(repeating: "ab-", count: n / 3),
             "password" + String(repeating: "\t", count: n),
             String(repeating: "password\t \t", count: n / 11),
             // NOV-161: values scanned again after an empty field. Chains of keys, keys with
